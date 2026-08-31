@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hku-moodle-collector"
+version = "0.1.0"
+description = "Minimal, configurable HKU Moodle data collector"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12,<5",
+  "playwright>=1.48,<2",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.6,<3",
+  "pypdf>=6,<7",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9"]
+
+[project.scripts]
+hku-moodle = "hku_moodle_collector.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hku_moodle_collector"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

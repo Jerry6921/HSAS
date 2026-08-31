@@ -1,0 +1,18 @@
+{
+  "course": {
+    "id": "138907",
+    "numsections": 1,
+    "sectionlist": ["100", "101"],
+    "baseurl": "https://moodle.example.edu/course/view.php?id=138907",
+    "maxbytes": "104857600"
+  },
+  "section": [
+    {"id": "100", "section": 0, "number": 0, "title": "General", "rawtitle": "", "cmlist": ["200", "201"], "visible": true, "sectionurl": "https://moodle.example.edu/course/section.php?id=100"},
+    {"id": "101", "section": 1, "number": 1, "title": "Week 1", "rawtitle": "Week 1", "cmlist": ["202"], "visible": true, "sectionurl": "https://moodle.example.edu/course/section.php?id=101"}
+  ],
+  "cm": [
+    {"id": "200", "name": "Announcements", "sectionid": "100", "module": "forum", "plugin": "mod_forum", "modname": "Forum", "url": "https://moodle.example.edu/mod/forum/view.php?id=200", "visible": true, "uservisible": true, "accessvisible": true},
+    {"id": "201", "name": "Course Syllabus", "sectionid": "100", "module": "resource", "plugin": "mod_resource", "modname": "File", "url": "https://moodle.example.edu/mod/resource/view.php?id=201", "visible": true, "uservisible": true, "accessvisible": true},
+    {"id": "202", "name": "Essay 1", "sectionid": "101", "module": "assign", "plugin": "mod_assign", "modname": "Assignment", "url": "https://moodle.example.edu/mod/assign/view.php?id=202", "visible": true, "uservisible": true, "accessvisible": true, "completionstate": 0}
+  ]
+}

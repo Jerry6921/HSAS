@@ -1,0 +1,11 @@
+.venv/
+.moodle-profile/
+output/
+config/selectors.local.json
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+build/
+dist/
+.DS_Store

@@ -1,0 +1,405 @@
+from __future__ import annotations
+
+import asyncio
+from contextlib import nullcontext
+from pathlib import Path
+from urllib.parse import parse_qs, urljoin, urlparse
+
+import typer
+from playwright.async_api import BrowserContext
+
+from .acquisition.file_downloader import download_course_files
+from .acquisition.moodle_client import (
+    discover_all_course_states,
+    discover_courses,
+    extract_course_title,
+    fetch_course_state,
+    open_page,
+    persistent_context,
+)
+from .settings import Settings
+from .storage.local_store import read_json, write_json, write_model
+from .sync_progress import SyncProgress
+from .transformation.assessment.builder import build_assessment_overview
+from .transformation.common.course_changes import (
+    CourseChangeSet,
+    compare_course_archives,
+)
+from .transformation.common.course_index import ArchiveIndex
+from .transformation.common.course_mapper import build_course_archive
+from .transformation.common.course_schema import CourseArchive
+from .transformation.course_materials.pdf_analyzer import analyze_course_pdfs
+
+def _settings() -> Settings:
+    return Settings()  # type: ignore[call-arg]
+
+
+def _validated_course_id(course_url: str, base_url: str) -> str:
+    target = urlparse(course_url)
+    base = urlparse(base_url)
+    if target.scheme not in {"http", "https"} or target.netloc != base.netloc:
+        raise typer.BadParameter("course-url must use the exact MOODLE_BASE_URL host")
+    course_id = parse_qs(target.query).get("id", [None])[0]
+    if not course_id or not course_id.isdigit():
+        raise typer.BadParameter("course-url must contain a numeric ?id= course ID")
+    return course_id
+
+
+def _resolve_course_target(value: str, base_url: str) -> tuple[str, str]:
+    """Accept a numeric Moodle course ID or a complete same-origin course URL."""
+    if value.isdigit():
+        course_url = urljoin(
+            base_url.rstrip("/") + "/",
+            f"course/view.php?id={value}",
+        )
+        return value, course_url
+    return _validated_course_id(value, base_url), value
+
+
+def _downloaded_courses(settings: Settings) -> dict[str, str]:
+    courses_root = settings.output_dir / "courses"
+    downloaded: dict[str, str] = {}
+    if not courses_root.exists():
+        return downloaded
+    for course_json in sorted(courses_root.glob("*/course.json")):
+        fallback_id = course_json.parent.name
+        try:
+            archive = CourseArchive.model_validate(read_json(course_json))
+            downloaded[archive.course.course_id] = archive.course.title
+        except Exception:
+            downloaded[fallback_id] = "Invalid or incompatible course.json"
+    return downloaded
+
+
+def _stage(
+    progress: SyncProgress | None,
+    task_id: int | None,
+    component: str,
+    detail: str,
+):
+    if progress is None or task_id is None:
+        return nullcontext()
+    return progress.stage(task_id, component, detail)
+
+
+async def _persist_course(
+    context: BrowserContext,
+    settings: Settings,
+    *,
+    course_id: str,
+    course_title: str,
+    state: dict,
+    progress: SyncProgress | None = None,
+    progress_task: int | None = None,
+) -> tuple[CourseArchive, CourseChangeSet, Path]:
+    """Download, analyze, structure assessments, and persist one course."""
+    storage_root = settings.output_dir
+    course_root = storage_root / "courses" / course_id
+    course_path = course_root / "course.json"
+    previous_archive: CourseArchive | None = None
+    if course_path.exists():
+        try:
+            previous_archive = CourseArchive.model_validate(read_json(course_path))
+        except Exception:
+            previous_archive = None
+    raw_path = course_root / "raw" / "course-state.json"
+    raw_relative_path = raw_path.relative_to(storage_root).as_posix()
+    with _stage(progress, progress_task, "StateMapper", "Mapping Moodle state"):
+        archive = build_course_archive(
+            state,
+            course_title=course_title,
+            raw_state_path=raw_relative_path,
+        )
+    with _stage(progress, progress_task, "FileStore", "Saving raw course state"):
+        write_json(raw_path, state)
+    with _stage(progress, progress_task, "Downloader", "Preparing course files"):
+        await download_course_files(
+            context,
+            archive,
+            base_url=str(settings.base_url),
+            course_root=course_root,
+            storage_root=storage_root,
+            max_download_bytes=settings.max_download_bytes,
+            timeout_ms=settings.navigation_timeout_ms,
+            concurrency=settings.download_concurrency,
+            previous_archive=previous_archive,
+            progress_callback=(
+                progress.download_callback(progress_task)
+                if progress is not None and progress_task is not None
+                else None
+            ),
+        )
+    with _stage(progress, progress_task, "PdfAnalyzer", "Extracting PDF text"):
+        analyze_course_pdfs(
+            archive,
+            storage_root=storage_root,
+            course_root=course_root,
+        )
+    with _stage(
+        progress,
+        progress_task,
+        "AssessmentParser",
+        "Structuring assessments",
+    ):
+        index = ArchiveIndex(archive)
+        archive.assessments = build_assessment_overview(
+            index,
+            storage_root=storage_root,
+        )
+    with _stage(
+        progress,
+        progress_task,
+        "ChangeDetector",
+        "Comparing deadlines, weights, activities, and materials",
+    ):
+        changes = compare_course_archives(previous_archive, archive)
+        changes_root = course_root / "changes"
+        write_model(changes_root / "latest.json", changes)
+        if changes.changed:
+            stamp = changes.detected_at.strftime("%Y%m%dT%H%M%SZ")
+            write_model(changes_root / "history" / f"{stamp}.json", changes)
+    with _stage(progress, progress_task, "FileStore", "Saving course.json"):
+        output_path = write_model(course_path, archive)
+    return archive, changes, output_path
+
+
+def login() -> None:
+    """Open a visible browser; finish SSO/MFA manually and save the profile."""
+
+    async def run() -> None:
+        settings = _settings()
+        async with persistent_context(settings, headless=False) as context:
+            await open_page(context, str(settings.login_url))
+            typer.echo("Complete HKU login/SSO/MFA in the opened browser.")
+            await asyncio.to_thread(input, "After the Moodle dashboard is visible, press Enter here... ")
+            moodle_host = urlparse(str(settings.base_url)).netloc
+            moodle_pages = [
+                candidate
+                for candidate in context.pages
+                if urlparse(candidate.url).netloc == moodle_host
+            ]
+            if not moodle_pages:
+                raise RuntimeError(
+                    "No logged-in Moodle page found. Complete SSO before pressing Enter."
+                )
+            page = moodle_pages[-1]
+            selectors = settings.selectors()
+            dashboard_found = False
+            for css in selectors.dashboard_ready:
+                if await page.locator(css).count():
+                    dashboard_found = True
+                    break
+            if not dashboard_found:
+                raise RuntimeError(
+                    "Dashboard marker not found. Update dashboard_ready in the selector config."
+                )
+            typer.echo(f"Session saved in {settings.profile_dir}")
+
+    asyncio.run(run())
+
+
+def list_courses() -> None:
+    """Show login status, available Moodle courses, and downloaded courses."""
+
+    async def run() -> None:
+        settings = _settings()
+        downloaded = _downloaded_courses(settings)
+        available = []
+        login_status = "not logged in"
+        login_error: str | None = None
+
+        try:
+            async with persistent_context(settings) as context:
+                page = await open_page(context, str(settings.dashboard_url))
+                selectors = settings.selectors()
+                available = await discover_courses(
+                    page,
+                    dashboard_url=str(settings.dashboard_url),
+                    selectors=selectors,
+                )
+                dashboard_found = False
+                for css in selectors.dashboard_ready:
+                    if await page.locator(css).count():
+                        dashboard_found = True
+                        break
+                redirected_to_login = page.url.startswith(str(settings.login_url))
+                if not redirected_to_login and (dashboard_found or available):
+                    login_status = "logged in"
+        except Exception as exc:
+            login_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+
+        typer.echo(f"Login status: {login_status}")
+        if login_error:
+            typer.echo(f"Login check error: {login_error}")
+
+        typer.echo(f"\nAvailable courses ({len(available)}):")
+        if not available:
+            typer.echo("  None. Run `hsas login` if the session expired.")
+        for course in available:
+            course_id = course.course_id or "unknown"
+            local_status = "downloaded" if course_id in downloaded else "not downloaded"
+            typer.echo(f"  {course_id} [{local_status}] {course.title}")
+            typer.echo(f"    {course.url}")
+
+        typer.echo(f"\nDownloaded courses ({len(downloaded)}):")
+        if not downloaded:
+            typer.echo("  None")
+        for course_id, title in downloaded.items():
+            typer.echo(f"  {course_id} {title}")
+
+    asyncio.run(run())
+
+
+def sync_course(
+    course: str,
+) -> None:
+    """Download and fully process one Moodle course."""
+
+    async def run() -> None:
+        settings = _settings()
+        course_id, course_url = _resolve_course_target(course, str(settings.base_url))
+
+        with SyncProgress() as progress:
+            task_id = progress.add_course(course_id, course, stages=8)
+            async with persistent_context(settings) as context:
+                with progress.stage(
+                    task_id,
+                    "MoodleAPI",
+                    "Fetching core_courseformat_get_state",
+                ):
+                    page = await open_page(context, course_url)
+                    if urlparse(page.url).netloc != urlparse(
+                        str(settings.base_url)
+                    ).netloc:
+                        raise RuntimeError(
+                            "Session expired or SSO redirected. Run `hsas login`."
+                        )
+                    html = await page.content()
+                    title = extract_course_title(html, settings.selectors())
+                    state = await fetch_course_state(
+                        context,
+                        page,
+                        base_url=str(settings.base_url),
+                        course_id=course_id,
+                    )
+                archive, changes, output_path = await _persist_course(
+                    context,
+                    settings,
+                    course_id=course_id,
+                    course_title=title,
+                    state=state,
+                    progress=progress,
+                    progress_task=task_id,
+                )
+            progress.finish_course(task_id, archive.course.title)
+        typer.echo(
+            f"Synced {archive.course.title}: "
+            f"{archive.stats.activity_count} activities, "
+            f"{archive.stats.downloaded_file_count} files, "
+            f"{len(changes.changes)} change(s) -> {output_path}"
+        )
+
+    asyncio.run(run())
+
+
+def sync_all() -> None:
+    """Download and fully process every available Moodle course."""
+
+    async def run() -> None:
+        settings = _settings()
+        selectors = settings.selectors()
+        succeeded: list[str] = []
+        change_counts: dict[str, int] = {}
+        failures: list[dict[str, str]] = []
+
+        with SyncProgress() as progress:
+            discovery_task = progress.add_operation(
+                "MoodleAPI",
+                "Discovering available courses",
+            )
+            async with persistent_context(settings) as context:
+                page = await open_page(context, str(settings.dashboard_url))
+                results = await discover_all_course_states(
+                    context,
+                    page,
+                    dashboard_url=str(settings.dashboard_url),
+                    base_url=str(settings.base_url),
+                    selectors=selectors,
+                    progress_callback=lambda index, total, course: (
+                        progress.update_discovery(
+                            discovery_task,
+                            index,
+                            total,
+                            course,
+                        )
+                    ),
+                )
+                progress.finish_operation(
+                    discovery_task,
+                    f"{len(results)} courses discovered",
+                )
+                write_json(
+                    settings.output_dir / "courses.json",
+                    [result.course.model_dump(mode="json") for result in results],
+                )
+                batch_task = progress.add_batch(len(results))
+
+                for result in results:
+                    course_id = result.course.course_id
+                    if not result.succeeded or not course_id or result.state is None:
+                        failures.append(
+                            {
+                                "course": result.course.title,
+                                "course_id": course_id or "",
+                                "error": result.error or "Course state was unavailable",
+                            }
+                        )
+                        progress.advance_batch(
+                            batch_task,
+                            f"failed: {course_id or result.course.title}",
+                        )
+                        continue
+                    course_task = progress.add_course(
+                        course_id,
+                        result.title,
+                        stages=7,
+                    )
+                    try:
+                        archive, changes, _ = await _persist_course(
+                            context,
+                            settings,
+                            course_id=course_id,
+                            course_title=result.title,
+                            state=result.state,
+                            progress=progress,
+                            progress_task=course_task,
+                        )
+                        progress.finish_course(course_task, archive.course.title)
+                        succeeded.append(course_id)
+                        change_counts[course_id] = len(changes.changes)
+                        progress.advance_batch(batch_task, f"completed: {course_id}")
+                    except Exception as exc:
+                        failures.append(
+                            {
+                                "course": result.course.title,
+                                "course_id": course_id,
+                                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                            }
+                        )
+                        progress.advance_batch(batch_task, f"failed: {course_id}")
+
+        report_path = write_json(
+            settings.output_dir / "sync-report.json",
+            {
+                "discovered_course_count": len(results),
+                "succeeded_course_ids": succeeded,
+                "change_counts": change_counts,
+                "failures": failures,
+            },
+        )
+        typer.echo(
+            f"Synced {len(succeeded)}/{len(results)} courses; "
+            f"{len(failures)} failed -> {report_path}"
+        )
+
+    asyncio.run(run())

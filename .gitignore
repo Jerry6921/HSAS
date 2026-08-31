@@ -1,7 +1,7 @@
 .venv/
 .moodle-profile/
-output/
-config/selectors.local.json
+src/resources/*
+!src/resources/.gitkeep
 __pycache__/
 .pytest_cache/
 *.pyc
@@ -9,3 +9,4 @@ __pycache__/
 build/
 dist/
 .DS_Store
+config/selectors.local.json

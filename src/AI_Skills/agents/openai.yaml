@@ -1,6 +1,6 @@
 interface:
   display_name: "HSAS Study Assistant"
-  short_description: "Grounded course advice and deterministic planning"
-  default_prompt: "Use $hsas-study-assistant to inspect my synchronized courses and explain what I should study next."
+  short_description: "Deterministic priorities and course-grounded study guidance"
+  default_prompt: "Use $hsas-study-assistant to inspect my priority backlog, retrieve the relevant course materials, and recommend flexible learning actions with approximate effort and self-check outcomes."
 policy:
   allow_implicit_invocation: true

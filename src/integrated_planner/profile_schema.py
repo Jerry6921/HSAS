@@ -129,6 +129,7 @@ class AcademicGoals(StrictModel):
 
 
 class StudyCapacity(StrictModel):
+    weekly_study_budget_minutes: int | None = Field(default=None, ge=1)
     preferred_session_minutes: int | None = Field(default=None, ge=15, le=240)
     preferred_break_minutes: int | None = Field(default=None, ge=0, le=120)
     maximum_deep_work_sessions_per_day: int | None = Field(default=None, ge=1)

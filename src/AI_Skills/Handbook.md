@@ -28,7 +28,7 @@ normalization pipeline with the following capabilities:
 | PDF analysis | Extracts page-aware text, word count, reading-time estimate, keywords, and extractive summary | Searchable course material with explicit OCR/failure flags |
 | Assessment parsing | Combines Moodle activities/sections, full rendered Label text, and syllabus evidence | Structured assessment items, groups, dates, normal/bonus weights, limits, policies, and warnings |
 | Statistics | Recomputes course-wide counts after mapping, downloading, and PDF analysis | A quick inventory of course size and processing completeness |
-| Persistence | Writes JSON, text, and binary data through the local storage layer | A reproducible `src/resources/` archive for downstream AI use |
+| Persistence | Writes JSON, text, and binary data through the local storage layer | A reproducible user-owned `RESOURCES_DIR` archive for downstream AI use |
 
 The Collector does not currently submit assignments, edit Moodle, read private
 grades, create calendar events, perform OCR, or maintain a Student Profile.
@@ -41,23 +41,29 @@ Run commands from the project root:
 
 Locate `HSAS_ROOT` as described in `SKILL.md`, then run commands from it.
 
-The CLI provides four commands:
+The CLI provides four core commands plus three Agent-facing command groups:
 
 ```bash
 hsas list-status
 hsas login
 hsas sync-courses [COURSE_ID_OR_URL]
 hsas update-plan
+hsas profile show|validate|apply
+hsas execution list|validate|add|correct
+hsas materials search|for-item
 ```
 
 Their responsibilities are:
 
 | Command | Purpose | AI behavior |
 |---|---|---|
-| `list-status` | Show Moodle, local courses, Profile, feedback, plan, capacity, and change status | Use before deciding whether synchronization or replanning is needed |
+| `list-status` | Show Moodle, local courses, Profile, feedback, priority backlog, workload, and change status | Use before deciding whether synchronization or reprioritization is needed |
 | `login` | Open Chromium for HKU SSO/MFA and persist the session | Ask the user to complete interactive login; never request or store their password |
 | `sync-courses [COURSE]` | Sync one course when specified, otherwise all discovered courses | Use the smallest course scope that satisfies the request |
 | `update-plan` | Run deterministic generation and all final validation | Use after Profile, Execution Log, or course data changes |
+| `profile ...` | Read, validate, or atomically apply a confirmed Profile patch | Never use `apply` without explicit confirmation |
+| `execution ...` | Read, validate, add, or correct confirmed study events | Keep actual and progress minutes distinct; preserve retry IDs |
+| `materials search|for-item` | Retrieve page-aware local course excerpts through deterministic lexical RAG | Use before content-specific study guidance; cite file/page and expose missing/OCR coverage |
 
 The Python CLI entry point is:
 
@@ -65,8 +71,12 @@ The Python CLI entry point is:
 command:app
 ```
 
+`command.py` composes the CLI. Agent-facing argument parsing lives in
+`AI_interface/commands.py`; validation and mutation rules remain in
+`integrated_planner` services.
+
 `update-plan` validates Profile input, loads every CourseArchive and the Execution
-Log, generates the plan through pure Python rules, and validates the result:
+Log, generates the priority backlog through pure Python rules, and validates the result:
 
 ```bash
 hsas update-plan
@@ -74,14 +84,17 @@ hsas update-plan
 
 The internal generation step incrementally updates `integrated_plan.json`; its
 final validation checks Pydantic schemas, course/section/activity/assessment references,
-dependency cycles, timetable overlaps, fixed commitments, availability, daily
-capacity, opening times, deadlines, milestones, and summary consistency.
+dependency cycles, key-workload totals, opening times, deadlines, milestones,
+execution references, and summary consistency. It does not allocate study slots.
 
 ## 3. Module responsibilities
 
 ```text
 src/
 ├── command.py
+├── AI_interface/
+│   ├── commands.py
+│   └── retrieval.py
 ├── moodle_collector/
 │   ├── workflow.py
 │   ├── settings.py
@@ -111,14 +124,17 @@ src/
 │       └── local_store.py
 ├── integrated_planner/
 │   ├── profile_schema.py
+│   ├── profile_service.py
+│   ├── execution_schema.py
+│   ├── execution_service.py
 │   ├── plan_schema.py
 │   ├── plan_validator.py
 │   ├── plan_rules.py
-│   ├── plan_scheduler.py
 │   ├── planner_engine.py
 │   └── workflow.py
 ├── AI_Skills/
-└── resources/
+├── hsas_runtime/
+└── updator/
 ```
 
 The end-to-end flow is:
@@ -136,24 +152,27 @@ pdf_analyzer.py
         ↓
 assessment/builder.py
         ↓
-src/resources/courses/<course_id>/course.json
+<RESOURCES_DIR>/courses/<course_id>/course.json
         +
-src/resources/student_profile.json
+<RESOURCES_DIR>/student_profile.json
         +
-src/resources/execution_log.json
+<RESOURCES_DIR>/execution_log.json
         ↓
 planner_engine.py
         ↓
-src/resources/integrated_plan.json
+<RESOURCES_DIR>/integrated_plan.json
 ```
 
 ## 4. Output locations
 
-Collector output, Student Profile, and Integrated Plan share `src/resources/`.
-AI operating guidance lives beside them in `src/AI_Skills/`:
+Collector output, Student Profile, and Integrated Plan share the user-owned
+`RESOURCES_DIR`. Resolve it from `hsas list-status`; on macOS the default is
+`~/Library/Application Support/HSAS/resources/`. `HSAS_DATA_DIR` or the global
+`hsas --resources` option may override it. AI operating guidance remains in the
+code checkout under `src/AI_Skills/`:
 
 ```text
-src/resources/
+<RESOURCES_DIR>/
 ├── student_profile.json
 ├── execution_log.json
 ├── integrated_plan.json
@@ -174,7 +193,7 @@ src/resources/
 - `files/` contains downloaded source documents.
 - `changes/` records DDL, weight, activity, and material SHA-256 changes.
 - `execution_log.json` stores only user-confirmed actual execution data.
-- Course file paths stored in JSON are relative to `src/resources/` unless stated otherwise.
+- Course file paths stored in JSON are relative to `RESOURCES_DIR` unless stated otherwise.
 
 Do not modify `raw/course-state.json`, downloaded source files, or generated
 `course.json` by hand. Refresh them through `hsas sync-courses`.
@@ -204,7 +223,9 @@ from pathlib import Path
 
 from moodle_collector.transformation.common.course_index import ArchiveIndex
 
-resource_root = Path("src/resources")
+from hsas_runtime import get_runtime_paths
+
+resource_root = get_runtime_paths().resources_dir
 index = ArchiveIndex.from_json(
     resource_root / "courses" / "138907" / "course.json"
 )
@@ -325,7 +346,7 @@ keywords, an extractive summary, metadata, and a path to full extracted text.
 | Field | Label | Meaning and planning use |
 |---|---|---|
 | `filename` | `[PLAN-SUPPORTING]` | Original/sanitized local filename; may hint at lecture, reading, syllabus, or assignment role |
-| `relative_path` | `[PROVENANCE]` | Canonical location under `src/resources/` for opening the actual evidence |
+| `relative_path` | `[PROVENANCE]` | Canonical location under `RESOURCES_DIR` for opening the actual evidence |
 | `source_url` | `[PROVENANCE]` | Sanitized Moodle origin URL with sensitive tokens removed |
 | `content_type` | `[PLAN-SUPPORTING]` | File format used to decide whether text analysis is available |
 | `size_bytes` | `[PLAN-SUPPORTING]` | Storage/download size; only a weak workload proxy |
@@ -467,8 +488,8 @@ apply the claim-specific policy in [references/operations.md](references/operati
 ## 9. Security boundaries
 
 - Never print, persist in answers, or expose Moodle `sesskey` values.
-- Never copy `.moodle-profile/`, cookies, or `storage-state.json` outside the
-  local environment.
+- Never copy `browser-profile/`, cookies, or `storage-state.json` outside the
+  local platform data directory.
 - Never ask the user to send their HKU password or MFA code.
 - Only collect courses the authenticated user is authorized to access.
 - Do not follow external activity URLs automatically unless the user authorizes

@@ -6,8 +6,10 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from command import app
+from integrated_planner.profile_schema import StudentProfile
 from moodle_collector.workflow import _persist_course, _resolve_course_target
 from moodle_collector.settings import Settings
+from moodle_collector.storage.local_store import write_json, write_model
 from moodle_collector.transformation.assessment.schema import AssessmentOverview
 
 
@@ -20,14 +22,18 @@ def test_cli_exposes_only_the_unified_commands() -> None:
         command.name or command.callback.__name__.replace("_", "-")
         for command in app.registered_commands
     }
+    group_names = {group.name for group in app.registered_groups}
 
     assert result.exit_code == 0
     assert command_names == {
         "list-status",
         "login",
+        "migrate-data",
         "sync-courses",
+        "update-hsas",
         "update-plan",
     }
+    assert group_names == {"profile", "execution", "materials"}
 
 
 def test_sync_target_accepts_an_id_or_same_origin_url() -> None:
@@ -45,10 +51,10 @@ def test_sync_target_accepts_an_id_or_same_origin_url() -> None:
 
 def test_unified_sync_command_dispatches_single_or_all(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr("command.sync_all", lambda: calls.append("all"))
+    monkeypatch.setattr("command.sync_all", lambda _settings: calls.append("all"))
     monkeypatch.setattr(
         "command.sync_course",
-        lambda course: calls.append(f"single:{course}"),
+        lambda course, _settings: calls.append(f"single:{course}"),
     )
 
     all_result = CliRunner().invoke(app, ["sync-courses"])
@@ -57,6 +63,49 @@ def test_unified_sync_command_dispatches_single_or_all(monkeypatch) -> None:
     assert all_result.exit_code == 0
     assert single_result.exit_code == 0
     assert calls == ["all", "single:138907"]
+
+
+def test_profile_cli_requires_confirmation_then_applies_valid_patch(
+    tmp_path: Path,
+) -> None:
+    profile_path = tmp_path / "student_profile.json"
+    patch_path = tmp_path / "profile-patch.json"
+    write_model(profile_path, StudentProfile())
+    write_json(patch_path, {"identity": {"preferred_name": "Jerry"}})
+
+    rejected = CliRunner().invoke(
+        app,
+        ["profile", "apply", str(patch_path), "--profile", str(profile_path)],
+    )
+    applied = CliRunner().invoke(
+        app,
+        [
+            "profile",
+            "apply",
+            str(patch_path),
+            "--profile",
+            str(profile_path),
+            "--confirmed",
+        ],
+    )
+    profile = StudentProfile.model_validate_json(profile_path.read_text())
+
+    assert rejected.exit_code != 0
+    assert applied.exit_code == 0
+    assert profile.identity.preferred_name == "Jerry"
+    assert profile.provenance.confirmed_by_user is True
+
+
+def test_global_resources_override_reaches_agent_subcommands(tmp_path: Path) -> None:
+    write_model(tmp_path / "student_profile.json", StudentProfile())
+
+    result = CliRunner().invoke(
+        app,
+        ["--resources", str(tmp_path), "profile", "validate"],
+    )
+
+    assert result.exit_code == 0
+    assert "Profile valid" in result.stdout
 
 
 def test_shared_sync_flow_always_runs_assessment_parser(

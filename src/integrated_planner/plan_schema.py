@@ -13,6 +13,7 @@ from moodle_collector.transformation.assessment.schema import AssessmentType
 
 
 PlanStatus = Literal["draft", "active", "completed"]
+PlanningMode = Literal["priority_backlog", "legacy_timetable"]
 ItemType = Literal[
     "assessment",
     "exam",
@@ -62,16 +63,18 @@ class CourseArchiveSnapshot(StrictModel):
 
 
 class SourceSnapshot(StrictModel):
-    student_profile_path: str = "src/resources/student_profile.json"
+    student_profile_path: str = "student_profile.json"
     student_profile_updated_at: datetime | None = None
     course_archives: list[CourseArchiveSnapshot] = Field(default_factory=list)
-    sync_report_path: str = "src/resources/sync-report.json"
-    execution_log_path: str = "src/resources/execution_log.json"
+    sync_report_path: str = "sync-report.json"
+    execution_log_path: str = "execution_log.json"
     execution_log_updated_at: datetime | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
 class CapacitySummary(StrictModel):
+    """Legacy timetable capacity fields retained for schema compatibility."""
+
     available_minutes: int | None = Field(default=None, ge=0)
     allocatable_minutes: int | None = Field(default=None, ge=0)
     required_minutes: int = Field(default=0, ge=0)
@@ -80,6 +83,19 @@ class CapacitySummary(StrictModel):
     unscheduled_minutes: int | None = Field(default=None, ge=0)
     unscheduled_workload_minutes: int = Field(default=0, ge=0)
     over_capacity: bool = False
+
+
+class WorkloadSummary(StrictModel):
+    """Estimated effort for the key-priority backlog, without time-slot allocation."""
+
+    key_item_count: int = Field(default=0, ge=0)
+    estimated_item_count: int = Field(default=0, ge=0)
+    unestimated_item_count: int = Field(default=0, ge=0)
+    total_remaining_minutes: int = Field(default=0, ge=0)
+    critical_minutes: int = Field(default=0, ge=0)
+    high_priority_minutes: int = Field(default=0, ge=0)
+    medium_priority_minutes: int = Field(default=0, ge=0)
+    planned_minutes: int = Field(default=0, ge=0)
 
 
 class FeedbackSummary(StrictModel):
@@ -328,29 +344,48 @@ class PlanWritePolicy(StrictModel):
     ai_must_not_copy_authentication_data: bool = True
     ai_must_not_treat_missing_values_as_zero: bool = True
     ai_must_not_double_count_assessment_groups: bool = True
+    ai_must_not_assign_study_times_unless_requested: bool = True
 
 
 class IntegratedPlan(StrictModel):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     plan_id: str = "default"
+    planning_mode: PlanningMode = "priority_backlog"
     generated_at: datetime | None = None
     updated_at: datetime | None = None
     timezone: str = "Asia/Hong_Kong"
     plan_status: PlanStatus = "draft"
     planning_window: PlanningWindow | None = None
     source_snapshot: SourceSnapshot = Field(default_factory=SourceSnapshot)
-    capacity_summary: CapacitySummary = Field(default_factory=CapacitySummary)
+    # Accepted when reading v1.0 timetable plans, but deliberately omitted from
+    # v1.1 output. Priority backlogs describe workload rather than allocating a
+    # student's calendar capacity.
+    capacity_summary: CapacitySummary = Field(
+        default_factory=CapacitySummary,
+        exclude=True,
+    )
+    workload_summary: WorkloadSummary = Field(default_factory=WorkloadSummary)
     feedback_summary: FeedbackSummary = Field(default_factory=FeedbackSummary)
     plan_summary: PlanSummary = Field(default_factory=PlanSummary)
     items: list[PlanItem] = Field(default_factory=list)
-    timetable: list[TimetableBlock] = Field(default_factory=list)
+    timetable: list[TimetableBlock] = Field(default_factory=list, exclude=True)
     milestones: list[Milestone] = Field(default_factory=list)
-    review_points: list[ReviewPoint] = Field(default_factory=list)
+    review_points: list[ReviewPoint] = Field(default_factory=list, exclude=True)
     plan_warnings: list[str] = Field(default_factory=list)
     classification_guide: ClassificationGuide = Field(
         default_factory=ClassificationGuide
     )
     write_policy: PlanWritePolicy = Field(default_factory=PlanWritePolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def recognize_legacy_timetable(cls, value):
+        if isinstance(value, dict) and "planning_mode" not in value:
+            value = dict(value)
+            value["planning_mode"] = (
+                "legacy_timetable" if value.get("timetable") else "priority_backlog"
+            )
+        return value
 
     @field_validator("timezone")
     @classmethod
@@ -398,6 +433,8 @@ class IntegratedPlan(StrictModel):
             and self.plan_summary.next_action_item_id not in item_ids
         ):
             raise ValueError("next_action_item_id references unknown item")
+        if self.planning_mode == "priority_backlog" and self.timetable:
+            raise ValueError("priority_backlog plans must not contain timetable blocks")
         return self
 
 

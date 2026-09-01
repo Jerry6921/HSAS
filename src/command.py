@@ -7,10 +7,17 @@ from typing import Annotated
 
 import typer
 
+from AI_interface import execution_app, materials_app, profile_app
+from hsas_runtime import (
+    MigrationError,
+    get_runtime_paths,
+    migrate_legacy_data,
+)
 from integrated_planner.execution_schema import ExecutionLog
 from integrated_planner.plan_schema import IntegratedPlan
 from integrated_planner.profile_schema import StudentProfile
 from integrated_planner.workflow import generate_plan
+from moodle_collector.settings import Settings
 from moodle_collector.transformation.common.course_changes import CourseChangeSet
 from moodle_collector.workflow import (
     list_courses,
@@ -18,25 +25,49 @@ from moodle_collector.workflow import (
     sync_all,
     sync_course,
 )
+from updator import UpdateError, update_installation
 
 
-DEFAULT_RESOURCES = Path("src/resources")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 app = typer.Typer(
     no_args_is_help=True,
     help="HKU Study Assistance System",
 )
+app.add_typer(profile_app, name="profile")
+app.add_typer(execution_app, name="execution")
+app.add_typer(materials_app, name="materials")
+
+
+@app.callback()
+def main(
+    ctx: typer.Context,
+    resources_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--resources",
+            help="Override the platform-standard resources directory",
+        ),
+    ] = None,
+) -> None:
+    """Resolve shared runtime paths for this command invocation."""
+    ctx.obj = {
+        "resources": resources_dir or get_runtime_paths().resources_dir,
+    }
 
 
 @app.command("list-status")
 def list_status(
+    ctx: typer.Context,
     resources_dir: Annotated[
-        Path,
+        Path | None,
         typer.Option("--resources", help="Shared resources directory"),
-    ] = DEFAULT_RESOURCES,
+    ] = None,
 ) -> None:
     """Show Moodle, course sync, Profile, execution, and plan status."""
-    list_courses()
+    resources_dir = resources_dir or _resources(ctx)
+    typer.echo(f"Resources: {resources_dir}")
+    list_courses(Settings.load(output_dir=resources_dir))
     typer.echo("\nPlanning status:")
     _show_profile(resources_dir / "student_profile.json")
     _show_execution_log(resources_dir / "execution_log.json")
@@ -52,6 +83,7 @@ def login() -> None:
 
 @app.command("sync-courses")
 def sync_courses(
+    ctx: typer.Context,
     course: Annotated[
         str | None,
         typer.Argument(
@@ -60,30 +92,32 @@ def sync_courses(
     ] = None,
 ) -> None:
     """Sync one course when specified, otherwise sync every available course."""
+    settings = Settings.load(output_dir=_resources(ctx))
     if course is None:
-        sync_all()
+        sync_all(settings)
     else:
-        sync_course(course)
+        sync_course(course, settings)
 
 
 @app.command("update-plan")
 def update_plan(
+    ctx: typer.Context,
     profile_path: Annotated[
-        Path,
+        Path | None,
         typer.Option("--profile", help="Student Profile JSON path"),
-    ] = DEFAULT_RESOURCES / "student_profile.json",
+    ] = None,
     output_path: Annotated[
-        Path,
+        Path | None,
         typer.Option("--output", help="Integrated Plan JSON path"),
-    ] = DEFAULT_RESOURCES / "integrated_plan.json",
+    ] = None,
     resources_dir: Annotated[
-        Path,
+        Path | None,
         typer.Option("--resources", help="Shared resources directory"),
-    ] = DEFAULT_RESOURCES,
+    ] = None,
     execution_path: Annotated[
-        Path,
+        Path | None,
         typer.Option("--execution-log", help="Execution Log JSON path"),
-    ] = DEFAULT_RESOURCES / "execution_log.json",
+    ] = None,
     days: Annotated[
         int | None,
         typer.Option(min=1, max=365, help="Override planning horizon"),
@@ -97,16 +131,67 @@ def update_plan(
         typer.Option(help="Ignore the existing plan and its preserved progress"),
     ] = False,
 ) -> None:
-    """Generate and validate the deterministic cross-course plan."""
+    """Generate and validate the deterministic cross-course priority backlog."""
+    resources_dir = resources_dir or _resources(ctx)
     generate_plan(
-        profile_path=profile_path,
-        output_path=output_path,
+        profile_path=profile_path or resources_dir / "student_profile.json",
+        output_path=output_path or resources_dir / "integrated_plan.json",
         resources_dir=resources_dir,
-        execution_path=execution_path,
+        execution_path=execution_path or resources_dir / "execution_log.json",
         days=days,
         start=start,
         fresh=fresh,
     )
+
+
+@app.command("migrate-data")
+def migrate_data(
+    legacy_root: Annotated[
+        Path,
+        typer.Option(
+            "--from",
+            help="Legacy HSAS code directory containing src/resources",
+        ),
+    ] = PROJECT_ROOT,
+) -> None:
+    """Copy and verify legacy personal data into platform-standard storage."""
+    try:
+        result = migrate_legacy_data(legacy_root)
+    except MigrationError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        f"Migration verified: {result.copied_files} copied, "
+        f"{result.reused_files} reused, {result.verified_files} verified -> "
+        f"{result.destination}"
+    )
+    typer.echo(f"Report: {result.destination / 'state/migration-report.json'}")
+    typer.echo("Legacy files were retained for manual review:")
+    for path in result.legacy_paths:
+        typer.echo(f"  {path}")
+
+
+@app.command("update-hsas")
+def update_hsas(
+    dry_run: Annotated[
+        bool,
+        typer.Option(help="Clone and compare without changing the installation"),
+    ] = False,
+) -> None:
+    """Update HSAS from the trusted GitHub main branch, preserving local data."""
+    typer.echo("Fetching trusted release: https://github.com/Jerry6921/HSAS (main)")
+    try:
+        result = update_installation(PROJECT_ROOT, dry_run=dry_run)
+    except UpdateError as exc:
+        typer.echo(f"Update failed safely: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    action = "Dry run" if result.dry_run else "Update complete"
+    typer.echo(
+        f"{action}: commit={result.commit[:12]}; "
+        f"{result.copied_files} file(s) changed; "
+        f"{result.removed_files} obsolete file(s) removed"
+    )
+    if not result.dry_run:
+        typer.echo("Personal resources and browser session were not modified.")
 
 
 def _show_profile(path: Path) -> None:
@@ -136,15 +221,14 @@ def _show_plan(path: Path) -> None:
     try:
         plan = IntegratedPlan.model_validate_json(path.read_text(encoding="utf-8"))
         typer.echo(
-            f"  Plan: {plan.plan_status}; {len(plan.items)} item(s); "
-            f"{len(plan.timetable)} block(s); updated={plan.updated_at or 'never'}"
+            f"  Plan: {plan.plan_status}; mode={plan.planning_mode}; "
+            f"{len(plan.items)} key item(s); updated={plan.updated_at or 'never'}"
         )
-        if plan.capacity_summary.unscheduled_workload_minutes:
-            typer.echo(
-                "  Capacity warning: "
-                f"{plan.capacity_summary.unscheduled_workload_minutes} minute(s) "
-                "remain unscheduled"
-            )
+        typer.echo(
+            "  Estimated remaining effort: "
+            f"{plan.workload_summary.total_remaining_minutes} minute(s); "
+            "student selects study times"
+        )
     except Exception as exc:
         typer.echo(f"  Plan: unavailable ({type(exc).__name__})")
 
@@ -163,6 +247,12 @@ def _show_changes(courses_dir: Path) -> None:
         f"  Changes: {len(changed)} course(s) changed across "
         f"{len(reports)} report(s)"
     )
+
+
+def _resources(ctx: typer.Context) -> Path:
+    if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
+        return ctx.obj["resources"]
+    return get_runtime_paths().resources_dir
 
 
 if __name__ == "__main__":

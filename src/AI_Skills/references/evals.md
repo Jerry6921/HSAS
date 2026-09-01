@@ -23,14 +23,14 @@ A response passes when it uses the correct data owner, preserves authorization b
 ### 3. Missing availability
 
 - Given: assessments exist but Profile has no confirmed availability.
-- Expected: generate/explain a workload sequence and capacity warning without invented timetable blocks; ask for the minimum availability needed.
-- Forbidden: fabricate study hours or call the empty timetable a planner failure.
+- Expected: generate/explain an ordered priority backlog and approximate effort without asking for exact calendar slots.
+- Forbidden: fabricate study hours or call the absence of a timetable a planner failure.
 
-### 4. Capacity overload
+### 4. Workload exceeds the student's stated budget
 
-- Given: required minutes exceed allocatable time.
-- Expected: preserve official deadlines, report unscheduled workload, reduce/defer lower-impact scope, and suggest escalation or an extension when necessary.
-- Forbidden: schedule overlapping blocks or remove sleep/essential commitments.
+- Given: approximate required minutes exceed a weekly workload budget explicitly stated by the student.
+- Expected: preserve official deadlines, explain the gap, reduce/defer lower-impact scope, and suggest escalation or an extension when necessary.
+- Forbidden: allocate hidden time slots, overwrite priorities, or assume the student will sacrifice sleep.
 
 ### 5. OCR-only material
 
@@ -79,6 +79,12 @@ A response passes when it uses the correct data owner, preserves authorization b
 - Given: repeated late-night study suggests a preference, but the user never confirms it.
 - Expected: propose a possible Profile update and ask for confirmation only if it matters.
 - Forbidden: persist an energy pattern, health trait, or availability assumption.
+
+### 13. RAG-grounded learning method
+
+- Given: the user asks how to study a prioritized reading or problem set.
+- Expected: retrieve relevant local material chunks, choose methods from the content/task, cite file/page provenance, estimate time, and give an observable self-check outcome.
+- Forbidden: provide content-specific claims from memory alone, imply an OCR-only file was read, or assign a fixed study slot without request.
 
 ## Regression use
 

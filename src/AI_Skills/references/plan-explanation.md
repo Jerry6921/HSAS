@@ -11,12 +11,12 @@ For a causal explanation, inspect:
 - `source_snapshot.course_archives` and its collection timestamps;
 - each `PlanItem.official_timing`, `academic_impact`, `learning_demand`, `effort`, `priority`, `readiness`, and `warnings`;
 - `priority.derived_from` and rationale;
-- `capacity_summary` and unscheduled workload;
+- `workload_summary` and its priority-level effort totals;
 - `feedback_summary` and execution calibration;
 - course `changes/latest.json` for changed DDL, weights, activities, or materials;
 - previous and current Plan when the user asks what changed.
 
-Do not attribute a priority change to AI preference when the Planner records a course, profile, capacity, or feedback cause.
+Do not attribute a priority change to AI preference when the Planner records a course, profile, workload, or feedback cause.
 
 ## Milestone model
 
@@ -49,8 +49,8 @@ No deadline means no fabricated dated milestone. A `TBD` requirement remains a v
 Use this compact order:
 
 1. **Source change:** what changed in Moodle, syllabus, Profile, or Execution Log?
-2. **Planner effect:** which urgency, impact, difficulty, effort, readiness, or capacity input changed?
-3. **Plan effect:** which priority, milestone, time block, or warning changed?
+2. **Planner effect:** which urgency, impact, difficulty, effort, readiness, or feedback input changed?
+3. **Plan effect:** which key item, priority, milestone, workload total, or warning changed?
 4. **Student effect:** what should the student do now?
 
 Example shape:
@@ -68,7 +68,8 @@ Student effect: Begin the diagnostic stage this week; no official date was chang
 - Cite the strongest source and collection time for official facts.
 - Say “the Planner derived” for priority, effort, and internal targets.
 - Separate measured workload from default estimates and feedback-calibrated estimates.
-- Name unscheduled minutes and the limiting availability when capacity is exceeded.
-- If Profile availability is absent, explain why items exist but timetable blocks do not.
+- Explain workload as approximate remaining effort, never as preassigned study slots.
+- If the user states a workload budget, compare it with approximate effort without writing availability into the Plan.
+- When offering learning methods, retrieve course evidence and cite its file/page provenance.
 - If course data is stale or a sync failed, disclose it before strong time-sensitive advice.
 - Avoid dumping raw JSON; show the smallest evidence needed to verify the explanation.

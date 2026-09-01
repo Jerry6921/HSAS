@@ -35,6 +35,7 @@ from .plan_rules import (
 )
 from .plan_schema import (
     AcademicImpact,
+    CapacitySummary,
     CourseArchiveSnapshot,
     EffortEstimate,
     FeedbackSummary,
@@ -46,11 +47,9 @@ from .plan_schema import (
     PlanningWindow,
     PlanSourceReference,
     PlanSummary,
-    ReviewPoint,
     SourceSnapshot,
-    TimetableBlock,
+    WorkloadSummary,
 )
-from .plan_scheduler import build_timetable
 from .profile_schema import CourseState, StudentProfile
 
 
@@ -169,37 +168,29 @@ class PlannerEngine:
                 if item is not None:
                     items.append(item)
 
+        items = self._select_key_items(items)
         generated_ids = {item.plan_item_id for item in items}
         removed = sorted(set(old_items) - generated_ids)
         if removed:
             warnings.append(
-                "Removed source items were omitted during refresh: "
+                "Items that are no longer key priorities were omitted during refresh: "
                 + ", ".join(removed)
             )
 
         items.sort(key=lambda item: self._item_sort_key(item, current))
-        preserved_blocks = [
-            block
-            for block in self._preserved_blocks(existing_plan, start, end)
-            if block.plan_item_id in generated_ids
-        ]
-        timetable, capacity, scheduling_warnings = build_timetable(
-            profile,
-            items,
-            start=start,
-            end=end,
-            current=current,
-            preserved_blocks=preserved_blocks,
-        )
-        warnings.extend(scheduling_warnings)
+        workload = self._build_workload_summary(items)
         milestones = self._build_milestones(
             items,
             existing_plan,
             current,
             profile.planning_preferences.deadline_buffer_hours,
         )
-        reviews = self._build_review_points(existing_plan, end, zone)
         summary = self._build_summary(items, current)
+        if profile.profile_status == "incomplete":
+            warnings.append(
+                "Student Profile is incomplete; priorities use confirmed course "
+                "facts and available defaults."
+            )
         generated_at = (
             existing_plan.generated_at
             if existing_plan and existing_plan.generated_at
@@ -207,12 +198,13 @@ class PlannerEngine:
         )
         return IntegratedPlan(
             plan_id=existing_plan.plan_id if existing_plan else "default",
+            planning_mode="priority_backlog",
             generated_at=generated_at,
             updated_at=current,
             timezone=profile.timezone,
             plan_status=(
                 "active"
-                if profile.availability.weekly_pattern and items
+                if profile.profile_status == "active" and items
                 else "draft"
             ),
             planning_window=PlanningWindow(start_date=start, end_date=end),
@@ -222,7 +214,10 @@ class PlannerEngine:
                 course_archives=source_snapshots,
                 warnings=[],
             ),
-            capacity_summary=capacity,
+            capacity_summary=CapacitySummary(
+                required_minutes=workload.total_remaining_minutes,
+            ),
+            workload_summary=workload,
             feedback_summary=FeedbackSummary(
                 execution_record_count=feedback.record_count,
                 total_actual_minutes=feedback.total_actual_minutes,
@@ -230,9 +225,9 @@ class PlannerEngine:
             ),
             plan_summary=summary,
             items=items,
-            timetable=timetable,
+            timetable=[],
             milestones=milestones,
-            review_points=reviews,
+            review_points=[],
             plan_warnings=list(dict.fromkeys(warnings)),
         )
 
@@ -538,19 +533,59 @@ class PlannerEngine:
             item.title.casefold(),
         )
 
-    def _preserved_blocks(
-        self,
-        existing: IntegratedPlan | None,
-        start: Date,
-        end: Date,
-    ) -> list[TimetableBlock]:
-        if existing is None:
-            return []
-        return [
-            block
-            for block in existing.timetable
-            if start <= block.date <= end and block.status in {"completed", "started"}
+    def _select_key_items(self, items: list[PlanItem]) -> list[PlanItem]:
+        """Keep current assessments and actionable supporting work only."""
+        selected = [
+            item
+            for item in items
+            if item.status not in {"completed", "cancelled"}
+            and (
+                item.source_assessment_id is not None
+                or item.priority.level != "planned"
+                or item.status == "blocked"
+            )
         ]
+        selected_ids = {item.plan_item_id for item in selected}
+        dependencies = {
+            dependency
+            for item in selected
+            for dependency in item.learning_demand.prerequisite_item_ids
+        }
+        if dependencies - selected_ids:
+            selected.extend(
+                item
+                for item in items
+                if item.plan_item_id in dependencies - selected_ids
+                and item.status not in {"completed", "cancelled"}
+            )
+        return selected
+
+    def _build_workload_summary(self, items: list[PlanItem]) -> WorkloadSummary:
+        estimated = [
+            item
+            for item in items
+            if item.effort.remaining_minutes is not None
+        ]
+
+        def minutes(level: str) -> int:
+            return sum(
+                item.effort.remaining_minutes or 0
+                for item in estimated
+                if item.priority.level == level
+            )
+
+        return WorkloadSummary(
+            key_item_count=len(items),
+            estimated_item_count=len(estimated),
+            unestimated_item_count=len(items) - len(estimated),
+            total_remaining_minutes=sum(
+                item.effort.remaining_minutes or 0 for item in estimated
+            ),
+            critical_minutes=minutes("critical"),
+            high_priority_minutes=minutes("high"),
+            medium_priority_minutes=minutes("medium"),
+            planned_minutes=minutes("planned"),
+        )
 
     def _build_milestones(
         self,
@@ -625,33 +660,6 @@ class PlannerEngine:
                 )
         milestones.sort(key=lambda milestone: milestone.target_at)
         return milestones
-
-    def _build_review_points(
-        self,
-        existing: IntegratedPlan | None,
-        end: Date,
-        zone: ZoneInfo,
-    ) -> list[ReviewPoint]:
-        completed = [
-            review
-            for review in (existing.review_points if existing else [])
-            if review.completed_at is not None
-        ]
-        review_id = f"review:weekly:{end.isoformat()}"
-        if all(review.review_id != review_id for review in completed):
-            completed.append(
-                ReviewPoint(
-                    review_id=review_id,
-                    scheduled_at=datetime.combine(end, Time(20, 0), tzinfo=zone),
-                    scope="weekly",
-                    questions=[
-                        "What was completed?",
-                        "Which estimates differed from actual time?",
-                        "Which deadlines, constraints, or priorities changed?",
-                    ],
-                )
-            )
-        return completed
 
     def _build_summary(
         self,

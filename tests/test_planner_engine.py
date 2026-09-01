@@ -112,7 +112,7 @@ def _profile(*, with_commitment: bool = False) -> StudentProfile:
     )
 
 
-def test_engine_generates_valid_items_and_timetable() -> None:
+def test_engine_generates_valid_priority_backlog_without_timetable() -> None:
     archive = _archive()
     profile = _profile()
     now = datetime(2026, 9, 1, 8, 0, tzinfo=ZONE)
@@ -132,8 +132,16 @@ def test_engine_generates_valid_items_and_timetable() -> None:
     assert essay.academic_impact.importance_level == 5
     assert essay.effort.estimated_total_minutes == 600
     assert essay.priority.level in {"critical", "high"}
-    assert any(block.plan_item_id == essay.plan_item_id for block in plan.timetable)
-    assert plan.capacity_summary.scheduled_minutes > 0
+    assert plan.planning_mode == "priority_backlog"
+    assert plan.timetable == []
+    serialized = plan.model_dump(mode="json")
+    assert "timetable" not in serialized
+    assert "capacity_summary" not in serialized
+    assert "review_points" not in serialized
+    assert plan.workload_summary.key_item_count == len(plan.items)
+    assert plan.workload_summary.total_remaining_minutes == sum(
+        item.effort.remaining_minutes or 0 for item in plan.items
+    )
     essay_milestones = [
         milestone
         for milestone in plan.milestones
@@ -147,6 +155,23 @@ def test_engine_generates_valid_items_and_timetable() -> None:
         "submission-ready",
     ]
     assert all(milestone.total_stages == 5 for milestone in essay_milestones)
+
+
+def test_active_priority_backlog_does_not_require_availability_slots() -> None:
+    profile = _profile()
+    profile.availability.weekly_pattern = []
+    profile.availability.fixed_commitments = []
+
+    plan = PlannerEngine().generate(
+        profile,
+        [_archive()],
+        start_date=date(2026, 9, 1),
+        now=datetime(2026, 9, 1, 8, 0, tzinfo=ZONE),
+    )
+
+    assert plan.plan_status == "active"
+    assert plan.planning_mode == "priority_backlog"
+    assert plan.timetable == []
 
 
 def test_engine_uses_type_specific_milestone_strategies() -> None:
@@ -219,7 +244,7 @@ def test_assessment_evidence_activity_is_not_mixed_with_assessment_section() -> 
     assert report.valid
 
 
-def test_engine_update_preserves_progress_and_completed_blocks() -> None:
+def test_engine_update_preserves_progress_without_creating_time_blocks() -> None:
     archive = _archive()
     profile = _profile()
     engine = PlannerEngine()
@@ -233,11 +258,6 @@ def test_engine_update_preserves_progress_and_completed_blocks() -> None:
     essay.effort.completed_minutes = 60
     essay.effort.remaining_minutes = essay.effort.estimated_total_minutes - 60
     essay.status = "in_progress"
-    completed_block = next(
-        block for block in first.timetable if block.plan_item_id == essay.plan_item_id
-    )
-    completed_block.status = "completed"
-    completed_block.actual_minutes = completed_block.planned_minutes
     first_milestone_targets = {
         milestone.milestone_id: milestone.target_at
         for milestone in first.milestones
@@ -259,10 +279,9 @@ def test_engine_update_preserves_progress_and_completed_blocks() -> None:
     assert updated_essay.created_at == essay.created_at
     assert updated_essay.status == "in_progress"
     assert updated_essay.effort.completed_minutes == 60
-    assert any(
-        block.block_id == completed_block.block_id
-        and block.status == "completed"
-        for block in updated.timetable
+    assert updated.timetable == []
+    assert updated.workload_summary.total_remaining_minutes == sum(
+        item.effort.remaining_minutes or 0 for item in updated.items
     )
     assert {
         milestone.milestone_id: milestone.target_at
@@ -271,7 +290,7 @@ def test_engine_update_preserves_progress_and_completed_blocks() -> None:
     } == first_milestone_targets
 
 
-def test_validator_detects_reference_and_time_conflicts() -> None:
+def test_validator_detects_reference_and_workload_summary_conflicts() -> None:
     archive = _archive()
     profile = _profile(with_commitment=True)
     plan = PlannerEngine().generate(
@@ -280,21 +299,16 @@ def test_validator_detects_reference_and_time_conflicts() -> None:
         start_date=date(2026, 9, 1),
         now=datetime(2026, 9, 1, 8, 0, tzinfo=ZONE),
     )
-    # The engine avoids commitments; move one generated block into the class time
-    # and break one course reference to exercise external validation.
-    block = plan.timetable[0]
-    block.date = date(2026, 9, 1)
-    block.start_time = datetime.strptime("09:00", "%H:%M").time()
-    block.end_time = datetime.strptime("10:00", "%H:%M").time()
-    block.planned_minutes = 60
+    # Break a source reference and a derived workload total.
     plan.items[0].source_section_id = "missing-section"
+    plan.workload_summary.total_remaining_minutes += 1
 
     report = validate_integrated_plan(plan, profile, [archive])
     codes = {issue.code for issue in report.errors}
 
     assert not report.valid
     assert "reference.section_missing" in codes
-    assert "schedule.fixed_commitment_conflict" in codes
+    assert "workload.summary_mismatch" in codes
 
 
 def test_execution_feedback_reestimates_effort_and_progress() -> None:
@@ -362,7 +376,7 @@ def test_feedback_extends_an_exhausted_but_incomplete_estimate() -> None:
     assert (total, factor, extended) == (75, 1.0, True)
 
 
-def test_validator_handles_date_only_deadlines_and_workload_overload() -> None:
+def test_validator_handles_date_only_deadlines_without_allocating_capacity() -> None:
     archive = _archive()
     profile = _profile()
     profile.planning_preferences.default_planning_horizon_days = 1
@@ -387,9 +401,8 @@ def test_validator_handles_date_only_deadlines_and_workload_overload() -> None:
 
     report = validate_integrated_plan(plan, profile, [archive])
     error_codes = {issue.code for issue in report.errors}
-    warning_codes = {issue.code for issue in report.warnings}
-
-    assert "schedule.milestone_after_deadline" in error_codes
-    assert plan.capacity_summary.over_capacity is True
-    assert plan.capacity_summary.unscheduled_workload_minutes > 0
-    assert "capacity.workload_exceeds_capacity" in warning_codes
+    assert "deadline.milestone_after_official_deadline" in error_codes
+    assert plan.planning_mode == "priority_backlog"
+    assert plan.timetable == []
+    assert plan.capacity_summary.available_minutes is None
+    assert plan.capacity_summary.over_capacity is False

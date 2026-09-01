@@ -2,7 +2,7 @@
 
 > 把分散在 Moodle、syllabus 和课件里的课程信息，变成真正适合个人执行的跨课程学习计划。
 
-HSAS 是一个面向 HKU 学生的本地 AI 学习辅助系统。它会采集学生有权访问的 Moodle 课程，理解 Assessment、DDL、权重、要求和课件内容，再结合学生的时间、目标与真实学习进度，生成一份统一的综合计划。
+HSAS 是一个面向 HKU 学生的本地 AI 学习辅助系统。它会采集学生有权访问的 Moodle 课程，理解 Assessment、DDL、权重、要求和课件内容，再结合学生的目标与真实学习进度，生成一份统一的跨课程优先级清单。AI 随后检索相关课件，为优先事项设计学习方法、预计投入时间和可自我检验的学习成果；具体何时学习由学生自行选择。
 
 ## 它解决什么问题
 
@@ -22,8 +22,9 @@ HSAS 将这些信息汇总成统一课程数据库，再通过可验证的规划
 |---|---|---|---|
 | 信息深度 | 依赖用户复制的上下文 | 只保存手动输入的任务 | 课程结构、Assessment、syllabus、Label、PDF 正文和来源统一采集 |
 | 数据可信度 | 可能混淆事实与建议 | 通常没有课程证据 | 保存 activity ID、页码、置信度、冲突和 warning |
-| 个性化 | 依赖当次提示词 | 主要依赖手动设置 | 独立 Student Profile 描述目标、时间、能力、偏好和限制 |
-| 计划生成 | 大模型自由生成，结果可能漂移 | 规则较浅，不理解课程 | 确定性 Planner 综合 DDL、权重、难度、耗时、容量和依赖 |
+| 个性化 | 依赖当次提示词 | 主要依赖手动设置 | 独立 Student Profile 描述目标、能力、偏好和限制 |
+| 计划生成 | 大模型自由生成，结果可能漂移 | 规则较浅，不理解课程 | 确定性 Planner 综合 DDL、权重、难度、耗时、状态和依赖 |
+| 学习指导 | 容易依赖模型记忆或用户粘贴 | 通常不理解课件 | AI 先通过本地 RAG 检索已下载课件，再给方法、耗时与自测标准 |
 | 更新成本 | 需要重新对话和调用模型 | 需要人工维护 | 增量同步并自动重算，纯逻辑生成成本低 |
 | AI 的角色 | 同时猜数据、做决定和解释 | 通常没有课程 AI | AI 只记录用户确认的数据、解释计划和提供顾问服务 |
 | 数据控制 | 取决于服务商 | 通常存于云端 | 课程数据库、Profile 和 Plan 默认保存在本地 |
@@ -32,40 +33,47 @@ HSAS 最重要的区别，是没有把整个系统交给 AI 自由发挥：
 
 - Collector 负责可靠地取得课程事实；
 - Pydantic Schema 负责约束数据；
-- Planner 负责稳定地生成计划；
-- Validator 负责发现引用、DDL、冲突和容量问题；
-- AI 负责与学生沟通、记录确认信息并解释结果。
+- Planner 负责稳定地排序关键要务并给出理由；
+- Validator 负责发现引用、DDL、工作量和里程碑问题；
+- RAG 负责从本地课件中检索与当前要务相关的证据；
+- AI 负责与学生沟通、记录确认信息，并把要务转化为灵活的学习建议。
 
 这种边界让系统既能利用 AI 的交互能力，又尽量避免幻觉、计划漂移和重复调用成本。
 
 ## 核心产品：Integrated Plan
 
-`integrated_plan.json` 不是简单的 DDL 列表，而是一份可追踪、可更新的综合学习计划。它包含：
+`integrated_plan.json` 不是日历，也不是简单的 DDL 列表，而是一份可追踪、可更新的关键要务清单。它包含：
 
 - 所有课程的标准化任务；
 - 官方开放时间、考试日期和 DDL；
 - Assessment 权重与成绩影响；
-- 学习难度和学生薄弱主题；
+- 学习难度、任务状态和学生薄弱主题；
 - 预计总耗时、已完成时间和剩余时间；
 - `critical / high / medium / planned` 综合优先级；
-- 每周和每日时间块；
 - 论文、考试、项目和演示的阶段性里程碑；
-- 时间冲突、容量超载、资料缺失和不确定信息警告。
+- 每项任务的排序理由、完成标准、来源和 warning；
+- 全局工作量摘要、资料缺失和不确定信息警告。
+
+它不会保存学生的具体可用时段，也不会替学生把任务锁定到某天几点。Profile 可以保留可选的每周工作量预算和学习偏好，用于判断负担、改善建议，但不会据此生成固定日历。
 
 ```text
 HKU Moodle
     ↓
 课程数据库：课程结构、Assessment、DDL、课件与来源
     +
-Student Profile：目标、可用时间、学习特点与限制
+Student Profile：目标、学习特点、偏好与限制
     +
 Execution Log：完成进度与实际耗时
     ↓
 Deterministic Planner Engine
     ↓
-Integrated Plan
+Integrated Plan：排序后的关键要务、理由与完成标准
     ↓
-AI 负责解释计划、回答课程问题并记录用户确认的反馈
+本地 RAG 检索对应课程、activity、文件和 PDF 页码
+    ↓
+AI 生成学习方法、预计投入与可自测成果
+    ↓
+学生自行选择实际学习时段，并反馈真实耗时
 ```
 
 ## 核心功能
@@ -99,16 +107,16 @@ HSAS 不只抓取课程名称和 DDL，还会尽可能保存：
 
 每个重要结论尽量保留来源、置信度和 warning，未知信息不会被自动当成零或被 AI 猜测补全。
 
-### 3. 纯逻辑综合排程
+### 3. 纯逻辑优先级排序
 
-Integrated Plan 由确定性的 Python Planner 生成，不依赖大模型临场“想一个计划”。Planner 会综合考虑：
+Integrated Plan 由确定性的 Python Planner 生成，不依赖大模型临场“想一个顺序”。Planner 会综合考虑：
 
 - DDL 和考试日期；
 - Assessment 权重和课程目标；
 - 学习难度与薄弱主题；
-- 剩余工作量和学生可用时间；
+- 剩余工作量、完成进度与估算误差；
 - 任务是否开放、材料是否齐全；
-- 固定课程、个人安排、每日容量与休息缓冲。
+- 前置依赖、风险和来源可信度。
 
 大型 Assessment 会自动拆分：
 
@@ -117,9 +125,20 @@ Integrated Plan 由确定性的 Python Planner 生成，不依赖大模型临场
 - 项目：范围确认 → 原型 → 核心实现 → 整合测试 → 最终交付；
 - 演示：信息与提纲 → 初版材料 → 彩排 → 最终检查。
 
-相同输入会产生稳定、可复现的结果。生成计划不需要持续调用 AI API，因此成本更低，也更适合频繁更新。
+这些阶段是早于官方 DDL 的任务里程碑，不是具体学习时段。相同输入会产生稳定、可复现的排序；更新 Integrated Plan 不需要调用 AI API，因此成本更低，也更适合频繁运行。
 
-### 4. 学习反馈闭环
+### 4. 本地课件 RAG 与灵活学习设计
+
+AI 不应只根据任务标题猜测应该怎样学习。它会先读取 Integrated Plan 的高优先级事项，再用本地 RAG 检索对应课程的 PDF 正文，保留课程、activity、文件和页码来源，最后提出：
+
+- 适合该内容的学习方法，例如预习、主动回忆、刷题、论证提纲或模拟考试；
+- 每个学习动作大致需要多少分钟，而不是安排到具体日期和时间；
+- 完成后应能回答、解释、推导、实现或产出什么，以便学生自我检验；
+- 资料缺失、OCR 不可用或证据不足时的明确提示。
+
+当前 RAG v1 使用本地、确定性的关键词相关度检索，不需要 embedding 服务或外部 API，因此便宜、可复现且不会上传课件。它擅长检索已提取的文本；扫描型 PDF 仍需要后续 OCR 才能纳入正文检索。
+
+### 5. 学习反馈闭环
 
 系统可以记录计划耗时、实际耗时、完成进度和结果，并据此校准未来估算：
 
@@ -127,9 +146,9 @@ Integrated Plan 由确定性的 Python Planner 生成，不依赖大模型临场
 计划 → 执行 → 记录实际耗时 → 校准估算 → 更新计划
 ```
 
-已经开始或完成的内容会被保留，未来任务则根据新 DDL、课件变化和学生进度重新安排。
+已经开始或完成的内容会被保留，其余事项则根据新 DDL、课件变化、学生进度和实际耗时重新排序、重新估算。
 
-### 5. AI 课程顾问
+### 6. AI 课程顾问
 
 在结构化课程数据库之上，AI 可以回答：
 
@@ -138,7 +157,7 @@ Integrated Plan 由确定性的 Python Planner 生成，不依赖大模型临场
 - 某项 Assessment 的权重、要求和来源是什么？
 - syllabus 如何规定迟交、参与和 AI 使用？
 - 为什么某项任务优先级更高？
-- 当前时间容量是否足够？应该如何调整？
+- 针对当前优先事项，应该怎样学习、预计多久、如何确认自己真的掌握？
 
 ## 快速开始
 
@@ -159,7 +178,33 @@ python -m pip install -e .
 playwright install chromium
 ```
 
-仓库中的 `.env` 已配置当前 Moodle 地址。密码、MFA、cookie 和 sesskey 不应写入配置文件。
+HKU Moodle URL 已作为公开默认值保存在 `config/defaults.toml`，通常无需配置。个人配置、课程数据和浏览器登录状态不放在 Git 仓库中；macOS 默认使用：
+
+```text
+~/Library/Application Support/HSAS/
+├── config.toml
+├── browser-profile/
+├── resources/
+│   ├── courses/
+│   ├── student_profile.json
+│   ├── execution_log.json
+│   └── integrated_plan.json
+└── state/
+```
+
+缓存与日志分别位于 `~/Library/Caches/HSAS/` 和 `~/Library/Logs/HSAS/`。这些路径由 `platformdirs` 自动选择；其他系统会使用各自的标准用户目录。可通过 `HSAS_DATA_DIR=/custom/path` 覆盖整个数据根目录，或通过全局 `hsas --resources /custom/path/resources COMMAND` 只覆盖本次命令的资源目录。
+
+`.env` 仅作为可选的本地 Moodle 配置覆盖，已被 `.gitignore` 排除。密码、MFA、cookie 和 sesskey 不应写入任何配置文件。
+
+### 从旧版目录迁移
+
+如果旧版数据仍在项目中的 `src/resources/`、`.moodle-profile/` 和 `.env`，运行：
+
+```bash
+hsas migrate-data
+```
+
+命令会复制文件、逐文件校验 SHA-256，并把非敏感设置转换为用户目录中的 `config.toml`。它不会删除旧文件；验证成功后请先检查 `state/migration-report.json`，再自行处理项目中的旧副本。
 
 ### 使用
 
@@ -175,12 +220,25 @@ hsas sync-courses
 # 也可以只同步一门课程
 hsas sync-courses 146267
 
-# 3. 完善 src/resources/student_profile.json 后生成综合计划
+# 3. 验证 Student Profile 后生成综合计划
+hsas profile validate
 hsas update-plan
 
 # 4. 查看登录、课程、Profile、执行记录和计划状态
 hsas list-status
 ```
+
+更新软件代码：
+
+```bash
+# 只克隆、验证和比较
+hsas update-hsas --dry-run
+
+# 从受信任的 Jerry6921/HSAS main 分支更新并重新安装依赖
+hsas update-hsas
+```
+
+更新器只管理仓库代码。个人 resources、浏览器 profile、`.env`、虚拟环境和本地 selector 均不会被 Git 内容覆盖；复制或安装失败时会回滚代码。
 
 ### 搭配 AI Agent 使用
 
@@ -191,9 +249,11 @@ hsas list-status
 1. 让 Agent 运行 `hsas list-status`，检查登录、课程数据、Student Profile 和 Integrated Plan 状态。
 2. 如果尚未登录，让 Agent 运行 `hsas login`；浏览器打开后，由用户本人完成 HKU SSO/MFA。
 3. 明确授权 Agent 运行 `hsas sync-courses`。Python 会自动发现课程、抓取 Moodle 数据、下载课件、解析 Assessment，并完成结构化与校验。
-4. 告诉 Agent 你的目标、可用时间、薄弱主题和学习限制。Agent 只把你明确确认的信息写入 `student_profile.json`。
+4. 告诉 Agent 你的目标、薄弱主题、学习偏好、限制，以及可选的每周学习预算。确认变更后，Agent 通过 `hsas profile apply` 安全更新 Profile，而不是直接编辑 JSON。
 5. Agent 运行 `hsas update-plan`，由确定性的 Planner Engine 生成或更新 `integrated_plan.json`。
-6. 继续用自然语言询问下一步、DDL、Assessment 要求、每周内容或排程原因。Agent 读取结构化数据并解释结果，不自行改写官方课程事实。
+6. Agent 读取排序后的关键要务，并先运行 `hsas materials for-item PLAN_ITEM_ID` 检索相关课件；必要时再用 `hsas materials search` 精细检索。
+7. Agent 根据检索证据给出学习方法、大致耗时和可自测成果。学生自行选择实际学习时段；AI 不把具体时段写回 Integrated Plan。
+8. 学习后通过 `hsas execution add` 记录实际耗时与进度，再运行 `hsas update-plan` 完成重新估算。
 
 可以直接这样提问：
 
@@ -202,34 +262,85 @@ hsas list-status
 
 同步全部可用课程，然后更新综合计划。
 
-我星期一到星期五每天可学习 2 小时，周末每天 4 小时。
+我每周大约能投入 12 小时，偏好每次专注 60 分钟。
 请先向我确认准备写入的 Profile 变更，再更新计划。
 
 根据 Integrated Plan 告诉我这周最优先的三项任务，
-并解释每项任务受到哪些 DDL、权重、难度和容量因素影响。
+并解释每项任务受到哪些 DDL、权重、难度、耗时和状态因素影响。
 
-我刚完成了计划项 plan-item-123，实际用了 90 分钟。
-记录这次执行结果并重新估算后续计划。
+先检索最高优先级事项对应的课件，再给我三个灵活学习动作。
+每项都说明大致耗时、采用这种方法的理由、课件来源和自测标准，
+不要替我指定周几几点学习。
+
+我刚完成了计划项 plan-item-123 的一个预计 60 分钟学习动作，实际用了 90 分钟，
+完成了相当于 60 分钟的计划工作。记录这次执行结果并重新估算后续计划。
 ```
 
 Agent 与 HSAS 的职责边界是：
 
 - **用户**：完成登录并确认个人资料、实际耗时和进度；
 - **Python Collector**：抓取、下载、解析、结构化和校验 Moodle 数据；
-- **Planner Engine**：根据课程事实、Student Profile 和 Execution Log 生成计划；
-- **AI Agent**：理解用户意图、记录已确认信息、调用命令并解释计划。
+- **Planner Engine**：根据课程事实、Student Profile 和 Execution Log 排序关键要务；
+- **本地 RAG**：从已下载课件正文中检索与某项要务相关的内容并返回来源；
+- **AI Agent**：理解用户意图、记录已确认信息，并据检索证据设计灵活学习建议；
+- **学生**：根据现实安排自行选择学习时段，并反馈真实耗时。
 
-Agent 不应直接编辑 `course.json` 或 `integrated_plan.json`。当同步失败或数据过期时，应保留上一份有效数据并明确提示，而不是猜测最新 DDL 或伪造更新成功。
+Agent 不应直接编辑 `student_profile.json`、`execution_log.json`、`course.json` 或 `integrated_plan.json`。Profile 与执行记录必须通过受控 CLI 校验并原子写入。当同步失败或数据过期时，应保留上一份有效数据并明确提示，而不是猜测最新 DDL 或伪造更新成功。
 
-主要数据保存在：
+### 安全更新 Profile 与执行记录
+
+Profile 采用最小 JSON 补丁，避免重写或覆盖未涉及的数据：
+
+```json
+{
+  "profile_status": "active",
+  "study_capacity": {
+    "weekly_study_budget_minutes": 720,
+    "preferred_session_minutes": 60
+  }
+}
+```
+
+用户确认补丁内容后执行：
+
+```bash
+hsas profile apply profile-patch.json --confirmed
+hsas update-plan
+```
+
+记录学习反馈时，实际耗时和完成的计划工作量必须分开提供：
+
+```bash
+hsas execution add PLAN_ITEM_ID \
+  --planned-minutes 60 \
+  --actual-minutes 90 \
+  --progress-minutes 60 \
+  --completed
+
+hsas update-plan
+```
+
+`--planned-minutes` 是 AI 此前为该学习动作提出的大致投入，不代表固定日历时段。重复提交可传入相同的 `--record-id`；完全相同的重试不会产生重复记录。如果报告有误，使用 `hsas execution correct RECORD_ID` 更正原记录。
+
+也可以直接从命令行检索课件：
+
+```bash
+# 根据一个 Plan Item 自动组合查询，并限制到对应课程
+hsas materials for-item PLAN_ITEM_ID
+
+# 自定义检索；--course 可重复提供
+hsas materials search "eigenvalue diagonalization" --course 138907 --limit 5
+```
+
+macOS 上主要数据默认保存在：
 
 ```text
-src/resources/
+~/Library/Application Support/HSAS/resources/
 ├── courses/<course-id>/course.json   # 结构化课程数据库
 ├── courses/<course-id>/files/        # 下载的课程文件
 ├── student_profile.json              # 学生目标、时间与学习特点
 ├── execution_log.json                # 真实执行与耗时反馈
-└── integrated_plan.json              # 跨课程综合计划
+└── integrated_plan.json              # 排序后的跨课程关键要务
 ```
 
 ## 当前边界

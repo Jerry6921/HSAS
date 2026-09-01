@@ -35,7 +35,7 @@ def validate_integrated_plan(
     archives: list[ArchiveIndex],
     execution_log: ExecutionLog | None = None,
 ) -> PlanValidationReport:
-    """Validate cross-file references, dependencies, time, and capacity."""
+    """Validate references, key-workload totals, and deadline-safe milestones."""
     issues: list[ValidationIssue] = []
     archive_by_course: dict[str, ArchiveIndex] = {}
     for index in archives:
@@ -64,9 +64,11 @@ def validate_integrated_plan(
             issues,
         )
     _validate_dependency_cycles(plan.items, issues)
-    _validate_timetable(plan, profile, item_by_id, issues)
+    if plan.planning_mode == "legacy_timetable":
+        _validate_timetable(plan, profile, item_by_id, issues)
+        _validate_capacity_summary(plan, issues)
     _validate_milestones(plan, item_by_id, issues)
-    _validate_capacity_summary(plan, issues)
+    _validate_workload_summary(plan, issues)
     _validate_execution_log(execution_log, item_by_id, issues)
 
     errors = [issue for issue in issues if issue.severity == "error"]
@@ -93,7 +95,7 @@ def _validate_profile_references(
                     "warning",
                     "reference.profile_course_missing",
                     f"Student Profile references unsynchronized course {course_id}.",
-                    "src/resources/student_profile.json",
+                    "student_profile.json",
                 )
             )
 
@@ -428,7 +430,7 @@ def _validate_milestones(
             issues.append(
                 _issue(
                     "error",
-                    "schedule.milestone_after_deadline",
+                    "deadline.milestone_after_official_deadline",
                     f"Milestone {milestone.milestone_id} is after the official "
                     "deadline.",
                     f"milestones[{index}]",
@@ -477,6 +479,44 @@ def _validate_capacity_summary(
                 "capacity_summary.unscheduled_workload_minutes",
             )
         )
+
+
+def _validate_workload_summary(
+    plan: IntegratedPlan,
+    issues: list[ValidationIssue],
+) -> None:
+    estimated = [
+        item for item in plan.items if item.effort.remaining_minutes is not None
+    ]
+    expected = {
+        "key_item_count": len(plan.items),
+        "estimated_item_count": len(estimated),
+        "unestimated_item_count": len(plan.items) - len(estimated),
+        "total_remaining_minutes": sum(
+            item.effort.remaining_minutes or 0 for item in estimated
+        ),
+    }
+    for level, field in {
+        "critical": "critical_minutes",
+        "high": "high_priority_minutes",
+        "medium": "medium_priority_minutes",
+        "planned": "planned_minutes",
+    }.items():
+        expected[field] = sum(
+            item.effort.remaining_minutes or 0
+            for item in estimated
+            if item.priority.level == level
+        )
+    for field, value in expected.items():
+        if getattr(plan.workload_summary, field) != value:
+            issues.append(
+                _issue(
+                    "error",
+                    "workload.summary_mismatch",
+                    f"workload_summary.{field} must equal {value}.",
+                    f"workload_summary.{field}",
+                )
+            )
 
 
 def _validate_execution_log(

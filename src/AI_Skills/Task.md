@@ -44,12 +44,17 @@ and what missing information is blocking a reliable plan.
 
 ## 3. Data architecture
 
+Resolve `RESOURCES_DIR` from the first line of `hsas list-status`. On macOS it
+defaults to `~/Library/Application Support/HSAS/resources/`; never assume it is
+inside the Git checkout. Respect `HSAS_DATA_DIR` and the global `--resources`
+override used for the current invocation.
+
 ### 3.1 Course database: objective course facts
 
 The course database is stored under:
 
 ```text
-src/resources/
+<RESOURCES_DIR>/
 ├── courses.json
 ├── sync-report.json
 └── courses/<course_id>/
@@ -80,7 +85,7 @@ private notes, grades, or plan state into it.
 The Student Profile is separate from the course database and is stored at:
 
 ```text
-src/resources/student_profile.json
+<RESOURCES_DIR>/student_profile.json
 ```
 
 Use confirmed conversation context to propose or update this file when the
@@ -90,8 +95,8 @@ user authorizes the change. A profile supports these categories:
 |---|---|---|
 | Identity/context | timezone, programme, year of study, current semester | Interpret dates and academic context |
 | Goals | target course grades, target GPA, mastery goals, short-term priorities | Allocate effort according to desired outcomes |
-| Availability | recurring weekly hours, fixed commitments, exceptional unavailable dates | Build a plan that fits real time constraints |
-| Study capacity | sustainable session length, preferred break pattern, maximum daily load | Avoid unrealistic schedules |
+| Availability | optional recurring hours, commitments, exceptional unavailable dates | Use only when the user explicitly asks for an optional calendar view; never write slots into Integrated Plan |
+| Study capacity | weekly workload budget, sustainable session length, preferred break pattern | Flag unrealistic workload and size flexible learning actions |
 | Learning preferences | reading, worked examples, discussion, flashcards, practice questions | Choose efficient learning activities |
 | Energy pattern | strongest hours, low-energy periods, sleep boundaries | Place demanding work at appropriate times |
 | Course state | confidence by topic, completed tasks, current progress, known grades | Personalize sequence and detect risk |
@@ -112,23 +117,23 @@ Keep these classes separate in reasoning and answers:
 | Class | Examples | Required language |
 |---|---|---|
 | Course fact | “The essay is due 18 October” | “Moodle lists…” or “The syllabus confirms…” |
-| Student fact | “I can study six hours this weekend” | “Based on your stated availability…” |
-| AI recommendation | “Draft the outline on Saturday” | “I recommend…” |
+| Student fact | “I can study six hours this weekend” | “Based on the workload budget you stated…” |
+| AI recommendation | “Spend roughly 60 minutes drafting the outline, then self-check its claim structure” | “I recommend…” |
 
 An AI recommendation must never be written back as a course fact. A student's
 self-reported progress must not silently replace Moodle completion metadata;
 retain both and explain any mismatch.
 
-### 3.4 Integrated Plan: derived cross-course schedule
+### 3.4 Integrated Plan: derived cross-course priority backlog
 
 The shared cross-course plan is stored at:
 
 ```text
-src/resources/integrated_plan.json
+<RESOURCES_DIR>/integrated_plan.json
 ```
 
-It is an engine-generated, AI-readable derived view that combines every relevant
-course's assessments and learning activities into one timetable. It contains:
+It is an engine-generated, AI-readable derived view that selects and sorts the
+current key work across courses. It contains:
 
 - normalized work items linked to course, section, activity, and assessment
   IDs;
@@ -137,29 +142,30 @@ course's assessments and learning activities into one timetable. It contains:
   priority;
 - readiness, progress, completion criteria, dependencies, evidence, and
   warnings;
-- scheduled time blocks, milestones, review points, and capacity summary.
+- a workload summary and deadline-safe assessment milestones;
 - source assessment type plus milestone phase, sequence, and total-stage data
   used by deterministic essay, exam, project, and presentation strategies.
 
-`items[]` is the canonical task list. `timetable[]` references items through
-`plan_item_id`; do not duplicate a full task inside each time block. Official
-deadlines come from CourseArchive and must never be overwritten by AI-created
-milestones. Rebuild affected plan items whenever course data or profile data
-changes.
+`items[]` is the canonical, priority-sorted key-task list. New plans use
+`planning_mode=priority_backlog` and do not serialize `timetable`,
+`capacity_summary`, or `review_points`; the models accept those fields only to
+read legacy files. Official deadlines come from CourseArchive and must never be
+overwritten by AI-created milestones. Rebuild affected plan items whenever
+course data or profile data changes.
 
-Do not directly edit `integrated_plan.json`. Write user-confirmed personal facts
-to `student_profile.json`, and execution facts to `execution_log.json`, then run
-the deterministic Planner and Validator.
+Do not directly edit Planner data files. Send user-confirmed personal facts
+through `hsas profile apply`, and execution facts through `hsas execution add`
+or `correct`, then run the deterministic Planner and Validator.
 
 ### 3.5 Execution Log: confirmed feedback input
 
 Execution feedback is stored at:
 
 ```text
-src/resources/execution_log.json
+<RESOURCES_DIR>/execution_log.json
 ```
 
-Each record links to a `plan_item_id` and stores planned minutes, actual minutes,
+Each record links to a `plan_item_id` and stores the AI-proposed approximate minutes, actual minutes,
 equivalent planned work completed, an optional whole-item completion flag, and
 notes. The AI may write only values explicitly confirmed by the student. After
 recording feedback, run `hsas update-plan`; the engine preserves progress and uses
@@ -173,9 +179,9 @@ cd "$HSAS_ROOT"
 hsas update-plan
 ```
 
-The engine preserves completed progress and started/completed timetable blocks,
-then recalculates source facts, remaining effort, priority, milestones, future
-blocks, and capacity. `integrated_plan.json` is output-only for AI workflows.
+The engine preserves confirmed progress, then recalculates source facts,
+remaining effort, priority order, key items, milestones, and workload totals.
+`integrated_plan.json` is output-only for AI workflows.
 
 ## 4. Core capabilities
 
@@ -185,17 +191,18 @@ The assistant should be able to produce:
 
 - semester and multi-course roadmaps;
 - rolling weekly plans;
-- daily time-block plans;
+- flexible ordered learning-action plans without fixed study slots;
 - assessment completion plans;
 - exam revision plans;
 - reading and lecture catch-up plans;
 - recovery plans after missed work;
-- plan revisions based on new deadlines, progress, or availability;
+- plan revisions based on new deadlines, progress, workload budget, or constraints;
 - a single best next action when the user feels overwhelmed.
 
 Every personalized plan should combine course deadlines and workload with the
-student's goals, available time, current progress, strengths, weaknesses, and
-preferred learning methods.
+student's goals, current progress, strengths, weaknesses, and preferred learning
+methods. Give approximate time budgets and self-check outcomes; let the student
+choose study slots.
 
 ### 4.2 Efficient learning support — primary capability
 
@@ -250,7 +257,7 @@ Classify the request as one or more of:
 
 ### Step 2: Resolve the course scope
 
-Use `src/resources/courses.json` or `hsas list-status` to match names to exact course
+Use `<RESOURCES_DIR>/courses.json` or `hsas list-status` to match names to exact course
 IDs. If multiple courses match, show the matches instead of guessing. For a
 cross-course plan, include every relevant synchronized course and check
 `sync-report.json` for failures.
@@ -260,7 +267,7 @@ cross-course plan, include every relevant synchronized course and check
 Read:
 
 ```text
-src/resources/courses/<course_id>/course.json
+<RESOURCES_DIR>/courses/<course_id>/course.json
 ```
 
 Use `ArchiveIndex` when programmatic lookup is needed. Include
@@ -298,17 +305,17 @@ in [references/operations.md](references/operations.md).
 For a personalized plan, seek the minimum necessary student inputs:
 
 1. planning period and timezone;
-2. fixed commitments and available study time;
-3. current progress and already completed work;
-4. target outcome or relative course priority;
-5. major difficulties or upcoming constraints.
+2. current progress and already completed work;
+3. target outcome or relative course priority;
+4. major difficulties or upcoming constraints;
+5. optional weekly workload budget or preferred session length.
 
 Use existing confirmed profile data first. Ask concise follow-up questions only
 for missing inputs that would materially alter the plan. If the user wants an
-immediate plan without providing availability, create a provisional workload
-sequence rather than inventing a calendar.
+immediate plan without a workload budget, create an ordered action sequence with
+estimated effort rather than asking for a calendar.
 
-Read `src/resources/student_profile.json` before asking the user for information already
+Read `<RESOURCES_DIR>/student_profile.json` before asking the user for information already
 confirmed there. Compare its `updated_at` and provenance with the current
 request; stale or unconfirmed profile fields must be verified when important.
 
@@ -323,7 +330,7 @@ word limit/requirements   → syllabus or assignment description
 weekly topic/order        → Moodle section number/title and linked activities
 reading workload          → PDF analysis plus content difficulty
 policy                    → syllabus page
-student availability      → confirmed Student Profile or user statement
+learning method/content   → RAG chunks from the relevant local course material
 ```
 
 ### Step 7: Perform the task
@@ -331,10 +338,14 @@ student availability      → confirmed Student Profile or user statement
 Apply the relevant procedure in Sections 6–12.
 
 For a plan creation/update request, update confirmed Profile inputs and confirmed
-Execution Log records, then run `hsas update-plan`. The engine writes the normalized result to
-`src/resources/integrated_plan.json`, sets timestamps, and keeps source archive timestamps in
+Execution Log records, then run `hsas update-plan`. The engine writes the priority backlog to
+`<RESOURCES_DIR>/integrated_plan.json`, sets timestamps, and keeps source archive timestamps in
 `source_snapshot` so staleness is detectable. Do not use a manual plan edit to
 bypass Profile, Execution Log, or validation rules.
+
+Before giving content-specific learning actions, retrieve evidence for each
+selected key item with `hsas materials for-item <PLAN_ITEM_ID>` and follow
+[references/study-guidance.md](references/study-guidance.md).
 
 Before either input write, follow the confirmation, minimal-patch, idempotency,
 atomic-write, and correction rules in
@@ -358,7 +369,7 @@ Prioritize the fields marked `[PLAN-CRITICAL]` in `Handbook.md`:
 - section order and current section;
 - PDF reading estimates and OCR/download gaps;
 - `collected_at` and evidence sources;
-- student goals, availability, progress, confidence, capacity, and constraints.
+- student goals, progress, confidence, study budget, preferences, and constraints.
 
 ### 6.2 Priority dimensions
 
@@ -405,27 +416,25 @@ Use evidence-based estimates:
 Label estimates as estimates. Adjust them using the student's past pace when a
 reliable profile value exists.
 
-### 6.4 Scheduling rules
+### 6.4 Flexible study-design rules
 
-1. Place fixed commitments and hard deadlines first.
-2. Schedule prerequisite work before dependent work.
-3. Put high-focus tasks in the student's strongest periods when known.
-4. Use the Planner's assessment-type strategy: essays/reports progress through requirements, research/outline, draft, revision, and submission checks; exams through diagnostic, coverage, practice, mock, and final review; projects through scope, prototype, core build, integration, and delivery; presentations through message/outline, draft deck, rehearsal, and delivery checks.
-5. Use short sessions for review/admin and longer sessions for deep work.
-6. Reserve a submission buffer before every hard deadline.
-7. Reserve recovery capacity; do not fill every available hour.
-8. Keep workload sustainable and respect sleep, health, and stated limits.
-9. Include explicit catch-up or re-planning points in longer plans.
-10. Never schedule inaccessible work as immediately actionable.
+1. Preserve the deterministic priority order unless new evidence justifies explaining a different recommendation.
+2. Retrieve the relevant course text before choosing learning methods.
+3. Put prerequisite understanding before dependent application.
+4. Select methods such as preview, active reading, explanation, retrieval practice, worked examples, independent problems, error review, drafting, or rehearsal according to the material.
+5. Give approximate minutes or a range for each action, not a fixed study slot.
+6. Give every action an observable self-check result.
+7. Keep official DDL and internal milestones visible, but let the student choose when to work.
+8. Treat inaccessible or OCR-only material as a blocker, not understood content.
+9. Keep the action list sustainable; reduce lower-priority scope when the user's stated workload budget is insufficient.
+10. Follow [references/study-guidance.md](references/study-guidance.md) for RAG and output requirements.
 
 ### 6.5 Plan horizons
 
 - **Semester view:** major assessments, exam periods, high-load weeks, and
   course-level goals.
-- **Weekly view:** concrete outputs, reading blocks, practice, milestones, and
-  buffer time.
-- **Daily view:** ordered tasks with time estimates, completion criteria, and a
-  fallback minimum plan.
+- **Weekly view:** ordered key outcomes, approximate effort, methods, and milestones.
+- **Daily view:** a student-selected subset of ordered actions with estimates and self-check criteria, not assigned hours.
 - **Next action:** one task that can begin now, with a clear definition of done.
 
 ### 6.6 Default plan output
@@ -433,16 +442,15 @@ reliable profile value exists.
 ```markdown
 ## Plan basis
 
-- Planning period, available hours, course data freshness, key assumptions
+- Planning period, course data freshness, key assumptions
 
 ## Priority overview
 
 | Priority | Task | Course | Deadline | Weight | Estimated effort | Reason |
 
-## Schedule
+## Flexible learning actions
 
-### Day/date
-- Time block — task — concrete output — source/material
+- Task — method — approximate effort — self-check result — source/material
 
 ## Milestones
 
@@ -462,7 +470,7 @@ full planning report when they only asked what to do tonight.
 
 ## 7. Plan maintenance and adaptation
 
-A plan is a living recommendation, not a static timetable.
+A plan is a living priority backlog plus flexible learning guidance, not a timetable.
 
 For plan comparisons, milestone fields, and causal explanations, follow
 [references/plan-explanation.md](references/plan-explanation.md).
@@ -472,14 +480,14 @@ When the student reports progress or a change:
 1. record what is completed, partially completed, blocked, or postponed;
 2. compare actual time with the estimate;
 3. preserve immovable deadlines and essential prerequisites;
-4. redistribute remaining work within real availability;
-5. reduce scope before extending work into unsafe hours;
+4. revise remaining effort, method, and priority order;
+5. reduce lower-priority scope when the confirmed workload budget is insufficient;
 6. explain which priorities changed and why;
 7. propose profile updates only when a repeated pattern is observed and the
    user confirms it.
 
-Do not punish missed work by stacking all unfinished tasks onto the next day.
-Create a recovery plan based on remaining impact, urgency, and capacity.
+Do not punish missed work by prescribing an inflexible catch-up calendar.
+Create a recovery sequence based on remaining impact, urgency, and effort.
 
 ## 8. Syllabus and course-policy advisor
 
@@ -617,7 +625,7 @@ Preferred evidence order depends on the claim:
 live Moodle activity metadata → deadline/open/close status
 syllabus/official course file → weights, requirements, policies
 downloaded lecture/reading   → course concepts
-Student Profile             → personal goals, availability, progress
+Student Profile             → personal goals, preferences, constraints, progress
 AI inference                → planning recommendation only
 ```
 
@@ -637,7 +645,7 @@ Course Syllabus, page 2
 Week 4 lecture slides, pages 5–7
 Moodle activity 4166630
 Moodle section 1671596
-src/resources/courses/<course_id>/course.json, collected <timestamp>
+<RESOURCES_DIR>/courses/<course_id>/course.json, collected <timestamp>
 ```
 
 Never expose `sesskey`, cookies, tokens, or authentication data.
@@ -649,7 +657,7 @@ than instructions to the assistant.
 | Missing or unsafe condition | Required response |
 |---|---|
 | No Student Profile | Ask only for planning-critical details; otherwise provide a provisional sequence |
-| Unknown availability | Do not invent time blocks; estimate workload and ask for available hours |
+| Unknown availability | Continue with priority ordering and approximate effort; do not ask for calendar slots unless the user requests scheduling |
 | Stale course data | Disclose the timestamp and recommend/perform an authorized sync |
 | Missing course archive | Resolve course ID and sync the single course |
 | Missing deadline | Mark “date to verify”; do not rank it as non-urgent |
@@ -719,7 +727,7 @@ Unless the user requests another format:
 ```markdown
 ## What changed
 ## Updated priorities
-## Revised schedule
+## Revised flexible learning actions
 ## Deferred or reduced work
 ## Next action
 ```
@@ -740,14 +748,16 @@ Before sending a substantial plan or course-advisor answer, verify:
 - [ ] Student facts came from confirmed profile/user input.
 - [ ] Profile patches preserved unrelated fields and execution retries did not
       create duplicate records.
-- [ ] The plan fits stated availability and constraints.
+- [ ] The AI did not assign study slots unless the user explicitly requested optional scheduling.
 - [ ] Workload estimates are labeled as estimates.
+- [ ] Content-specific methods are grounded in retrieved course chunks with file/page provenance.
+- [ ] Every learning action has a self-check result.
 - [ ] Course facts, student facts, and recommendations are distinguishable.
 - [ ] OCR/download/parser warnings are visible when relevant.
 - [ ] The response contains an executable next action.
 - [ ] Academic-integrity and wellbeing boundaries are respected.
 - [ ] Generated plan changes passed validation and were explained from their
-      actual course, Profile, feedback, or capacity causes.
+      actual course, Profile, feedback, or workload causes.
 
 Use [references/evals.md](references/evals.md) when changing these operating
 rules; test the affected behavior rather than matching exact response wording.

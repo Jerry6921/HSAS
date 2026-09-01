@@ -441,19 +441,3 @@ def activity_completion_criterion(activity: CourseActivity) -> str:
     if activity.category == "forum":
         return f"Complete the required contribution for {activity.name}"
     return f"Study {activity.name} and record key concepts/questions"
-
-
-def block_type(item: PlanItem) -> str:
-    if item.item_type in {"reading", "lecture"}:
-        return "reading"
-    if item.item_type in {"quiz", "exam", "practice"}:
-        return "practice"
-    if item.item_type == "admin":
-        return "admin"
-    if item.item_type == "review":
-        return "review"
-    return "deep_work"
-
-
-def capacity_rank(capacity: str) -> int:
-    return {"high": 0, "medium": 1, "low": 2}.get(capacity, 1)

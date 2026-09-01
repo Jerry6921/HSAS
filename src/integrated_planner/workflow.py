@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError
 
+from hsas_runtime import get_runtime_paths
 from moodle_collector.storage.local_store import write_model
 from moodle_collector.transformation.common.course_index import ArchiveIndex
 from .plan_schema import IntegratedPlan
@@ -16,15 +17,19 @@ from .profile_schema import StudentProfile
 
 
 def generate_plan(
-    profile_path: Path = Path("src/resources/student_profile.json"),
-    output_path: Path = Path("src/resources/integrated_plan.json"),
-    resources_dir: Path = Path("src/resources"),
-    execution_path: Path = Path("src/resources/execution_log.json"),
+    profile_path: Path | None = None,
+    output_path: Path | None = None,
+    resources_dir: Path | None = None,
+    execution_path: Path | None = None,
     days: int | None = None,
     start: str | None = None,
     fresh: bool = False,
 ) -> None:
-    """Generate or update the cross-course timetable."""
+    """Generate or update the cross-course priority backlog."""
+    resources_dir = resources_dir or get_runtime_paths().resources_dir
+    profile_path = profile_path or resources_dir / "student_profile.json"
+    output_path = output_path or resources_dir / "integrated_plan.json"
+    execution_path = execution_path or resources_dir / "execution_log.json"
     profile = _load_profile(profile_path)
     archives = _load_archives(resources_dir)
     existing = None
@@ -50,8 +55,9 @@ def generate_plan(
         raise typer.Exit(code=1)
     write_model(output_path, plan)
     typer.echo(
-        f"Plan updated: {len(plan.items)} item(s), "
-        f"{len(plan.timetable)} timetable block(s) -> {output_path}"
+        f"Plan updated: {len(plan.items)} key item(s), "
+        f"{plan.workload_summary.total_remaining_minutes} estimated minute(s); "
+        f"study times remain student-selected -> {output_path}"
     )
     _print_report(report)
 

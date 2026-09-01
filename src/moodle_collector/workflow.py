@@ -31,7 +31,7 @@ from .transformation.common.course_schema import CourseArchive
 from .transformation.course_materials.pdf_analyzer import analyze_course_pdfs
 
 def _settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]
+    return Settings.load()
 
 
 def _validated_course_id(course_url: str, base_url: str) -> str:
@@ -163,16 +163,16 @@ async def _persist_course(
     return archive, changes, output_path
 
 
-def login() -> None:
+def login(settings: Settings | None = None) -> None:
     """Open a visible browser; finish SSO/MFA manually and save the profile."""
+    active_settings = settings or _settings()
 
     async def run() -> None:
-        settings = _settings()
-        async with persistent_context(settings, headless=False) as context:
-            await open_page(context, str(settings.login_url))
+        async with persistent_context(active_settings, headless=False) as context:
+            await open_page(context, str(active_settings.login_url))
             typer.echo("Complete HKU login/SSO/MFA in the opened browser.")
             await asyncio.to_thread(input, "After the Moodle dashboard is visible, press Enter here... ")
-            moodle_host = urlparse(str(settings.base_url)).netloc
+            moodle_host = urlparse(str(active_settings.base_url)).netloc
             moodle_pages = [
                 candidate
                 for candidate in context.pages
@@ -183,7 +183,7 @@ def login() -> None:
                     "No logged-in Moodle page found. Complete SSO before pressing Enter."
                 )
             page = moodle_pages[-1]
-            selectors = settings.selectors()
+            selectors = active_settings.selectors()
             dashboard_found = False
             for css in selectors.dashboard_ready:
                 if await page.locator(css).count():
@@ -193,28 +193,28 @@ def login() -> None:
                 raise RuntimeError(
                     "Dashboard marker not found. Update dashboard_ready in the selector config."
                 )
-            typer.echo(f"Session saved in {settings.profile_dir}")
+            typer.echo(f"Session saved in {active_settings.profile_dir}")
 
     asyncio.run(run())
 
 
-def list_courses() -> None:
+def list_courses(settings: Settings | None = None) -> None:
     """Show login status, available Moodle courses, and downloaded courses."""
+    active_settings = settings or _settings()
 
     async def run() -> None:
-        settings = _settings()
-        downloaded = _downloaded_courses(settings)
+        downloaded = _downloaded_courses(active_settings)
         available = []
         login_status = "not logged in"
         login_error: str | None = None
 
         try:
-            async with persistent_context(settings) as context:
-                page = await open_page(context, str(settings.dashboard_url))
-                selectors = settings.selectors()
+            async with persistent_context(active_settings) as context:
+                page = await open_page(context, str(active_settings.dashboard_url))
+                selectors = active_settings.selectors()
                 available = await discover_courses(
                     page,
-                    dashboard_url=str(settings.dashboard_url),
+                    dashboard_url=str(active_settings.dashboard_url),
                     selectors=selectors,
                 )
                 dashboard_found = False
@@ -222,7 +222,7 @@ def list_courses() -> None:
                     if await page.locator(css).count():
                         dashboard_found = True
                         break
-                redirected_to_login = page.url.startswith(str(settings.login_url))
+                redirected_to_login = page.url.startswith(str(active_settings.login_url))
                 if not redirected_to_login and (dashboard_found or available):
                     login_status = "logged in"
         except Exception as exc:
@@ -252,16 +252,20 @@ def list_courses() -> None:
 
 def sync_course(
     course: str,
+    settings: Settings | None = None,
 ) -> None:
     """Download and fully process one Moodle course."""
+    active_settings = settings or _settings()
 
     async def run() -> None:
-        settings = _settings()
-        course_id, course_url = _resolve_course_target(course, str(settings.base_url))
+        course_id, course_url = _resolve_course_target(
+            course,
+            str(active_settings.base_url),
+        )
 
         with SyncProgress() as progress:
             task_id = progress.add_course(course_id, course, stages=8)
-            async with persistent_context(settings) as context:
+            async with persistent_context(active_settings) as context:
                 with progress.stage(
                     task_id,
                     "MoodleAPI",
@@ -269,22 +273,22 @@ def sync_course(
                 ):
                     page = await open_page(context, course_url)
                     if urlparse(page.url).netloc != urlparse(
-                        str(settings.base_url)
+                        str(active_settings.base_url)
                     ).netloc:
                         raise RuntimeError(
                             "Session expired or SSO redirected. Run `hsas login`."
                         )
                     html = await page.content()
-                    title = extract_course_title(html, settings.selectors())
+                    title = extract_course_title(html, active_settings.selectors())
                     state = await fetch_course_state(
                         context,
                         page,
-                        base_url=str(settings.base_url),
+                        base_url=str(active_settings.base_url),
                         course_id=course_id,
                     )
                 archive, changes, output_path = await _persist_course(
                     context,
-                    settings,
+                    active_settings,
                     course_id=course_id,
                     course_title=title,
                     state=state,
@@ -302,12 +306,12 @@ def sync_course(
     asyncio.run(run())
 
 
-def sync_all() -> None:
+def sync_all(settings: Settings | None = None) -> None:
     """Download and fully process every available Moodle course."""
+    active_settings = settings or _settings()
 
     async def run() -> None:
-        settings = _settings()
-        selectors = settings.selectors()
+        selectors = active_settings.selectors()
         succeeded: list[str] = []
         change_counts: dict[str, int] = {}
         failures: list[dict[str, str]] = []
@@ -317,13 +321,13 @@ def sync_all() -> None:
                 "MoodleAPI",
                 "Discovering available courses",
             )
-            async with persistent_context(settings) as context:
-                page = await open_page(context, str(settings.dashboard_url))
+            async with persistent_context(active_settings) as context:
+                page = await open_page(context, str(active_settings.dashboard_url))
                 results = await discover_all_course_states(
                     context,
                     page,
-                    dashboard_url=str(settings.dashboard_url),
-                    base_url=str(settings.base_url),
+                    dashboard_url=str(active_settings.dashboard_url),
+                    base_url=str(active_settings.base_url),
                     selectors=selectors,
                     progress_callback=lambda index, total, course: (
                         progress.update_discovery(
@@ -339,7 +343,7 @@ def sync_all() -> None:
                     f"{len(results)} courses discovered",
                 )
                 write_json(
-                    settings.output_dir / "courses.json",
+                    active_settings.output_dir / "courses.json",
                     [result.course.model_dump(mode="json") for result in results],
                 )
                 batch_task = progress.add_batch(len(results))
@@ -367,7 +371,7 @@ def sync_all() -> None:
                     try:
                         archive, changes, _ = await _persist_course(
                             context,
-                            settings,
+                            active_settings,
                             course_id=course_id,
                             course_title=result.title,
                             state=result.state,
@@ -389,7 +393,7 @@ def sync_all() -> None:
                         progress.advance_batch(batch_task, f"failed: {course_id}")
 
         report_path = write_json(
-            settings.output_dir / "sync-report.json",
+            active_settings.output_dir / "sync-report.json",
             {
                 "discovered_course_count": len(results),
                 "succeeded_course_ids": succeeded,

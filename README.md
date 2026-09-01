@@ -1,6 +1,6 @@
 # HSAS — HKU Study Assistance System
 
-License status: no open-source license is currently granted; see `LICENSE`.
+Licensed under the [MIT License](LICENSE).
 
 > 把分散在 Moodle、syllabus 和课件里的课程信息，变成真正适合个人执行的跨课程学习计划。
 

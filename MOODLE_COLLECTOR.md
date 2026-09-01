@@ -10,63 +10,53 @@
 HSAS/
 ├── config/defaults.toml                # HKU Moodle 公开默认配置
 ├── config/selectors.example.json       # 所有易变 CSS selector
-├── src/command.py                       # CLI 组合入口：采集、规划与状态
-├── src/AI_interface/
-│   ├── commands.py                     # Agent 的 Profile/Execution/RAG 命令
-│   └── retrieval.py                    # 本地课件分块、索引和相关度检索
-├── src/moodle_collector/
-│   ├── acquisition/                    # 阶段 1：访问与下载
-│   │   ├── moodle_client.py            # 浏览器会话、课程发现与 AJAX service
-│   │   └── file_downloader.py          # 同源课程文件下载与校验
-│   ├── transformation/                 # 阶段 2：对象化与分析
-│   │   ├── common/                     # 跨业务共享的通用结构和转换
-│   │   │   ├── base_schema.py          # 严格 Pydantic 基类
-│   │   │   ├── course_schema.py        # 通用课程归档 schema
-│   │   │   ├── course_mapper.py        # Moodle state -> CourseArchive
-│   │   │   ├── course_index.py         # activity/file/assessment 索引
-│   │   │   ├── course_stats.py         # 归档统计
-│   │   │   └── html_fallback.py        # HTML fallback
-│   │   ├── course_materials/           # 课件处理
-│   │   │   ├── pdf_schema.py           # PDF 分析 schema
-│   │   │   └── pdf_analyzer.py         # PDF 正文提取与分析
-│   │   └── assessment/                 # 通用 Assessment Parser v1
-│   │       ├── extractors/
-│   │       │   ├── moodle_extractor.py # Moodle 候选提取
-│   │       │   └── syllabus_extractor.py # syllabus 候选提取
-│   │       ├── schema.py               # 输出 schema 与候选模型
-│   │       ├── parse_rules.py          # 标题、类型和日期规则
-│   │       └── builder.py              # 合并、校验与最终构建
-│   ├── storage/                        # 阶段 3：持久化
-│   │   └── local_store.py              # JSON/文本/二进制原子写入
-│   ├── settings.py                     # 配置与 selector schema
-│   ├── sync_progress.py                # 同步进度显示
-│   └── workflow.py                     # 登录、状态和同步内部流程
-├── src/integrated_planner/             # 独立跨课程规划包
-│   ├── profile_schema.py               # Student Profile Pydantic schema
-│   ├── profile_service.py              # Profile 补丁合并、验证与原子写入
-│   ├── execution_schema.py             # Execution Log Pydantic schema
-│   ├── execution_service.py            # 执行记录新增、更正、去重与写入
-│   ├── plan_schema.py                  # Integrated Plan Pydantic schema
-│   ├── plan_validator.py               # 引用、DDL、工作量与里程碑校验
-│   ├── plan_rules.py                   # 重要度、难度、耗时与优先级规则
-│   ├── planner_engine.py               # 课程任务对象化和增量更新
-│   └── workflow.py                     # 计划生成和校验内部流程
+├── src/hsas/
+│   ├── interfaces/                     # CLI 与 Agent 适配器
+│   │   ├── run_cli.py
+│   │   └── handle_commands.py
+│   ├── application/                    # 用例编排
+│   │   ├── synchronize_courses.py
+│   │   ├── generate_plans.py
+│   │   ├── retrieve_materials.py
+│   │   ├── update_profile.py
+│   │   └── record_execution.py
+│   ├── domain/                         # 无外部 I/O 的领域规则
+│   │   ├── courses/
+│   │   │   ├── define_courses.py
+│   │   │   ├── define_assessments.py
+│   │   │   ├── index_courses.py
+│   │   │   └── detect_changes.py
+│   │   └── planning/
+│   │       ├── define_profile.py
+│   │       ├── define_execution.py
+│   │       ├── define_plan.py
+│   │       ├── calculate_priority.py
+│   │       ├── generate_plan.py
+│   │       └── validate_plan.py
+│   └── infrastructure/                 # 外部系统与持久化
+│       ├── moodle/                     # Moodle 获取、映射与 Assessment 解析
+│       ├── documents/analyze_pdfs.py
+│       ├── storage/                    # 原子写入与课程快照发布
+│       ├── runtime/                    # platformdirs 路径与旧数据迁移
+│       └── updates/                    # 受信任 Git 更新与失败回滚
 ├── src/AI_Skills/                      # AI 操作与规划规范
-├── src/hsas_runtime/                   # platformdirs 路径与旧数据迁移
-├── src/updator/                        # 受信任 Git 更新与失败回滚
 ├── tests/                              # 离线解析测试
 └── pyproject.toml
 ```
 
-根级 `command.py` 只负责组合采集、规划、状态命令与 Profile、Execution、Materials 三个 Agent 子命令组。`AI_interface/commands.py` 是薄适配层；Profile/Execution 参数会交给 `integrated_planner` 中的 Service，Materials 查询会交给只读的 `AI_interface/retrieval.py`。两个模块的 `workflow.py` 分别管理课程同步与计划更新。acquisition 负责获取数据；transformation 下的 `common` 生成和查询通用课程对象，`course_materials` 处理课件，`assessment` 生成结构化考核。所有磁盘写入最终统一经过无 Moodle 业务知识的 `storage/local_store.py`。写入先落到同目录临时文件，完成并刷新后再原子替换目标文件，避免程序中断时截断已有 JSON。
+`interfaces/run_cli.py` 只负责组合命令；`interfaces/handle_commands.py` 是薄适配层。
+`application/` 编排同步、规划、检索和用户确认写入，`domain/` 保存纯领域模型与确定性
+规则，`infrastructure/` 承担 Moodle、PDF、磁盘和 Git 等外部副作用。所有普通 Python
+模块采用动词职责名称；文件夹采用名词。磁盘写入统一经过
+`infrastructure/storage/persist_data.py`，以同目录临时文件、刷新和原子替换避免截断已有 JSON。
 
 ### 加载和查询 course.json
 
 `ArchiveIndex` 负责把磁盘 JSON 校验为强类型 `CourseArchive`，并一次性建立常用内存索引：
 
 ```python
-from hsas_runtime import get_runtime_paths
-from moodle_collector.transformation.common.course_index import ArchiveIndex
+from hsas.infrastructure.runtime import get_runtime_paths
+from hsas.domain.courses.index_courses import ArchiveIndex
 
 resources = get_runtime_paths().resources_dir
 index = ArchiveIndex.from_json(resources / "courses/138907/course.json")
@@ -78,9 +68,9 @@ syllabus = index.find_document(role="syllabus")
 assessment = index.get_assessment("final-essay")
 ```
 
-公开只读映射包括 `sections_by_id`、`activities_by_id`、`files_by_path`、`files_by_sha256`、`assessments_by_id` 和 `groups_by_id`。如果其他服务增删了对象，调用 `index.rebuild()` 刷新索引；JSON 写回由 `storage/local_store.py` 负责。
+公开只读映射包括 `sections_by_id`、`activities_by_id`、`files_by_path`、`files_by_sha256`、`assessments_by_id` 和 `groups_by_id`。如果其他服务增删了对象，调用 `index.rebuild()` 刷新索引；JSON 写回由 `infrastructure/storage/persist_data.py` 负责。
 
-`course_stats.py` 统计整个 `CourseArchive`，并不专属于 PDF。它在初始映射、文件下载、跳过下载和 PDF 分析后都会被调用。统计只需共享的 `iter_activities()` 轻量遍历，因此不会为了计数额外构建完整 `ArchiveIndex`。
+`domain/courses/calculate_statistics.py` 统计整个 `CourseArchive`，并不专属于 PDF。它在初始映射、文件下载、跳过下载和 PDF 分析后都会被调用。统计只需共享的 `iter_activities()` 轻量遍历，因此不会为了计数额外构建完整 `ArchiveIndex`。
 
 ## 安装
 

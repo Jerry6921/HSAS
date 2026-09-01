@@ -5,24 +5,38 @@
 Dependencies point inward:
 
 ```text
-command / AI_interface adapters
-             |
-             v
-      hsas_application use cases
-             |
-             v
- integrated_planner domain rules
-             ^
-             |
-moodle_collector public contracts
+hsas.interfaces
+      |
+      v
+hsas.application
+      |
+      v
+hsas.domain
 
-hsas_runtime supplies platform paths and generic atomic persistence.
-Playwright, Typer, filesystem layout, and update transport stay outside planning rules.
+hsas.infrastructure implements Moodle, documents, storage, runtime, and updates.
 ```
 
-External consumers import course models from `moodle_collector.contracts`, not
-from transformation internals. Application services return results or typed
-errors; CLI adapters own presentation and exit codes.
+Folders are nouns that express architectural ownership. Ordinary Python module
+names are verb phrases that express behavior; Python-required `__init__.py` and
+`__main__.py` are the only source-module exceptions. Domain modules do not import
+Typer, Playwright, platform paths, filesystem persistence, or update transport.
+Application services return results or typed errors; interface adapters own
+presentation and exit codes; infrastructure owns external and filesystem effects.
+
+```text
+src/hsas/
+├── interfaces/       # CLI and agent adapters
+├── application/      # synchronization, planning, retrieval, Profile/Execution use cases
+├── domain/
+│   ├── courses/      # course, assessment, document contracts and rules
+│   └── planning/     # Profile, Execution, Plan models and deterministic rules
+└── infrastructure/
+    ├── moodle/       # browser/API acquisition and Moodle transformation
+    ├── documents/    # PDF analysis
+    ├── storage/      # atomic persistence and snapshot publication
+    ├── runtime/      # platform paths and migration
+    └── updates/      # pinned Git release updates
+```
 
 ## Course synchronization transaction
 

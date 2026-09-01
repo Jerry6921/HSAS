@@ -68,12 +68,12 @@ Their responsibilities are:
 The Python CLI entry point is:
 
 ```text
-command:app
+hsas.interfaces.run_cli:app
 ```
 
-`command.py` composes the CLI. Agent-facing argument parsing lives in
-`AI_interface/commands.py`; validation and mutation rules remain in
-`integrated_planner` services.
+`interfaces/run_cli.py` composes the CLI. Agent-facing argument parsing lives in
+`interfaces/handle_commands.py`; validation and mutation rules remain in the
+application and domain layers.
 
 `update-plan` validates Profile input, loads every CourseArchive and the Execution
 Log, generates the priority backlog through pure Python rules, and validates the result:
@@ -92,51 +92,35 @@ same use case; failures retain the prior Plan and appear as stale status.
 ## 3. Module responsibilities
 
 ```text
-src/
-├── command.py
-├── AI_interface/
-│   ├── commands.py
-│   └── retrieval.py
-├── moodle_collector/
-│   ├── workflow.py
-│   ├── settings.py
-│   ├── sync_progress.py
-│   ├── acquisition/
-│   │   ├── moodle_client.py
-│   │   └── file_downloader.py
-│   ├── transformation/
-│   │   ├── common/
-│   │   │   ├── base_schema.py
-│   │   │   ├── course_schema.py
-│   │   │   ├── course_mapper.py
-│   │   │   ├── course_index.py
-│   │   │   ├── course_stats.py
-│   │   │   └── html_fallback.py
-│   │   ├── course_materials/
-│   │   │   ├── pdf_schema.py
-│   │   │   └── pdf_analyzer.py
-│   │   └── assessment/
-│   │       ├── schema.py
-│   │       ├── parse_rules.py
-│   │       ├── builder.py
-│   │       └── extractors/
-│   │           ├── moodle_extractor.py
-│   │           └── syllabus_extractor.py
-│   └── storage/
-│       └── local_store.py
-├── integrated_planner/
-│   ├── profile_schema.py
-│   ├── profile_service.py
-│   ├── execution_schema.py
-│   ├── execution_service.py
-│   ├── plan_schema.py
-│   ├── plan_validator.py
-│   ├── plan_rules.py
-│   ├── planner_engine.py
-│   └── workflow.py
-├── AI_Skills/
-├── hsas_runtime/
-└── updator/
+src/hsas/
+├── interfaces/
+│   ├── run_cli.py
+│   └── handle_commands.py
+├── application/
+│   ├── synchronize_courses.py
+│   ├── generate_plans.py
+│   ├── retrieve_materials.py
+│   ├── update_profile.py
+│   └── record_execution.py
+├── domain/
+│   ├── courses/
+│   │   ├── define_courses.py
+│   │   ├── define_assessments.py
+│   │   ├── index_courses.py
+│   │   └── detect_changes.py
+│   └── planning/
+│       ├── define_profile.py
+│       ├── define_execution.py
+│       ├── define_plan.py
+│       ├── calculate_priority.py
+│       ├── generate_plan.py
+│       └── validate_plan.py
+└── infrastructure/
+    ├── moodle/
+    ├── documents/
+    ├── storage/
+    ├── runtime/
+    └── updates/
 ```
 
 The end-to-end flow is:
@@ -144,15 +128,15 @@ The end-to-end flow is:
 ```text
 Moodle session and AJAX state
         ↓
-course_mapper.py
+map_courses.py
         ↓
 CourseArchive
         ↓
-file_downloader.py
+download_files.py
         ↓
-pdf_analyzer.py
+analyze_pdfs.py
         ↓
-assessment/builder.py
+assessments/build_assessments.py
         ↓
 <RESOURCES_DIR>/courses/<course_id>/course.json
         +
@@ -160,7 +144,7 @@ assessment/builder.py
         +
 <RESOURCES_DIR>/execution_log.json
         ↓
-planner_engine.py
+generate_plan.py
         ↓
 <RESOURCES_DIR>/integrated_plan.json
 ```
@@ -172,6 +156,10 @@ Collector output, Student Profile, and Integrated Plan share the user-owned
 `~/Library/Application Support/HSAS/resources/`. `HSAS_DATA_DIR` or the global
 `hsas --resources` option may override it. AI operating guidance remains in the
 code checkout under `src/AI_Skills/`:
+
+The CLI creates the stable runtime directories on first invocation. It creates
+`resources/courses/` immediately and creates course-specific `raw/`, `files/`,
+`analysis/`, and `changes/` directories only while synchronizing that course.
 
 ```text
 <RESOURCES_DIR>/
@@ -223,9 +211,9 @@ JSON dictionaries:
 ```python
 from pathlib import Path
 
-from moodle_collector.transformation.common.course_index import ArchiveIndex
+from hsas.domain.courses.index_courses import ArchiveIndex
 
-from hsas_runtime import get_runtime_paths
+from hsas.infrastructure.runtime import get_runtime_paths
 
 resource_root = get_runtime_paths().resources_dir
 index = ArchiveIndex.from_json(

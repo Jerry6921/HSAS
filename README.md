@@ -196,6 +196,12 @@ HKU Moodle URL 已作为公开默认值保存在 `config/defaults.toml`，通常
 
 缓存与日志分别位于 `~/Library/Caches/HSAS/` 和 `~/Library/Logs/HSAS/`。这些路径由 `platformdirs` 自动选择；其他系统会使用各自的标准用户目录。可通过 `HSAS_DATA_DIR=/custom/path` 覆盖整个数据根目录，或通过全局 `hsas --resources /custom/path/resources COMMAND` 只覆盖本次命令的资源目录。
 
+首次运行任意 `hsas` 子命令时，CLI 会自动创建平台数据目录以及
+`resources/courses/`、`browser-profile/`、`state/`、缓存和日志目录。使用
+`--resources` 指定自定义资源位置时，也会自动创建该目录及其 `courses/`
+子目录。`raw/`、`files/`、`analysis/` 和 `changes/` 等课程专属目录会在首次
+成功同步对应课程时按需生成；系统不会预先生成没有数据来源的课程 JSON。
+
 `.env` 仅作为可选的本地 Moodle 配置覆盖，已被 `.gitignore` 排除。密码、MFA、cookie 和 sesskey 不应写入任何配置文件。
 
 ### 从旧版目录迁移

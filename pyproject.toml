@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hku-study-assistance-system"
-version = "0.2.0"
+version = "0.3.0"
 description = "HKU Study Assistance System with Moodle collection, deterministic prioritization, and local RAG"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,18 +26,10 @@ dev = [
 ]
 
 [project.scripts]
-hsas = "command:app"
+hsas = "hsas.interfaces.run_cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = [
-  "src/AI_interface",
-  "src/hsas_runtime",
-  "src/hsas_application",
-  "src/moodle_collector",
-  "src/integrated_planner",
-  "src/updator",
-  "src/command.py",
-]
+packages = ["src/hsas"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

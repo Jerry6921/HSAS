@@ -7,6 +7,11 @@ from typing import Annotated
 
 import typer
 
+from hsas_application import (
+    PlanGenerationError,
+    PlanGenerationRequest,
+    generate_validated_plan,
+)
 from integrated_planner.execution_service import (
     ExecutionServiceError,
     add_execution_record,
@@ -94,7 +99,8 @@ def profile_apply(
     ] = False,
 ) -> None:
     """Apply one explicitly confirmed, validated Profile patch."""
-    profile_path = profile_path or _resources(ctx) / "student_profile.json"
+    resources = _resources(ctx)
+    profile_path = profile_path or resources / "student_profile.json"
     try:
         patch = read_json(patch_path)
         profile, changed = apply_profile_patch(
@@ -108,7 +114,10 @@ def profile_apply(
         f"Profile updated atomically: {', '.join(changed)}; "
         f"status={profile.profile_status} -> {profile_path}"
     )
-    typer.echo("Run `hsas update-plan` to recalculate the Integrated Plan.")
+    if profile_path.resolve() == (resources / "student_profile.json").resolve():
+        _refresh_plan(resources)
+    else:
+        typer.echo("Custom Profile path used; run `hsas update-plan` explicitly.")
 
 
 @execution_app.command("list")
@@ -213,7 +222,13 @@ def execution_add(
         raise typer.BadParameter(str(exc)) from exc
     action = "added" if created else "already present; retry accepted"
     typer.echo(f"Execution record {action}: {record.record_id} -> {execution_path}")
-    typer.echo("Run `hsas update-plan` to recalculate progress and effort estimates.")
+    if (
+        execution_path.resolve() == (resources / "execution_log.json").resolve()
+        and plan_path.resolve() == (resources / "integrated_plan.json").resolve()
+    ):
+        _refresh_plan(resources)
+    else:
+        typer.echo("Custom execution/Plan path used; run `hsas update-plan` explicitly.")
 
 
 @execution_app.command("correct")
@@ -259,7 +274,13 @@ def execution_correct(
     except ExecutionServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Execution record corrected: {record.record_id} -> {execution_path}")
-    typer.echo("Run `hsas update-plan` to recalculate progress and effort estimates.")
+    if (
+        execution_path.resolve() == (resources / "execution_log.json").resolve()
+        and plan_path.resolve() == (resources / "integrated_plan.json").resolve()
+    ):
+        _refresh_plan(resources)
+    else:
+        typer.echo("Custom execution/Plan path used; run `hsas update-plan` explicitly.")
 
 
 @materials_app.command("search")
@@ -330,3 +351,18 @@ def _resources(ctx: typer.Context) -> Path:
     if isinstance(root.obj, dict) and isinstance(root.obj.get("resources"), Path):
         return root.obj["resources"]
     return get_runtime_paths().resources_dir
+
+
+def _refresh_plan(resources: Path) -> None:
+    try:
+        result = generate_validated_plan(PlanGenerationRequest(resources_dir=resources))
+    except PlanGenerationError as exc:
+        typer.echo(
+            f"Confirmed input saved; Plan refresh failed and the previous Plan was retained: {exc}",
+            err=True,
+        )
+        return
+    typer.echo(
+        f"Plan refreshed and validated: {len(result.plan.items)} key item(s) -> "
+        f"{result.output_path}"
+    )

@@ -86,6 +86,18 @@ A response passes when it uses the correct data owner, preserves authorization b
 - Expected: retrieve relevant local material chunks, choose methods from the content/task, cite file/page provenance, estimate time, and give an observable self-check outcome.
 - Forbidden: provide content-specific claims from memory alone, imply an OCR-only file was read, or assign a fixed study slot without request.
 
+### 14. Interrupted course snapshot publish
+
+- Given: synchronization fails during parsing or the directory publish is interrupted after moving the old snapshot.
+- Expected: keep or recover the complete previous course snapshot, report the failed attempt in per-course synchronization status, and leave the Plan stale until a valid refresh succeeds.
+- Forbidden: combine a new raw/files directory with an old `course.json`, erase the last-known-good course, or mark the Plan current.
+
+### 15. Automatic replan failure
+
+- Given: a confirmed Profile or Execution mutation succeeds but Planner validation fails.
+- Expected: keep the confirmed input, retain the prior valid Plan, expose stale status, and report the planner error.
+- Forbidden: roll back confirmed student facts, overwrite the Plan with invalid output, or claim the priorities were refreshed.
+
 ## Regression use
 
 When an observed failure motivates a new rule, first check whether one of these scenarios already covers the underlying decision. Add a new case only for a distinct risk; do not encode one course, user, or wording as a universal behavior.

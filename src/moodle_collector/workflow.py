@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -19,7 +20,9 @@ from .acquisition.moodle_client import (
 )
 from .settings import Settings
 from .storage.local_store import read_json, write_json, write_model
+from .storage.course_snapshot import CourseSnapshotTransaction
 from .sync_progress import SyncProgress
+from .sync_report import record_sync_operation
 from .transformation.assessment.builder import build_assessment_overview
 from .transformation.common.course_changes import (
     CourseChangeSet,
@@ -29,6 +32,22 @@ from .transformation.common.course_index import ArchiveIndex
 from .transformation.common.course_mapper import build_course_archive
 from .transformation.common.course_schema import CourseArchive
 from .transformation.course_materials.pdf_analyzer import analyze_course_pdfs
+
+
+@dataclass(frozen=True, slots=True)
+class SyncCourseResult:
+    course_id: str
+    course_title: str
+    change_count: int
+    output_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class SyncBatchResult:
+    discovered_course_count: int
+    succeeded_course_ids: tuple[str, ...]
+    failures: tuple[dict[str, str], ...]
+    report_path: Path
 
 def _settings() -> Settings:
     return Settings.load()
@@ -93,73 +112,78 @@ async def _persist_course(
     progress_task: int | None = None,
 ) -> tuple[CourseArchive, CourseChangeSet, Path]:
     """Download, analyze, structure assessments, and persist one course."""
-    storage_root = settings.output_dir
-    course_root = storage_root / "courses" / course_id
-    course_path = course_root / "course.json"
+    live_storage_root = settings.output_dir
+    live_course_root = live_storage_root / "courses" / course_id
+    course_path = live_course_root / "course.json"
     previous_archive: CourseArchive | None = None
     if course_path.exists():
         try:
             previous_archive = CourseArchive.model_validate(read_json(course_path))
         except Exception:
             previous_archive = None
-    raw_path = course_root / "raw" / "course-state.json"
-    raw_relative_path = raw_path.relative_to(storage_root).as_posix()
-    with _stage(progress, progress_task, "StateMapper", "Mapping Moodle state"):
-        archive = build_course_archive(
-            state,
-            course_title=course_title,
-            raw_state_path=raw_relative_path,
-        )
-    with _stage(progress, progress_task, "FileStore", "Saving raw course state"):
-        write_json(raw_path, state)
-    with _stage(progress, progress_task, "Downloader", "Preparing course files"):
-        await download_course_files(
-            context,
-            archive,
-            base_url=str(settings.base_url),
-            course_root=course_root,
-            storage_root=storage_root,
-            max_download_bytes=settings.max_download_bytes,
-            timeout_ms=settings.navigation_timeout_ms,
-            concurrency=settings.download_concurrency,
-            previous_archive=previous_archive,
-            progress_callback=(
-                progress.download_callback(progress_task)
-                if progress is not None and progress_task is not None
-                else None
-            ),
-        )
-    with _stage(progress, progress_task, "PdfAnalyzer", "Extracting PDF text"):
-        analyze_course_pdfs(
-            archive,
-            storage_root=storage_root,
-            course_root=course_root,
-        )
-    with _stage(
-        progress,
-        progress_task,
-        "AssessmentParser",
-        "Structuring assessments",
-    ):
-        index = ArchiveIndex(archive)
-        archive.assessments = build_assessment_overview(
-            index,
-            storage_root=storage_root,
-        )
-    with _stage(
-        progress,
-        progress_task,
-        "ChangeDetector",
-        "Comparing deadlines, weights, activities, and materials",
-    ):
-        changes = compare_course_archives(previous_archive, archive)
-        changes_root = course_root / "changes"
-        write_model(changes_root / "latest.json", changes)
-        if changes.changed:
-            stamp = changes.detected_at.strftime("%Y%m%dT%H%M%SZ")
-            write_model(changes_root / "history" / f"{stamp}.json", changes)
-    with _stage(progress, progress_task, "FileStore", "Saving course.json"):
-        output_path = write_model(course_path, archive)
+    with CourseSnapshotTransaction.prepare(live_storage_root, course_id) as transaction:
+        storage_root = transaction.staging_resources_dir
+        course_root = transaction.staged_course_dir
+        staged_course_path = course_root / "course.json"
+        raw_path = course_root / "raw" / "course-state.json"
+        raw_relative_path = raw_path.relative_to(storage_root).as_posix()
+        with _stage(progress, progress_task, "StateMapper", "Mapping Moodle state"):
+            archive = build_course_archive(
+                state,
+                course_title=course_title,
+                raw_state_path=raw_relative_path,
+            )
+        with _stage(progress, progress_task, "FileStore", "Staging raw course state"):
+            write_json(raw_path, state)
+        with _stage(progress, progress_task, "Downloader", "Staging course files"):
+            await download_course_files(
+                context,
+                archive,
+                base_url=str(settings.base_url),
+                course_root=course_root,
+                storage_root=storage_root,
+                max_download_bytes=settings.max_download_bytes,
+                timeout_ms=settings.navigation_timeout_ms,
+                concurrency=settings.download_concurrency,
+                previous_archive=previous_archive,
+                progress_callback=(
+                    progress.download_callback(progress_task)
+                    if progress is not None and progress_task is not None
+                    else None
+                ),
+            )
+        with _stage(progress, progress_task, "PdfAnalyzer", "Extracting PDF text"):
+            analyze_course_pdfs(
+                archive,
+                storage_root=storage_root,
+                course_root=course_root,
+            )
+        with _stage(
+            progress,
+            progress_task,
+            "AssessmentParser",
+            "Structuring assessments",
+        ):
+            index = ArchiveIndex(archive)
+            archive.assessments = build_assessment_overview(
+                index,
+                storage_root=storage_root,
+            )
+        with _stage(
+            progress,
+            progress_task,
+            "ChangeDetector",
+            "Comparing deadlines, weights, activities, and materials",
+        ):
+            changes = compare_course_archives(previous_archive, archive)
+            changes_root = course_root / "changes"
+            write_model(changes_root / "latest.json", changes)
+            if changes.changed:
+                stamp = changes.detected_at.strftime("%Y%m%dT%H%M%SZ")
+                write_model(changes_root / "history" / f"{stamp}.json", changes)
+        with _stage(progress, progress_task, "FileStore", "Publishing course snapshot"):
+            write_model(staged_course_path, archive)
+            output_path = transaction.commit()
     return archive, changes, output_path
 
 
@@ -253,15 +277,16 @@ def list_courses(settings: Settings | None = None) -> None:
 def sync_course(
     course: str,
     settings: Settings | None = None,
-) -> None:
+) -> SyncCourseResult:
     """Download and fully process one Moodle course."""
     active_settings = settings or _settings()
 
-    async def run() -> None:
-        course_id, course_url = _resolve_course_target(
-            course,
-            str(active_settings.base_url),
-        )
+    course_id, course_url = _resolve_course_target(
+        course,
+        str(active_settings.base_url),
+    )
+
+    async def run() -> SyncCourseResult:
 
         with SyncProgress() as progress:
             task_id = progress.add_course(course_id, course, stages=8)
@@ -302,15 +327,51 @@ def sync_course(
             f"{archive.stats.downloaded_file_count} files, "
             f"{len(changes.changes)} change(s) -> {output_path}"
         )
+        return SyncCourseResult(
+            course_id=course_id,
+            course_title=archive.course.title,
+            change_count=len(changes.changes),
+            output_path=output_path,
+        )
 
-    asyncio.run(run())
+    try:
+        result = asyncio.run(run())
+    except Exception as exc:
+        record_sync_operation(
+            active_settings.output_dir,
+            scope="single",
+            discovered_course_count=1,
+            course_results=[
+                {
+                    "course_id": course_id,
+                    "course": course,
+                    "succeeded": False,
+                    "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                }
+            ],
+        )
+        raise
+    record_sync_operation(
+        active_settings.output_dir,
+        scope="single",
+        discovered_course_count=1,
+        course_results=[
+            {
+                "course_id": result.course_id,
+                "course": result.course_title,
+                "succeeded": True,
+                "change_count": result.change_count,
+            }
+        ],
+    )
+    return result
 
 
-def sync_all(settings: Settings | None = None) -> None:
+def sync_all(settings: Settings | None = None) -> SyncBatchResult:
     """Download and fully process every available Moodle course."""
     active_settings = settings or _settings()
 
-    async def run() -> None:
+    async def run() -> SyncBatchResult:
         selectors = active_settings.selectors()
         succeeded: list[str] = []
         change_counts: dict[str, int] = {}
@@ -392,18 +453,33 @@ def sync_all(settings: Settings | None = None) -> None:
                         )
                         progress.advance_batch(batch_task, f"failed: {course_id}")
 
-        report_path = write_json(
-            active_settings.output_dir / "sync-report.json",
+        course_results = [
             {
-                "discovered_course_count": len(results),
-                "succeeded_course_ids": succeeded,
-                "change_counts": change_counts,
-                "failures": failures,
-            },
+                "course_id": course_id,
+                "course": course_id,
+                "succeeded": True,
+                "change_count": change_counts[course_id],
+            }
+            for course_id in succeeded
+        ] + [
+            {**failure, "succeeded": False}
+            for failure in failures
+        ]
+        report_path = record_sync_operation(
+            active_settings.output_dir,
+            scope="all",
+            discovered_course_count=len(results),
+            course_results=course_results,
         )
         typer.echo(
             f"Synced {len(succeeded)}/{len(results)} courses; "
             f"{len(failures)} failed -> {report_path}"
         )
+        return SyncBatchResult(
+            discovered_course_count=len(results),
+            succeeded_course_ids=tuple(succeeded),
+            failures=tuple(failures),
+            report_path=report_path,
+        )
 
-    asyncio.run(run())
+    return asyncio.run(run())

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 
-from moodle_collector.transformation.common.base_schema import StrictModel
+from moodle_collector.contracts import StrictModel
 
 
 DayOfWeek = Literal[

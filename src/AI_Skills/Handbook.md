@@ -86,6 +86,8 @@ The internal generation step incrementally updates `integrated_plan.json`; its
 final validation checks Pydantic schemas, course/section/activity/assessment references,
 dependency cycles, key-workload totals, opening times, deadlines, milestones,
 execution references, and summary consistency. It does not allocate study slots.
+Confirmed Profile/Execution writes and successful syncs automatically request this
+same use case; failures retain the prior Plan and appear as stale status.
 
 ## 3. Module responsibilities
 

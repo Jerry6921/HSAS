@@ -1,5 +1,7 @@
 # HSAS — HKU Study Assistance System
 
+License status: no open-source license is currently granted; see `LICENSE`.
+
 > 把分散在 Moodle、syllabus 和课件里的课程信息，变成真正适合个人执行的跨课程学习计划。
 
 HSAS 是一个面向 HKU 学生的本地 AI 学习辅助系统。它会采集学生有权访问的 Moodle 课程，理解 Assessment、DDL、权重、要求和课件内容，再结合学生的目标与真实学习进度，生成一份统一的跨课程优先级清单。AI 随后检索相关课件，为优先事项设计学习方法、预计投入时间和可自我检验的学习成果；具体何时学习由学生自行选择。
@@ -174,7 +176,7 @@ AI 不应只根据任务标题猜测应该怎样学习。它会先读取 Integra
 cd "/path/to/HSAS"
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -c requirements.lock -e .
 playwright install chromium
 ```
 
@@ -220,7 +222,7 @@ hsas sync-courses
 # 也可以只同步一门课程
 hsas sync-courses 146267
 
-# 3. 验证 Student Profile 后生成综合计划
+# 3. 验证 Student Profile；确认写入和后续同步会自动尝试刷新计划
 hsas profile validate
 hsas update-plan
 
@@ -234,11 +236,11 @@ hsas list-status
 # 只克隆、验证和比较
 hsas update-hsas --dry-run
 
-# 从受信任的 Jerry6921/HSAS main 分支更新并重新安装依赖
-hsas update-hsas
+# 使用 dry-run 输出的完整 commit 精确授权本次代码更新
+hsas update-hsas --commit FULL_40_CHARACTER_COMMIT
 ```
 
-更新器只管理仓库代码。个人 resources、浏览器 profile、`.env`、虚拟环境和本地 selector 均不会被 Git 内容覆盖；复制或安装失败时会回滚代码。
+更新器只管理仓库代码。个人 resources、浏览器 profile、`.env`、虚拟环境和本地 selector 均不会被 Git 内容覆盖；代码复制失败时会回滚。依赖变化必须通过普通包管理器升级，不在原地更新事务中执行。
 
 ### 搭配 AI Agent 使用
 
@@ -250,10 +252,10 @@ hsas update-hsas
 2. 如果尚未登录，让 Agent 运行 `hsas login`；浏览器打开后，由用户本人完成 HKU SSO/MFA。
 3. 明确授权 Agent 运行 `hsas sync-courses`。Python 会自动发现课程、抓取 Moodle 数据、下载课件、解析 Assessment，并完成结构化与校验。
 4. 告诉 Agent 你的目标、薄弱主题、学习偏好、限制，以及可选的每周学习预算。确认变更后，Agent 通过 `hsas profile apply` 安全更新 Profile，而不是直接编辑 JSON。
-5. Agent 运行 `hsas update-plan`，由确定性的 Planner Engine 生成或更新 `integrated_plan.json`。
+5. CLI 自动尝试重新规划；Agent 再检查 Planner 与 Validator 是否成功。必要时显式运行 `hsas update-plan`。
 6. Agent 读取排序后的关键要务，并先运行 `hsas materials for-item PLAN_ITEM_ID` 检索相关课件；必要时再用 `hsas materials search` 精细检索。
 7. Agent 根据检索证据给出学习方法、大致耗时和可自测成果。学生自行选择实际学习时段；AI 不把具体时段写回 Integrated Plan。
-8. 学习后通过 `hsas execution add` 记录实际耗时与进度，再运行 `hsas update-plan` 完成重新估算。
+8. 学习后通过 `hsas execution add` 记录实际耗时与进度；CLI 自动重新估算并保留失败前的有效 Plan。
 
 可以直接这样提问：
 
@@ -305,7 +307,6 @@ Profile 采用最小 JSON 补丁，避免重写或覆盖未涉及的数据：
 
 ```bash
 hsas profile apply profile-patch.json --confirmed
-hsas update-plan
 ```
 
 记录学习反馈时，实际耗时和完成的计划工作量必须分开提供：
@@ -317,10 +318,9 @@ hsas execution add PLAN_ITEM_ID \
   --progress-minutes 60 \
   --completed
 
-hsas update-plan
 ```
 
-`--planned-minutes` 是 AI 此前为该学习动作提出的大致投入，不代表固定日历时段。重复提交可传入相同的 `--record-id`；完全相同的重试不会产生重复记录。如果报告有误，使用 `hsas execution correct RECORD_ID` 更正原记录。
+`--planned-minutes` 是 AI 此前为该学习动作提出的大致投入，不代表固定日历时段。重复提交可传入相同的 `--record-id`；完全相同的重试不会产生重复记录。如果报告有误，使用 `hsas execution correct RECORD_ID` 更正原记录。成功写入后 CLI 会自动运行 Planner；如果失败，已确认事实与上一份有效 Plan 都会保留，`hsas list-status` 会显示 Plan 已过期。
 
 也可以直接从命令行检索课件：
 

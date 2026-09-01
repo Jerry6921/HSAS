@@ -11,8 +11,7 @@ import re
 from pydantic import Field
 
 from integrated_planner.plan_schema import IntegratedPlan, PlanItem
-from moodle_collector.transformation.common.base_schema import StrictModel
-from moodle_collector.transformation.common.course_index import ArchiveIndex, iter_files
+from moodle_collector.contracts import ArchiveIndex, StrictModel, iter_files
 
 
 PAGE_MARKER = re.compile(r"^--- Page (\d+) ---\s*$", re.MULTILINE)

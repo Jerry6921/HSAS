@@ -7,10 +7,13 @@ from typer.testing import CliRunner
 
 from command import app
 from integrated_planner.profile_schema import StudentProfile
+from hsas_application import assess_plan_freshness
 from moodle_collector.workflow import _persist_course, _resolve_course_target
+from moodle_collector.sync_report import record_sync_operation
 from moodle_collector.settings import Settings
 from moodle_collector.storage.local_store import write_json, write_model
 from moodle_collector.transformation.assessment.schema import AssessmentOverview
+from moodle_collector.transformation.common.course_mapper import build_course_archive
 
 
 ROOT = Path(__file__).parents[1]
@@ -106,6 +109,43 @@ def test_global_resources_override_reaches_agent_subcommands(tmp_path: Path) -> 
 
     assert result.exit_code == 0
     assert "Profile valid" in result.stdout
+
+
+def test_confirmed_profile_mutation_replans_canonical_resources(tmp_path: Path) -> None:
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state,
+        course_title="Demo Course",
+        raw_state_path="courses/138907/raw/course-state.json",
+    )
+    write_model(tmp_path / "student_profile.json", StudentProfile())
+    write_model(tmp_path / "courses/138907/course.json", archive)
+    patch = tmp_path / "patch.json"
+    write_json(patch, {"identity": {"preferred_name": "Jerry"}})
+    record_sync_operation(
+        tmp_path,
+        scope="single",
+        discovered_course_count=1,
+        course_results=[
+            {"course_id": "138907", "course": "Demo Course", "succeeded": True}
+        ],
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--resources",
+            str(tmp_path),
+            "profile",
+            "apply",
+            str(patch),
+            "--confirmed",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Plan refreshed and validated" in result.stdout
+    assert assess_plan_freshness(tmp_path).current is True
 
 
 def test_shared_sync_flow_always_runs_assessment_parser(

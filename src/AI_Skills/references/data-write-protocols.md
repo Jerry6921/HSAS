@@ -23,7 +23,7 @@ AI inference, a prior recommendation, Moodle completion metadata, and silence ar
 4. Check duplicate course states, overlapping availability/commitments, timezone validity, and field bounds through Pydantic validation.
 5. After confirmation, run `hsas profile apply <patch.json> --confirmed`. `ProfileService` deep-merges the patch, rejects authentication and system-managed fields, sets timestamps/provenance, validates the complete object, and writes atomically.
 6. Do not set `profile_status=active` merely because one field changed. Activate only when the Profile has enough confirmed goals, preferences, constraints, or course context for personalized prioritization. Exact availability is not required.
-7. Run `hsas update-plan`. If validation fails, keep the valid Profile input, retain the last known good Plan, and report the planner error.
+7. The CLI automatically requests `hsas update-plan`. Verify its result; if validation fails, keep the valid Profile input, retain the last known good Plan, report the planner error, and treat Plan status as stale.
 
 Replacing or deleting existing availability, commitments, constraints, goals, or results requires clear scope. “Add” is not permission to replace, and a correction should update the identified value rather than append a contradictory duplicate.
 
@@ -50,7 +50,7 @@ For idempotency:
 4. When the user corrects a known event, run `hsas execution correct <record_id>` after explicit correction instead of creating a second event.
 5. Deletion requires an explicit request identifying the event and is not currently exposed by the CLI. Do not erase history merely because an estimate changed.
 
-After a successful add/correction, run `hsas update-plan`. If a referenced plan item no longer exists or its type changed, stop and resolve the current item instead of storing an orphan. Never edit `execution_log.json` directly.
+After a successful add/correction, verify the CLI's automatic replan. If it was deferred, run `hsas update-plan` explicitly. If a referenced plan item no longer exists or its type changed, stop and resolve the current item instead of storing an orphan. Never edit `execution_log.json` directly.
 
 ## Write-result response
 

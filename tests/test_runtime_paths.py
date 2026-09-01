@@ -5,7 +5,7 @@ import subprocess
 from hsas_runtime.migration import migrate_legacy_data
 from hsas_runtime.paths import RuntimePaths, get_runtime_paths
 from moodle_collector.settings import Settings
-from updator.service import update_installation
+from updator.service import UpdateError, _validate_expected_commit, update_installation
 
 
 def _runtime(root: Path) -> RuntimePaths:
@@ -37,6 +37,28 @@ def test_runtime_paths_honor_data_directory_override(
     assert str(settings.base_url).rstrip("/") == "https://moodle.hku.hk"
     assert settings.output_dir == custom.resolve() / "resources"
     assert settings.profile_dir == custom.resolve() / "browser-profile"
+
+
+def test_https_update_requires_and_enforces_full_commit_pin() -> None:
+    commit = "a" * 40
+    try:
+        _validate_expected_commit(
+            commit,
+            None,
+            require_pin=True,
+            dry_run=False,
+        )
+    except UpdateError as exc:
+        assert "rerun with --commit" in str(exc)
+    else:
+        raise AssertionError("an unpinned HTTPS update should be rejected")
+
+    _validate_expected_commit(
+        commit,
+        commit,
+        require_pin=True,
+        dry_run=False,
+    )
 
 
 def test_migration_copies_verifies_and_retains_legacy_data(tmp_path: Path) -> None:
@@ -97,14 +119,14 @@ def test_updater_preserves_resources_and_removes_manifest_obsolete_files(
     )
 
     assert result.dry_run is False
-    assert (target / "src/command.py").read_text() == "new command"
+    assert (target / "src/command.py").read_text() == "VALUE = 'new command'\n"
     assert (target / "new.txt").read_text() == "new"
     assert not (target / "old.txt").exists()
     assert (target / "src/resources/personal.json").read_text() == "personal"
     assert not (target / "src/resources/remote.json").exists()
 
 
-def test_updater_rolls_back_code_when_dependency_install_fails(
+def test_updater_refuses_non_transactional_dependency_install_before_changes(
     tmp_path: Path,
 ) -> None:
     release = tmp_path / "release"
@@ -114,31 +136,20 @@ def test_updater_rolls_back_code_when_dependency_install_fails(
     _write_project(target, command="old command")
     state = tmp_path / "state"
 
-    def failing_installer(command, cwd):
-        if len(command) >= 4 and command[1:4] == ["-m", "pip", "install"]:
-            return subprocess.CompletedProcess(command, 1, "", "installation failed")
-        return subprocess.run(
-            command,
-            cwd=cwd,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
     try:
         update_installation(
             target,
             repository=str(release),
             branch="main",
-            runner=failing_installer,
+            install_dependencies=True,
             state_dir=state,
         )
     except Exception as exc:
-        assert "install the updated HSAS package" in str(exc)
+        assert "not transactional" in str(exc)
     else:
         raise AssertionError("the simulated installer failure should abort the update")
 
-    assert (target / "src/command.py").read_text() == "old command"
+    assert (target / "src/command.py").read_text() == "VALUE = 'old command'\n"
     assert not (state / "update-manifest.json").exists()
 
 
@@ -148,8 +159,8 @@ def _write_project(root: Path, *, command: str) -> None:
         '[project]\nname = "hku-study-assistance-system"\nversion = "0.1.0"\n',
         encoding="utf-8",
     )
-    (root / "src/command.py").write_text(command, encoding="utf-8")
-    (root / "src/updator/service.py").write_text("updater", encoding="utf-8")
+    (root / "src/command.py").write_text(f"VALUE = {command!r}\n", encoding="utf-8")
+    (root / "src/updator/service.py").write_text("VALUE = 'updater'\n", encoding="utf-8")
 
 
 def _commit(repository: Path) -> None:

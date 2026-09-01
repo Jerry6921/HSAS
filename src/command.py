@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from AI_interface import execution_app, materials_app, profile_app
+from hsas_application import PlanGenerationError, assess_plan_freshness
 from hsas_runtime import (
     MigrationError,
     get_runtime_paths,
@@ -72,6 +73,7 @@ def list_status(
     _show_profile(resources_dir / "student_profile.json")
     _show_execution_log(resources_dir / "execution_log.json")
     _show_plan(resources_dir / "integrated_plan.json")
+    _show_plan_freshness(resources_dir)
     _show_changes(resources_dir / "courses")
 
 
@@ -90,13 +92,19 @@ def sync_courses(
             help="Optional Moodle course ID or URL; omit to sync all courses"
         ),
     ] = None,
+    replan: Annotated[
+        bool,
+        typer.Option("--replan/--no-replan", help="Refresh the Plan after a successful sync"),
+    ] = True,
 ) -> None:
     """Sync one course when specified, otherwise sync every available course."""
     settings = Settings.load(output_dir=_resources(ctx))
     if course is None:
-        sync_all(settings)
+        result = sync_all(settings)
     else:
-        sync_course(course, settings)
+        result = sync_course(course, settings)
+    if replan and result is not None:
+        _refresh_plan_if_ready(settings.output_dir)
 
 
 @app.command("update-plan")
@@ -133,15 +141,26 @@ def update_plan(
 ) -> None:
     """Generate and validate the deterministic cross-course priority backlog."""
     resources_dir = resources_dir or _resources(ctx)
-    generate_plan(
-        profile_path=profile_path or resources_dir / "student_profile.json",
-        output_path=output_path or resources_dir / "integrated_plan.json",
-        resources_dir=resources_dir,
-        execution_path=execution_path or resources_dir / "execution_log.json",
-        days=days,
-        start=start,
-        fresh=fresh,
+    try:
+        result = generate_plan(
+            profile_path=profile_path or resources_dir / "student_profile.json",
+            output_path=output_path or resources_dir / "integrated_plan.json",
+            resources_dir=resources_dir,
+            execution_path=execution_path or resources_dir / "execution_log.json",
+            days=days,
+            start=start,
+            fresh=fresh,
+        )
+    except (PlanGenerationError, ValueError) as exc:
+        if isinstance(exc, PlanGenerationError) and exc.report is not None:
+            _print_validation_report(exc.report)
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        f"Plan updated: {len(result.plan.items)} key item(s), "
+        f"{result.plan.workload_summary.total_remaining_minutes} estimated minute(s); "
+        f"study times remain student-selected -> {result.output_path}"
     )
+    _print_validation_report(result.report)
 
 
 @app.command("migrate-data")
@@ -176,11 +195,22 @@ def update_hsas(
         bool,
         typer.Option(help="Clone and compare without changing the installation"),
     ] = False,
+    expected_commit: Annotated[
+        str | None,
+        typer.Option(
+            "--commit",
+            help="Exact 40-character commit shown by a prior dry run",
+        ),
+    ] = None,
 ) -> None:
-    """Update HSAS from the trusted GitHub main branch, preserving local data."""
-    typer.echo("Fetching trusted release: https://github.com/Jerry6921/HSAS (main)")
+    """Inspect or apply an exact HSAS commit while preserving local data."""
+    typer.echo("Inspecting release source: https://github.com/Jerry6921/HSAS (main)")
     try:
-        result = update_installation(PROJECT_ROOT, dry_run=dry_run)
+        result = update_installation(
+            PROJECT_ROOT,
+            dry_run=dry_run,
+            expected_commit=expected_commit,
+        )
     except UpdateError as exc:
         typer.echo(f"Update failed safely: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -192,6 +222,8 @@ def update_hsas(
     )
     if not result.dry_run:
         typer.echo("Personal resources and browser session were not modified.")
+    else:
+        typer.echo(f"To apply exactly this release, rerun with `--commit {result.commit}`.")
 
 
 def _show_profile(path: Path) -> None:
@@ -233,6 +265,13 @@ def _show_plan(path: Path) -> None:
         typer.echo(f"  Plan: unavailable ({type(exc).__name__})")
 
 
+def _show_plan_freshness(resources_dir: Path) -> None:
+    freshness = assess_plan_freshness(resources_dir)
+    typer.echo(f"  Plan freshness: {'current' if freshness.current else 'stale'}")
+    for reason in freshness.reasons:
+        typer.echo(f"    - {reason}")
+
+
 def _show_changes(courses_dir: Path) -> None:
     reports: list[CourseChangeSet] = []
     for path in sorted(courses_dir.glob("*/changes/latest.json")):
@@ -253,6 +292,31 @@ def _resources(ctx: typer.Context) -> Path:
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir
+
+
+def _refresh_plan_if_ready(resources_dir: Path) -> None:
+    if not (resources_dir / "student_profile.json").is_file():
+        typer.echo("Plan refresh deferred: Student Profile does not exist.")
+        return
+    try:
+        result = generate_plan(resources_dir=resources_dir)
+    except (PlanGenerationError, ValueError) as exc:
+        typer.echo(f"Plan refresh deferred; existing Plan retained: {exc}", err=True)
+        return
+    typer.echo(
+        f"Plan refreshed and validated: {len(result.plan.items)} key item(s) -> "
+        f"{result.output_path}"
+    )
+
+
+def _print_validation_report(report) -> None:
+    typer.echo(
+        f"Validation: {'valid' if report.valid else 'invalid'}; "
+        f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)"
+    )
+    for issue in [*report.errors, *report.warnings]:
+        paths = f" [{', '.join(issue.paths)}]" if issue.paths else ""
+        typer.echo(f"  {issue.severity.upper()} {issue.code}: {issue.message}{paths}")
 
 
 if __name__ == "__main__":

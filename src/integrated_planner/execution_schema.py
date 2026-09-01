@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from moodle_collector.transformation.common.base_schema import StrictModel
+from moodle_collector.contracts import StrictModel
 
 
 class ExecutionRecord(StrictModel):

@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from pydantic import ValidationError
 
-from moodle_collector.storage.local_store import read_json, write_model
+from hsas_runtime.storage import read_json, write_model
 from .profile_schema import StudentProfile
 
 

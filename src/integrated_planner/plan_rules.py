@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from moodle_collector.transformation.assessment.schema import (
+from moodle_collector.contracts import (
     AssessmentItem,
+    ArchiveIndex,
+    CourseActivity,
     SourceReference,
 )
-from moodle_collector.transformation.common.course_index import ArchiveIndex
-from moodle_collector.transformation.common.course_schema import CourseActivity
-from .plan_schema import OfficialTiming, PlanItem, PlanSourceReference, PriorityDecision
+from .plan_schema import OfficialTiming, PlanSourceReference, PriorityDecision
 from .profile_schema import CourseState, StudentProfile
 
 

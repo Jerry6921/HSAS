@@ -1,4 +1,4 @@
-"""Clone and transactionally apply the trusted HSAS Git release."""
+"""Inspect and transactionally apply an explicitly pinned HSAS Git release."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import os
+import ast
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
-import sys
 import tempfile
 import tomllib
 from typing import Callable, Sequence
@@ -59,11 +59,17 @@ def update_installation(
     runner: CommandRunner | None = None,
     repository: str = UPDATE_REPOSITORY,
     branch: str = UPDATE_BRANCH,
-    install_dependencies: bool = True,
+    expected_commit: str | None = None,
+    install_dependencies: bool = False,
     state_dir: Path | None = None,
 ) -> UpdateResult:
     """Update code from the trusted release while preserving local state."""
     root = project_root.resolve()
+    if install_dependencies:
+        raise UpdateError(
+            "in-place dependency installation is not transactional; reinstall HSAS "
+            "through the package manager after updating code"
+        )
     updater_state = (state_dir or get_runtime_paths().state_dir).resolve()
     manifest_path = updater_state / MANIFEST_NAME
     _validate_project(root)
@@ -96,6 +102,13 @@ def update_installation(
             cwd=checkout,
             action="resolve the release commit",
         ).stdout.strip()
+        _validate_expected_commit(
+            commit,
+            expected_commit,
+            require_pin=repository.startswith("https://"),
+            dry_run=dry_run,
+        )
+        _validate_dependency_compatibility(root, checkout)
         incoming = _tracked_release_files(checkout, execute)
         previous = _read_manifest(manifest_path)
         old_managed = {
@@ -139,13 +152,6 @@ def update_installation(
                 (root / Path(path)).unlink()
             for path in changed:
                 _atomic_copy(incoming[path], root / Path(path))
-            if install_dependencies:
-                _execute(
-                    execute,
-                    [sys.executable, "-m", "pip", "install", "-e", str(root)],
-                    cwd=root,
-                    action="install the updated HSAS package",
-                )
             updater_state.mkdir(parents=True, exist_ok=True)
             _write_manifest(
                 manifest_path,
@@ -206,6 +212,58 @@ def _validate_release(checkout: Path) -> None:
         raise UpdateError(
             "release is not updater-compatible; missing " + ", ".join(missing)
         )
+    for source in checkout.joinpath("src").rglob("*.py"):
+        try:
+            ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        except (OSError, SyntaxError) as exc:
+            raise UpdateError(f"release contains invalid Python source {source.name}: {exc}") from exc
+
+
+def _validate_expected_commit(
+    commit: str,
+    expected_commit: str | None,
+    *,
+    require_pin: bool,
+    dry_run: bool,
+) -> None:
+    if dry_run and expected_commit is None:
+        return
+    if require_pin and expected_commit is None:
+        raise UpdateError(
+            f"update commit is {commit}; rerun with --commit {commit} to authorize this exact release"
+        )
+    if expected_commit is None:
+        return
+    normalized = expected_commit.strip().casefold()
+    if len(normalized) != 40 or any(value not in "0123456789abcdef" for value in normalized):
+        raise UpdateError("expected commit must be a full 40-character Git SHA-1")
+    if commit.casefold() != normalized:
+        raise UpdateError(f"release commit mismatch: expected {normalized}, received {commit}")
+
+
+def _validate_dependency_compatibility(current: Path, incoming: Path) -> None:
+    current_signature = _dependency_signature(current / "pyproject.toml")
+    incoming_signature = _dependency_signature(incoming / "pyproject.toml")
+    if current_signature != incoming_signature:
+        raise UpdateError(
+            "release changes Python or build dependencies; use a package-manager upgrade "
+            "instead of the in-place updater"
+        )
+
+
+def _dependency_signature(path: Path) -> tuple[object, ...]:
+    try:
+        value = tomllib.loads(path.read_text(encoding="utf-8"))
+        project = value["project"]
+        build = value.get("build-system", {})
+        return (
+            project.get("requires-python"),
+            tuple(project.get("dependencies", [])),
+            tuple(build.get("requires", [])),
+            build.get("build-backend"),
+        )
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise UpdateError(f"cannot compare release dependencies: {exc}") from exc
 
 
 def _tracked_release_files(

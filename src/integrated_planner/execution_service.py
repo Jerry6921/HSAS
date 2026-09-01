@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from moodle_collector.storage.local_store import read_json, write_model
+from hsas_runtime.storage import read_json, write_model
 from .execution_schema import ExecutionLog, ExecutionRecord
 from .plan_schema import IntegratedPlan, PlanItem
 

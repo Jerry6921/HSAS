@@ -123,10 +123,10 @@ hsas migrate-data
 
 ```bash
 hsas update-hsas --dry-run
-hsas update-hsas
+hsas update-hsas --commit FULL_40_CHARACTER_COMMIT
 ```
 
-更新器验证项目名称和 updater 兼容性，只同步 Git 跟踪的代码文件，跳过个人数据路径，并在代码复制或依赖安装失败时回滚。
+更新器验证项目名称、Python 语法和 updater 兼容性，只同步 Git 跟踪的代码文件，跳过个人数据路径，并在代码复制失败时回滚。HTTPS 更新必须先 dry-run，再以完整 commit 精确授权；依赖变化交给包管理器处理。
 
 ## 运行
 
@@ -162,7 +162,7 @@ hsas sync-courses 'https://YOUR-MOODLE-HOST.example.edu/course/view.php?id=123'
 hsas sync-courses
 ```
 
-`sync-courses` 带 ID/URL 时处理单课，不带参数时遍历全部课程；两种模式使用相同管线：获取 AJAX state、对象化、复用或下载文件、PDF 正文分析、运行 Assessment Parser、生成 ChangeSet，最后原子写入 `course.json`。批量模式中一门课程失败不会中断其余课程。
+`sync-courses` 带 ID/URL 时处理单课，不带参数时遍历全部课程；两种模式使用相同管线：获取 AJAX state、在隔离目录对象化、复用或下载文件、PDF 正文分析、运行 Assessment Parser、生成 ChangeSet、验证完整快照，最后通过带恢复日志的目录切换发布整门课程。批量模式中一门课程失败不会中断其余课程，单课和批量结果都会合并进 `sync-report.json` 的逐课程状态。
 
 增量同步会按 Moodle activity ID 和清理后的文件 URL 匹配旧文件。`StoredFile` 会持久化服务端返回的 `etag`、`last_modified` 和 `validated_at`；后续同步发送 `If-None-Match`/`If-Modified-Since`，收到 `304` 时直接复用本地文件与 PDF analysis。服务端不支持 validator 时仍以 SHA-256 判断正文是否变化；内容变化时更新原路径并重新分析。字段级变化保存在 `changes/latest.json`，实际有变化的同步还会写入 `changes/history/`，覆盖 Assessment DDL、项目/分组权重、activity 状态以及课件新增、删除和内容变化。
 

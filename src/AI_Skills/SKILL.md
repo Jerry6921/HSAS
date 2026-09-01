@@ -36,7 +36,7 @@ Do not load both long references in full when a focused section is sufficient.
 3. Check freshness, sync failures, evidence confidence, and missing fields.
 4. Separate course facts, confirmed student facts, Planner output, and AI recommendations.
 5. Apply only authorized writes. Use `hsas profile apply` and `hsas execution add|correct`; do not rewrite their JSON files directly. CourseArchive and Integrated Plan are generated outputs, never AI-edited inputs.
-6. After confirmed Profile, Execution Log, or course changes, run `hsas update-plan` and require successful validation.
+6. Confirmed Profile/Execution writes and successful course syncs automatically request a replan. Verify that Planner and Validator succeeded; use `hsas update-plan` explicitly when the automatic refresh was deferred or failed.
 7. Before giving content-specific study methods, retrieve relevant materials with `hsas materials for-item` and refine with `materials search` when necessary.
 8. Lead the response with the outcome, show material warnings and provenance, and end with the next executable action when useful.
 

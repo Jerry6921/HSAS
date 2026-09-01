@@ -4,12 +4,12 @@ from datetime import date as Date
 from datetime import datetime, time as Time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from moodle_collector.transformation.assessment.schema import AssessmentItem
-from moodle_collector.transformation.common.course_index import (
+from moodle_collector.contracts import (
+    AssessmentItem,
     ArchiveIndex,
+    CourseActivity,
     iter_activities,
 )
-from moodle_collector.transformation.common.course_schema import CourseActivity
 from .execution_schema import ExecutionLog
 from .feedback import FeedbackIndex
 from .plan_rules import (

@@ -8,8 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field
 
-from moodle_collector.transformation.common.base_schema import StrictModel
-from moodle_collector.transformation.common.course_index import ArchiveIndex
+from moodle_collector.contracts import ArchiveIndex, StrictModel
 from .execution_schema import ExecutionLog
 from .plan_rules import effective_deadline
 from .plan_schema import IntegratedPlan, PlanItem, TimetableBlock

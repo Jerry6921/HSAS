@@ -15,7 +15,7 @@ Read this reference before running login, synchronization, or planning commands,
 | Add/correct `execution_log.json` through `hsas execution` | Only user-confirmed execution facts | Follow `data-write-protocols.md`; preserve stable retry IDs |
 | `hsas update-plan` | Allowed after an authorized input change or explicit plan request | Require final validation; never hand-edit the generated plan |
 | `hsas migrate-data` | Requires an explicit migration request | Copy and verify only; retain legacy files and report their paths for user review |
-| `hsas update-hsas` | Requires an explicit software-update request | Use only the pinned Jerry6921/HSAS main source; preserve personal data and report rollback failures |
+| `hsas update-hsas` | Requires an explicit software-update request | Dry-run first, then authorize the exact full commit; preserve personal data and use the package manager when dependencies change |
 | Follow an external activity URL or contact a third party | Separate authorization required | Moodle access does not authorize unrelated external access or messaging |
 | Submit work, alter Moodle, or create calendar events | Unsupported unless a future explicit capability exists | Do not claim or simulate success |
 

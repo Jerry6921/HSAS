@@ -1,3 +1,1 @@
-from command import app
-
-app()
+raise SystemExit("Use the unified `hsas` command instead of `python -m moodle_collector`.")

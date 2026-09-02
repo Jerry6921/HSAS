@@ -29,7 +29,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python -m pytest -q -p no:cacheprovider
       - name: Build wheel
-        run: python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+        run: python -m pip wheel --no-deps --wheel-dir dist .
       - name: Verify packaged runtime assets
         run: |
           python - <<'PY'

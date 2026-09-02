@@ -2,17 +2,18 @@
 
 > 把 Moodle 中分散的课程信息，转化为有依据、可执行的跨课程学习优先级。
 
-HSAS 是面向 HKU 学生的本地学习辅助系统。它同步用户有权访问的 Moodle 课程，整理
+HSAS 是面向 HKU 学生的本地学习辅助系统。它同步 Moodle 课程，整理
 Assessment、DDL、权重、要求和课件，通过确定性规则判断当前最重要的学习事项，并从
-本地课件中检索相关内容，帮助 AI 给出有来源的学习建议。
+本地课件中检索相关内容，组成带课程、文件和页码来源的 RAG context，帮助 AI 给出有来源
+的学习建议。
 
 你可以在本地 Dashboard 中查看优先事项、同步状态和课程资料，并记录真实学习进度。
-个人资料、课程文件、登录状态和计划默认只保存在自己的电脑上。
+个人资料、课程文件、登录状态和计划默认保存在本地数据目录。
 
 ## 它解决什么问题
 
 课程信息通常散落在 Moodle 页面、syllabus、公告、Label 和 PDF 中。多门课程同时进行时，
-学生不仅要记住日期，还需要不断判断：
+学生需要持续综合日期、工作量、重要程度和学习进度：
 
 - 最近有哪些真正重要的 DDL 和考试？
 - 权重、难度、剩余工作量和当前进度应该如何一起考虑？
@@ -21,32 +22,21 @@ Assessment、DDL、权重、要求和课件，通过确定性规则判断当前�
 - Moodle 更新后，旧计划是否仍然可信？
 
 HSAS 将这些信息整理成带来源的课程数据库，再生成稳定、可验证的跨课程优先事项。
-未知或证据不足的信息会保持未知，不会被自动当成零，也不会由 AI 猜测补全。
+信息模型为未公布或证据不足的字段保留 unknown 状态和来源说明。
 
-## 与相关产品的区别
-
-| 能力 | Moodle | 待办/日历工具 | 通用 AI 助手 | HSAS |
-|---|---|---|---|---|
-| 课程信息 | 信息完整但分散 | 依赖手动录入 | 依赖用户粘贴上下文 | 自动整理课程、Assessment、DDL、课件和来源 |
-| 跨课程优先级 | 不负责综合判断 | 主要按日期或手动排序 | 可能随对话变化 | 按 DDL、权重、难度、状态、工作量和依赖稳定计算 |
-| 学习建议 | 提供资料，不设计学习路径 | 不理解课程内容 | 容易依赖模型记忆 | 先检索本地课件，再给方法、预计投入和自测标准 |
-| 更新与可信度 | 展示当前页面 | 需要人工维护 | 容易遗漏变化 | 检测课程变化、验证数据并保留上一份有效结果 |
-| 个人数据 | 存于学校平台 | 通常存于服务商云端 | 取决于所用服务 | Profile、计划、进度和下载资料默认留在本机 |
-
-HSAS 不是另一个待办清单，也不是让大模型自由生成日程。它把职责拆开：Collector 负责
-课程事实，Planner 负责确定性排序，本地检索负责找到课件依据，AI 负责解释和设计灵活的
-学习动作，学生自己决定何时学习。
+系统中的职责分为课程事实采集、确定性规划、本地 RAG 检索和 AI 学习解释。学生结合现实
+安排选择具体学习日期和时间。
 
 ## 主要功能
 
 ### Moodle 登录与课程同步
 
-- 使用 Playwright 保存本地浏览器会话，HKU SSO/MFA 始终由用户本人完成；
-- 检查当前 Moodle 登录状态，并区分已登录、已退出和无法确认三种情况；
-- 从 Dashboard 发现当前账号有权访问的课程；
+- 使用 Playwright 保存本地浏览器会话，HKU SSO/MFA 交互在浏览器中完成；
+- 检查当前 Moodle 登录状态，并区分已登录、已退出和状态未知；
+- 从 Dashboard 发现当前课程；
 - 支持同步全部课程，也支持通过课程 ID 或同源 Moodle URL 同步单门课程；
-- 保留每门课程最近一次同步结果，部分课程失败时不会丢失其他课程的成功状态；
-- Moodle 页面或接口无法识别时给出明确错误，不把空结果误认为课程已经删除。
+- 分别保留每门课程最近一次同步结果，部分失败状态与其他课程的成功状态并存；
+- Moodle 页面或接口识别异常时记录错误并保留现有课程状态。
 
 ### 课程资料与 Assessment 整理
 
@@ -54,14 +44,14 @@ HSAS 不是另一个待办清单，也不是让大模型自由生成日程。它
 - 从 Moodle Activity、syllabus 和 PDF 文本中提取 Assessment 候选；
 - 整理 Assessment 类型、权重、开放时间、DDL、字数限制、评分组和来源；
 - 合并多个来源，并保留原始课程、activity、section、文件和页码证据；
-- 未公布、互相冲突或证据不足的信息保持未知，不自动补成零或确定事实；
+- 为未公布、互相冲突或证据不足的信息记录 unknown 状态和来源置信度；
 - 比较新旧课程归档，识别 DDL、权重、Assessment、Activity 和课件变化。
 
 ### 课件下载与本地处理
 
-- 下载用户原本有权访问的课程文件，并限制来源、重定向和单文件大小；
+- 下载课程文件，并校验来源、重定向和单文件大小；
 - 使用缓存验证信息增量更新课件，未变化的文件可以复用；
-- 同步失败或文件损坏时保留上一份有效课程快照；
+- 同步异常或文件损坏时恢复上一份有效课程快照；
 - 提取 PDF 正文、页码、元数据、关键词和抽取式摘要；
 - 计算字数和预计阅读时间，为后续工作量估算提供可测量依据；
 - 保留课件原始相对路径，方便从检索结果回到真实文件。
@@ -72,47 +62,46 @@ HSAS 不是另一个待办清单，也不是让大模型自由生成日程。它
 - 将重要 Assessment 和当前课程 Activity 转换为统一的 PlanItem；
 - 按 `critical`、`high`、`medium`、`planned` 生成稳定、可解释的跨课程排序；
 - 为论文、考试、项目和演示生成不同的阶段里程碑；
-- 保留旧计划中仍有效的进度，不因刷新计划而把真实进展清零；
+- 计划刷新会继承旧计划中仍然有效的真实进度；
 - 生成工作量、紧急事项、来源快照和警告汇总；
-- 输出优先事项清单而不是强制时间表，学习日期和时段仍由学生决定。
+- 输出优先事项清单，学习日期和时段由学生结合现实安排选择。
 
 ### Student Profile 与执行反馈
 
 - 使用 Student Profile 保存课程目标、能力、学习偏好、限制和已确认的个人事实；
-- Profile patch 必须经过用户明确确认，且不能修改系统管理字段；
-- 拒绝 password、cookie、sesskey、token 和 MFA 等认证信息进入 Profile；
+- Profile patch 流程包含用户确认、深度合并和完整模型验证；
 - 记录每个 PlanItem 的计划时长、实际时长、完成进度和用户备注；
-- 使用稳定 `record_id` 支持安全重试，拒绝同一 ID 对应不同内容；
+- 使用稳定 `record_id` 支持幂等重试和内容冲突检测；
 - 根据真实 Execution Log 校准剩余进度和后续工作量；
 - Profile 或 Execution 更新后自动请求重新验证并生成 Integrated Plan。
 
-### 本地课件检索与 AI 协作
+### 本地 RAG 与 AI 协作
 
-- 对 PDF 提取文本按页码和长度切分，建立无需外部服务的本地词法索引；
-- 支持直接搜索概念、问题或关键词，并可限制到指定课程；
+- 对 PDF 提取文本按页码和长度切分，构成本地轻量 RAG 的检索语料；
+- 支持搜索概念、问题或关键词，并提供课程范围筛选；
 - 可以从 PlanItem 自动组合课程、任务描述和完成标准形成检索问题；
 - 返回正文片段、匹配分数、课程、Activity、文件名、相对路径和页码；
-- AI 可以先读取这些有来源的证据，再解释知识、设计学习动作和自测标准；
-- 当前检索不需要外部 embedding 服务，也不会为了检索上传课程文件。
+- 检索结果作为 RAG context 交给 AI，用于解释知识、设计学习动作和自测标准；
+- 当前实现采用本地 BM25 风格词法检索，课程文本和检索过程位于本地数据目录。
 
 ### 本地 Dashboard 与 CLI
 
 - Dashboard 展示关键事项、优先级理由、DDL、剩余工作量、课程资料和同步警告；
 - 可按课程和 section 浏览、打开已下载课件，并查看完整课程信息；
-- 经用户确认后，可以从 Dashboard 记录实际学习情况并自动刷新计划；
-- Dashboard 只监听 `127.0.0.1`，写请求需要本地请求标记且不开放跨域；
+- Dashboard 记录用户确认的实际学习情况并自动刷新计划；
+- Dashboard 绑定 `127.0.0.1`，写请求包含本地请求标记，HTTP 配置采用同源访问；
 - CLI 提供登录、同步、状态检查、计划生成、Profile、Execution、检索、迁移和更新命令；
 - CLI 与 Dashboard 调用同一组 application 服务，因此业务验证规则保持一致。
 
-### 数据可靠性与安全更新
+### 数据可靠性与更新
 
 - 所有核心 JSON 模型在读取和写入前使用 Pydantic 完整验证；
-- JSON、文本和二进制文件使用临时文件加原子替换，避免留下半写入文件；
+- JSON、文本和二进制文件通过临时文件和原子替换完成写入；
 - 每门课程通过独立锁、staging、journal 和 backup 完成快照发布；
-- 新快照验证失败或发布中断时恢复上一份有效数据；
+- 新快照验证异常或发布中断时恢复上一份有效数据；
 - Integrated Plan 记录 Profile、Execution Log 和 CourseArchive 版本，可判断计划是否过期；
-- Git 更新先执行 dry-run，再要求使用完整 commit 明确确认；
-- 更新程序不会覆盖 resources、课程资料、浏览器会话或个人计划。
+- Git 更新由 dry-run、完整 commit 固定、文件备份和事务恢复组成；
+- 软件代码与 resources、课程资料、浏览器会话和个人计划采用分离目录。
 
 ## 工作方式
 
@@ -127,17 +116,17 @@ Deterministic Planner
     ↓
 Integrated Plan：关键事项、排序理由、工作量与完成标准
     ↓
-本地课件检索
+本地轻量 RAG
     ↓
 AI 学习建议：方法、预计投入、证据与自测标准
 ```
 
-`Integrated Plan` 是持续更新的优先事项清单，不是固定日历。它回答“现在应该关注什么、
-为什么重要、需要多少投入、怎样算完成”；具体学习日期和时间由学生根据现实安排决定。
+`Integrated Plan` 是持续更新的优先事项清单，记录当前关注事项、排序理由、预计投入和完成
+标准；具体学习日期和时间由学生根据现实安排决定。
 
 ## 代码架构与工作流
 
-HSAS 使用四层架构。依赖只指向业务核心：接口层接收请求，应用层编排用例，领域层保存
+HSAS 使用四层架构。依赖由外层指向业务核心：接口层接收请求，应用层编排用例，领域层保存
 模型与确定性规则，基础设施层负责 Moodle、文件系统、PDF、运行时目录和 Git 更新。
 
 ```mermaid
@@ -153,7 +142,7 @@ flowchart TB
     Infrastructure --> Resources[resources / JSON / PDF]
 ```
 
-允许的主要依赖方向为：
+层间依赖关系为：
 
 ```text
 interfaces ───────> application ───────> domain
@@ -163,10 +152,10 @@ interfaces ───────> application ───────> domain
      └──> infrastructure ───> application/ports + domain
 ```
 
-`domain` 不依赖 Typer、Playwright、平台路径或文件存储；`application` 不导入
-`infrastructure`、`interfaces`、Typer 或 Playwright。`interfaces` 是组合根，负责创建具体
-适配器并注入应用服务。项目使用 Python `Protocol` 描述端口，不要求适配器继承抽象基类。
-这些规则由 `tests/test_enforce_architecture.py` 自动检查。
+`domain` 集中保存 Pydantic 模型和确定性规则；`application` 由领域模型、用例和端口组成；
+`infrastructure` 实现 Moodle、存储、PDF、运行时和更新能力；`interfaces` 作为组合根创建
+具体适配器并注入应用服务。项目使用 Python `Protocol` 描述端口，适配器以结构化类型实现
+契约。`tests/test_enforce_architecture.py` 检查模块命名、层级结构和依赖图。
 
 ### 目录职责
 
@@ -183,7 +172,7 @@ src/hsas/
     ├── documents/       # PDF 文本提取、元数据与摘要分析
     ├── storage/         # 原子读写、仓储实现与课程快照发布
     ├── runtime/         # 用户数据目录、自动建目录与旧数据迁移
-    └── updates/         # 固定 Git commit 的安全更新
+    └── updates/         # 固定 Git commit 的事务更新
 ```
 
 ### 主要文件与依赖关系
@@ -194,15 +183,15 @@ src/hsas/
 |---|---|---|
 | `interfaces/run_cli.py` | 统一 `hsas` 命令入口、目录初始化、输出与退出码 | 创建仓储和 Moodle 适配器，调用 application 用例 |
 | `interfaces/handle_commands.py` | Profile、Execution、Materials 子命令 | 调用 Profile、Execution、Plan 和检索服务 |
-| `interfaces/run_dashboard.py` | 仅监听 `127.0.0.1` 的 Dashboard API 与静态文件服务 | 使用与 CLI 相同的 application 服务和 infrastructure 适配器 |
-| `interfaces/web/` | Dashboard 的 HTML、CSS 和 JavaScript | 只调用本地 JSON API，不直接修改 resources 文件 |
+| `interfaces/run_dashboard.py` | 绑定 `127.0.0.1` 的 Dashboard API 与静态文件服务 | 使用与 CLI 相同的 application 服务和 infrastructure 适配器 |
+| `interfaces/web/` | Dashboard 的 HTML、CSS 和 JavaScript | 调用本地 JSON API，由后端应用服务处理 resources 数据 |
 
 #### 应用层与端口
 
 | 文件 | 职责 | 主要依赖 |
 |---|---|---|
-| `application/ports/define_gateways.py` | 定义 `CourseGateway` 及同步、登录、课程列表返回类型 | 不依赖具体 Moodle 实现 |
-| `application/ports/define_repositories.py` | 定义 `PlanningRepository` | 只依赖领域模型 |
+| `application/ports/define_gateways.py` | 定义 `CourseGateway` 及同步、登录、课程列表返回类型 | 为 Moodle 适配器和测试替身提供统一契约 |
+| `application/ports/define_repositories.py` | 定义 `PlanningRepository` | 依赖领域模型 |
 | `application/synchronize_courses.py` | 通过 `CourseGateway` 表达登录、课程发现和同步用例 | `application/ports` |
 | `application/generate_plans.py` | 加载规划输入、调用 Planner、验证并保存 Plan；检查 Plan 新鲜度 | `PlanningRepository`、planning domain |
 | `application/orchestrate_plans.py` | 将 CLI 风格参数转换成 `PlanGenerationRequest` | `generate_plans.py` |
@@ -257,8 +246,8 @@ src/hsas/
 
 ### 运行时目录如何自动生成
 
-每次 CLI 启动时，`interfaces/run_cli.py` 会调用 `get_runtime_paths().create()`；显式传入
-`--resources` 时则调用 `ensure_resources_layout()`。因此用户不需要手动建立核心目录。
+每次 CLI 启动时，`interfaces/run_cli.py` 会调用 `get_runtime_paths().create()`；传入
+`--resources` 时调用 `ensure_resources_layout()`，两条路径都会建立核心目录。
 
 ```text
 HSAS data directory/
@@ -271,8 +260,8 @@ HSAS data directory/
 └── logs/
 ```
 
-Profile、Execution Log 和 Integrated Plan 会在对应操作首次成功执行时创建；课程目录及
-`course.json` 由同步事务创建。程序不会用空文件伪造尚未获取的业务数据。
+Profile、Execution Log 和 Integrated Plan 在对应操作首次成功执行时创建；课程目录及
+`course.json` 由同步事务创建。
 
 ### 课程同步工作流
 
@@ -292,8 +281,8 @@ flowchart LR
     Publish --> Report[更新 sync-report.json]
 ```
 
-单门课程拥有独立写锁。同步期间所有操作发生在 staging 目录，只有完整 CourseArchive
-验证成功后才替换 live 目录；中断或发布失败时恢复上一份有效快照。
+单门课程拥有独立写锁。同步期间所有操作发生在 staging 目录，完整 CourseArchive 验证
+成功后替换 live 目录；中断或发布异常时恢复上一份有效快照。
 
 ### Integrated Plan 生成工作流
 
@@ -314,16 +303,15 @@ Execution Log 和 CourseArchive 版本，用于判断计划是否过期。
 
 ### Profile 与 Execution 工作流
 
-Profile 修改必须显式确认。应用服务拒绝系统管理字段和密码、cookie、sesskey、token 等
-认证字段，完成深度合并和完整模型验证后才原子保存；规范资源路径中的 Profile 修改成功后
-会请求重新生成 Plan。
+Profile patch 工作流记录用户确认状态，完成深度合并与完整模型验证后原子保存；规范资源
+路径中的 Profile 更新会请求重新生成 Plan。
 
-Execution 记录必须引用真实的 PlanItem。相同 `record_id` 和相同内容被视为安全重试；相同
-ID 但内容不同则被拒绝。Execution Log 保存后重新生成 Plan，`FeedbackIndex` 据此更新完成
-进度、实际投入和保守的工作量校准。
+Execution 记录引用现有 PlanItem。相同 `record_id` 和相同内容形成幂等重试，不同内容形成
+冲突结果。Execution Log 保存后重新生成 Plan，`FeedbackIndex` 据此更新完成进度、实际投入
+和保守的工作量校准。
 
 ```text
-用户确认输入
+用户输入与确认状态
     ↓
 接口层解析和检查
     ↓
@@ -334,7 +322,7 @@ PlanningRepository 原子保存
 重新生成并验证 Integrated Plan
 ```
 
-### 本地课件检索工作流
+### 本地 RAG 工作流
 
 ```text
 问题或 PlanItem
@@ -345,19 +333,20 @@ ArchiveIndex 定位相关课程和课件
     ↓
 分页、分块、英文词与中文二元词分词
     ↓
-BM25 风格排序
+BM25 风格检索与排序
     ↓
-返回正文、课程、文件、相对路径和页码
+组成带正文、课程、文件、相对路径和页码的 RAG context
 ```
 
-检索结果保留来源信息，AI 可以据此解释和设计学习动作，而不必依赖模型记忆猜测课程内容。
+检索结果保留来源信息，并作为上下文交给 AI 解释课程内容和设计学习动作。
 
-更严格的事务、安全和更新边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+更详细的事务、依赖和更新设计见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 快速开始
 
 ### 环境要求
 
+- macOS 或 Linux；
 - Python 3.11 或更高版本；
 - 可正常访问 HKU Moodle 的账号；
 - 首次登录时由用户本人完成 HKU SSO/MFA。
@@ -373,7 +362,7 @@ python -m pip install -c requirements.lock -e .
 playwright install chromium
 ```
 
-HKU Moodle 地址已经包含在默认配置中，通常不需要创建 `.env`。
+HKU Moodle 地址包含在默认配置中，其他运行参数可通过本地配置文件调整。
 
 ### 打开本地 Dashboard
 
@@ -381,17 +370,17 @@ HKU Moodle 地址已经包含在默认配置中，通常不需要创建 `.env`�
 hsas ui
 ```
 
-浏览器会打开 `http://127.0.0.1:8765`。Dashboard 只监听本机地址，可以：
+浏览器会打开 `http://127.0.0.1:8765`。Dashboard 绑定本机地址，可以：
 
 - 检查 Moodle 登录状态并打开登录窗口；
 - 同步全部课程或指定课程；
 - 查看优先事项、排序理由、DDL、工作量和警告；
 - 按课程与 section 浏览并打开已下载课件；
 - 查看完整课程信息；
-- 经确认后记录实际学习时间和完成进度，并自动刷新计划。
+- 记录带用户确认状态的实际学习时间和完成进度，并自动刷新计划。
 
-首次使用时，在 Dashboard 中依次完成登录和课程同步。HKU SSO/MFA 始终由用户本人在
-Playwright 打开的浏览器中完成，HSAS 不读取或保存密码和 MFA 验证码。
+首次使用时，在 Dashboard 中依次完成登录和课程同步。HKU SSO/MFA 交互发生在 Playwright
+打开的 HKU 登录页面，HSAS 保存登录后的本地浏览器 profile。
 
 ### 命令行使用
 
@@ -409,20 +398,20 @@ hsas update-plan       # 重新生成优先事项
 ## 与 AI Agent 配合
 
 HSAS 可以与能够读取项目文件和运行本地命令的 AI Agent 配合。Agent 会通过项目自带的
-操作规范检查数据新鲜度、请求必要授权、检索相关课件，并解释 Planner 的结果。
+操作入口检查数据新鲜度、检索相关课件，并解释 Planner 的结果。
 
 例如：
 
 ```text
-检查当前状态，告诉我哪些课程需要同步；先不要执行同步。
+检查当前状态，告诉我各课程的同步状态。
 同步课程并更新计划，然后解释最高优先级的三项任务。
 检索最高优先事项对应的课件，给出学习方法、预计投入和自测标准。
 ```
 
-AI 不应直接改写课程归档或计划，也不能自行推断个人事实。Profile 和学习进度只会在用户
-确认后通过受控接口写入。
+AI Agent 通过 HSAS 命令、应用服务和本地 RAG 读取课程依据。Profile 和学习进度写入流程
+记录用户确认状态，并在写入后触发模型验证和计划刷新。
 
-## 数据与隐私
+## 本地数据目录
 
 HSAS 将软件代码与个人数据分开保存。macOS 默认数据目录为：
 
@@ -438,27 +427,18 @@ HSAS 将软件代码与个人数据分开保存。macOS 默认数据目录为：
 └── state/
 ```
 
-其他系统使用各自的标准用户目录，也可以通过 `HSAS_DATA_DIR` 自定义。浏览器 profile、
-课程资料、个人计划和执行记录不会进入 Git。当前课件检索在本地完成，不需要外部 embedding
-服务，也不会为了检索而上传课程文件。
+Linux 使用 platformdirs 提供的标准用户目录；macOS 和 Linux 都可以通过 `HSAS_DATA_DIR`
+自定义数据位置。
 
-请勿把密码、MFA、cookie、sesskey、token、Student Profile、课程资料或个人计划粘贴到
-公开 Issue 或诊断信息中。
-
-## 当前边界
-
-- HSAS 是本地 MVP，不是 HKU 官方产品；
-- 它只访问当前账号原本有权查看的内容，不绕过 Moodle 权限；
-- Moodle 页面或接口变化时，可能需要更新适配逻辑；
-- 扫描型 PDF 在加入 OCR 前无法提供可靠的正文检索；
-- 未公布或证据不足的信息保持未知，课程要求仍以 Moodle 官方页面为准；
-- AI 建议不替代学生自己的判断、时间安排或学术诚信责任。
+Git 跟踪内容由软件代码、测试、文档和配置模板组成。课程资料、个人计划、执行记录和浏览器
+profile 存放在本地数据目录。当前本地 RAG 使用 BM25 风格词法检索，提取文本、检索过程和
+RAG context 位于该数据目录。
 
 ## 更多信息
 
-- [代码架构、事务与依赖规则](ARCHITECTURE.md)
+- [代码架构与事务设计](ARCHITECTURE.md)
 - [Moodle 采集与数据说明](MOODLE_COLLECTOR.md)
-- [安全政策](SECURITY.md)
+- [数据与更新设计](SECURITY.md)
 
 ## License
 

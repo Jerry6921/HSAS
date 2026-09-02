@@ -1,0 +1,39 @@
+{
+  "dashboard_ready": [
+    "main",
+    "[role='main']"
+  ],
+  "course_links": [
+    "a[href*='/course/view.php?id=']",
+    "a[href*='course/view.php?id=']"
+  ],
+  "course_title": [
+    "h1",
+    "header h2",
+    "[role='main'] h2"
+  ],
+  "sections": [
+    "li.section",
+    "section.course-section",
+    "[data-sectionid]"
+  ],
+  "section_title": [
+    "h3",
+    "h4",
+    ".sectionname"
+  ],
+  "activity_links": [
+    "a[href*='/mod/']",
+    "a[href*='/pluginfile.php/']"
+  ],
+  "activity_name": [
+    ".instancename",
+    ".activityname",
+    "span"
+  ],
+  "activity_description": [
+    ".contentafterlink",
+    ".description",
+    ".activity-description"
+  ]
+}

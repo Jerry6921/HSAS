@@ -1,0 +1,8 @@
+[moodle]
+base_url = "https://moodle.hku.hk"
+login_url = "https://moodle.hku.hk/login/index.php"
+dashboard_url = "https://moodle.hku.hk/my/"
+headless = true
+navigation_timeout_ms = 30000
+max_download_bytes = 104857600
+download_concurrency = 3

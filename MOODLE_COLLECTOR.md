@@ -35,6 +35,7 @@ HSAS/
 │   │       └── validate_plan.py
 │   └── infrastructure/                 # 外部系统与持久化
 │       ├── moodle/                     # Moodle 获取、映射与 Assessment 解析
+│       │   └── config/                 # wheel 内置默认配置与 selector
 │       ├── documents/analyze_pdfs.py
 │       ├── storage/                    # 原子写入与课程快照发布
 │       ├── runtime/                    # platformdirs 路径与旧数据迁移
@@ -84,7 +85,10 @@ python -m pip install -e '.[dev]'
 python -m playwright install chromium
 ```
 
-HKU Moodle 的公开 URL 默认保存在 `config/defaults.toml`。如需本地覆盖，可在平台数据目录创建 `config.toml`，或使用已被 Git 忽略的 `.env`；不得在其中保存密码、cookie、MFA 或 sesskey。
+运行时默认配置打包在 `hsas.infrastructure.moodle/config/`；仓库根目录的
+`config/defaults.toml` 和 `config/selectors.example.json` 是对应的公开模板。如需本地覆盖，
+可在平台数据目录创建 `config.toml`，或使用已被 Git 忽略的 `.env`；不得在其中保存密码、
+cookie、MFA 或 sesskey。
 
 若页面结构与示例不同，在浏览器开发者工具检查元素后，复制并修改 selector 文件：
 

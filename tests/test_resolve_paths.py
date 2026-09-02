@@ -4,7 +4,11 @@ import subprocess
 
 from hsas.infrastructure.runtime.migrate_data import migrate_legacy_data
 from hsas.infrastructure.runtime.resolve_paths import RuntimePaths, ensure_resources_layout, get_runtime_paths
-from hsas.infrastructure.moodle.load_settings import Settings
+from hsas.infrastructure.moodle.load_settings import (
+    DEFAULT_CONFIG,
+    DEFAULT_SELECTORS,
+    Settings,
+)
 from hsas.infrastructure.updates.update_installation import UpdateError, _validate_expected_commit, update_installation
 
 
@@ -37,6 +41,21 @@ def test_runtime_paths_honor_data_directory_override(
     assert str(settings.base_url).rstrip("/") == "https://moodle.hku.hk"
     assert settings.output_dir == custom.resolve() / "resources"
     assert settings.profile_dir == custom.resolve() / "browser-profile"
+
+
+def test_packaged_moodle_defaults_are_loadable_and_match_public_templates() -> None:
+    root = Path(__file__).parents[1]
+    settings = Settings()
+    selectors = settings.selectors()
+
+    assert selectors.dashboard_ready
+    assert selectors.course_links
+    assert DEFAULT_CONFIG.read_text(encoding="utf-8") == (
+        root / "config/defaults.toml"
+    ).read_text(encoding="utf-8")
+    assert json.loads(DEFAULT_SELECTORS.read_text(encoding="utf-8")) == json.loads(
+        (root / "config/selectors.example.json").read_text(encoding="utf-8")
+    )
 
 
 def test_runtime_create_builds_the_stable_directory_layout(tmp_path: Path) -> None:

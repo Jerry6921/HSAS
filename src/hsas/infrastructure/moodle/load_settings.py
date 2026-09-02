@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 import tomllib
 
@@ -12,7 +14,9 @@ from hsas.infrastructure.runtime import get_runtime_paths
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_CONFIG = PROJECT_ROOT / "config/defaults.toml"
+PACKAGE_FILES = files("hsas.infrastructure.moodle")
+DEFAULT_CONFIG = PACKAGE_FILES.joinpath("config/defaults.toml")
+DEFAULT_SELECTORS = PACKAGE_FILES.joinpath("config/selectors.example.json")
 ENV_FIELDS = {
     "MOODLE_BASE_URL": "base_url",
     "MOODLE_LOGIN_URL": "login_url",
@@ -44,7 +48,7 @@ class Settings(BaseModel):
     base_url: HttpUrl = HttpUrl("https://moodle.hku.hk")
     login_url: HttpUrl = HttpUrl("https://moodle.hku.hk/login/index.php")
     dashboard_url: HttpUrl = HttpUrl("https://moodle.hku.hk/my/")
-    selector_config: Path = PROJECT_ROOT / "config/selectors.example.json"
+    selector_config: Path | None = None
     profile_dir: Path = Field(
         default_factory=lambda: get_runtime_paths().browser_profile_dir
     )
@@ -61,7 +65,6 @@ class Settings(BaseModel):
         values: dict[str, object] = {
             "profile_dir": paths.browser_profile_dir,
             "output_dir": paths.resources_dir,
-            "selector_config": PROJECT_ROOT / "config/selectors.example.json",
         }
         values.update(_read_moodle_toml(DEFAULT_CONFIG))
         user_values = _read_moodle_toml(paths.config_file)
@@ -89,10 +92,14 @@ class Settings(BaseModel):
         return self
 
     def selectors(self) -> SelectorConfig:
+        if self.selector_config is None:
+            return SelectorConfig.model_validate_json(
+                DEFAULT_SELECTORS.read_text(encoding="utf-8")
+            )
         return SelectorConfig.load(self.selector_config)
 
 
-def _read_moodle_toml(path: Path) -> dict[str, object]:
+def _read_moodle_toml(path: Path | Traversable) -> dict[str, object]:
     if not path.is_file():
         return {}
     try:

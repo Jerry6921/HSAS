@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 
 from .handle_commands import execution_app, materials_app, profile_app
+from .run_dashboard import serve_dashboard
 from hsas.application import PlanGenerationError, assess_plan_freshness
 from hsas.infrastructure.runtime import (
     MigrationError,
@@ -86,6 +87,22 @@ def list_status(
 def login() -> None:
     """Open Moodle and persist the user-completed SSO/MFA session."""
     login_to_moodle()
+
+
+@app.command("ui")
+def ui(
+    ctx: typer.Context,
+    port: Annotated[
+        int,
+        typer.Option(min=0, max=65535, help="Local TCP port; use 0 for an available port"),
+    ] = 8765,
+    open_browser: Annotated[
+        bool,
+        typer.Option("--open/--no-open", help="Open the dashboard in the default browser"),
+    ] = True,
+) -> None:
+    """Run the private HSAS dashboard on this Mac only."""
+    serve_dashboard(_resources(ctx), port=port, open_browser=open_browser)
 
 
 @app.command("sync-courses")

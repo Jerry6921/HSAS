@@ -1,17 +1,22 @@
 import asyncio
 import json
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from hsas.interfaces.run_cli import app
 from hsas.domain.planning.define_profile import StudentProfile
 from hsas.application import assess_plan_freshness
-from hsas.application.synchronize_courses import _persist_course, _resolve_course_target
+from hsas.application.synchronize_courses import (
+    _persist_course,
+    _resolve_course_target,
+    sync_all,
+)
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
 from hsas.infrastructure.moodle.load_settings import Settings
-from hsas.infrastructure.storage.persist_data import write_json, write_model
+from hsas.infrastructure.storage.persist_data import read_json, write_json, write_model
 from hsas.domain.courses.define_assessments import AssessmentOverview
 from hsas.infrastructure.moodle.map_courses import build_course_archive
 
@@ -33,6 +38,7 @@ def test_cli_exposes_only_the_unified_commands() -> None:
         "login",
         "migrate-data",
         "sync-courses",
+        "ui",
         "update-hsas",
         "update-plan",
     }
@@ -69,6 +75,61 @@ def test_unified_sync_command_dispatches_single_or_all(monkeypatch) -> None:
     assert all_result.exit_code == 0
     assert single_result.exit_code == 0
     assert calls == ["all", "single:138907"]
+
+
+def test_empty_course_discovery_preserves_last_known_sync_status(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    settings = Settings(
+        base_url="https://moodle.example.edu",
+        login_url="https://moodle.example.edu/login/index.php",
+        dashboard_url="https://moodle.example.edu/my/",
+        selector_config=ROOT / "config/selectors.example.json",
+        profile_dir=tmp_path / "profile",
+        output_dir=tmp_path / "output",
+    )
+    previous_report = {"schema_version": "2.0", "courses": {"1": {"succeeded": True}}}
+    previous_courses = [{"course_id": "1", "title": "Existing Course"}]
+    write_json(settings.output_dir / "sync-report.json", previous_report)
+    write_json(settings.output_dir / "courses.json", previous_courses)
+
+    class FakeProgress:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def add_operation(self, *_args):
+            return 1
+
+    @asynccontextmanager
+    async def fake_context(*_args, **_kwargs):
+        yield object()
+
+    async def fake_open_page(*_args, **_kwargs):
+        return object()
+
+    async def fake_discovery(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("hsas.application.synchronize_courses.SyncProgress", FakeProgress)
+    monkeypatch.setattr(
+        "hsas.application.synchronize_courses.persistent_context",
+        fake_context,
+    )
+    monkeypatch.setattr("hsas.application.synchronize_courses.open_page", fake_open_page)
+    monkeypatch.setattr(
+        "hsas.application.synchronize_courses.discover_all_course_states",
+        fake_discovery,
+    )
+
+    with pytest.raises(RuntimeError, match="No courses were discovered"):
+        sync_all(settings)
+
+    assert read_json(settings.output_dir / "sync-report.json") == previous_report
+    assert read_json(settings.output_dir / "courses.json") == previous_courses
 
 
 def test_profile_cli_requires_confirmation_then_applies_valid_patch(

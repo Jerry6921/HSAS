@@ -4,6 +4,7 @@ import asyncio
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urljoin, urlparse
 
 import typer
@@ -48,6 +49,14 @@ class SyncBatchResult:
     succeeded_course_ids: tuple[str, ...]
     failures: tuple[dict[str, str], ...]
     report_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class MoodleSessionResult:
+    status: str
+    checked_at: str
+    available_course_count: int
+    error: str | None = None
 
 def _settings() -> Settings:
     return Settings.load()
@@ -220,6 +229,99 @@ def login(settings: Settings | None = None) -> None:
             typer.echo(f"Session saved in {active_settings.profile_dir}")
 
     asyncio.run(run())
+
+
+def check_login_status(settings: Settings | None = None) -> MoodleSessionResult:
+    """Check the saved Moodle session without changing course data."""
+    active_settings = settings or _settings()
+
+    async def run() -> MoodleSessionResult:
+        try:
+            async with persistent_context(active_settings) as context:
+                page = await open_page(context, str(active_settings.dashboard_url))
+                selectors = active_settings.selectors()
+                available = await discover_courses(
+                    page,
+                    dashboard_url=str(active_settings.dashboard_url),
+                    selectors=selectors,
+                )
+                dashboard_found = any(
+                    [await page.locator(css).count() for css in selectors.dashboard_ready]
+                )
+                redirected_to_login = page.url.startswith(str(active_settings.login_url))
+                status = (
+                    "logged_out"
+                    if redirected_to_login
+                    else "logged_in"
+                    if dashboard_found or available
+                    else "unknown"
+                )
+                error = (
+                    "Moodle opened, but the dashboard and course links were not recognized."
+                    if status == "unknown"
+                    else None
+                )
+        except Exception as exc:
+            status = "unknown"
+            available = []
+            error = f"{type(exc).__name__}: {str(exc)[:300]}"
+        return MoodleSessionResult(
+            status=status,
+            checked_at=datetime.now(timezone.utc).isoformat(),
+            available_course_count=len(available),
+            error=error,
+        )
+
+    return asyncio.run(run())
+
+
+def login_until_ready(
+    settings: Settings | None = None,
+    *,
+    timeout_seconds: int = 300,
+) -> MoodleSessionResult:
+    """Open visible Moodle login and wait for the user-completed SSO flow."""
+    active_settings = settings or _settings()
+    if timeout_seconds < 30 or timeout_seconds > 900:
+        raise ValueError("login timeout must be between 30 and 900 seconds")
+
+    async def run() -> MoodleSessionResult:
+        async with persistent_context(active_settings, headless=False) as context:
+            await open_page(context, str(active_settings.login_url))
+            moodle_host = urlparse(str(active_settings.base_url)).netloc
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
+            while asyncio.get_running_loop().time() < deadline:
+                moodle_pages = [
+                    candidate
+                    for candidate in context.pages
+                    if urlparse(candidate.url).netloc == moodle_host
+                    and not candidate.url.startswith(str(active_settings.login_url))
+                ]
+                if moodle_pages:
+                    page = await open_page(context, str(active_settings.dashboard_url))
+                    selectors = active_settings.selectors()
+                    available = await discover_courses(
+                        page,
+                        dashboard_url=str(active_settings.dashboard_url),
+                        selectors=selectors,
+                    )
+                    dashboard_found = any(
+                        [await page.locator(css).count() for css in selectors.dashboard_ready]
+                    )
+                    if dashboard_found or available:
+                        return MoodleSessionResult(
+                            status="logged_in",
+                            checked_at=datetime.now(timezone.utc).isoformat(),
+                            available_course_count=len(available),
+                        )
+                    raise RuntimeError(
+                        "Moodle login returned, but the dashboard and course links "
+                        "were not recognized. Selector configuration may need updating."
+                    )
+                await asyncio.sleep(1)
+        raise RuntimeError("Moodle login timed out before the dashboard became available.")
+
+    return asyncio.run(run())
 
 
 def list_courses(settings: Settings | None = None) -> None:
@@ -399,6 +501,12 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
                         )
                     ),
                 )
+                if not results:
+                    raise RuntimeError(
+                        "No courses were discovered. The Moodle session may have "
+                        "expired or dashboard selectors may need updating; existing "
+                        "course archives and synchronization status were retained."
+                    )
                 progress.finish_operation(
                     discovery_task,
                     f"{len(results)} courses discovered",

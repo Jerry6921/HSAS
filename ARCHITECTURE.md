@@ -25,7 +25,7 @@ presentation and exit codes; infrastructure owns external and filesystem effects
 
 ```text
 src/hsas/
-├── interfaces/       # CLI and agent adapters
+├── interfaces/       # CLI, local web UI, and agent adapters
 ├── application/      # synchronization, planning, retrieval, Profile/Execution use cases
 ├── domain/
 │   ├── courses/      # course, assessment, document contracts and rules
@@ -66,6 +66,15 @@ revisions. `assess_plan_freshness` compares those revisions with current inputs
 and exposes synchronization failures. Confirmed Profile/Execution mutations and
 successful course syncs request an automatic replan. If planning fails, confirmed
 inputs and the prior valid Plan remain intact and status reports the Plan as stale.
+
+## Local dashboard boundary
+
+`hsas ui` binds only to `127.0.0.1` and serves packaged static assets plus a small JSON API.
+Read operations validate the same domain models used by the CLI. Confirmed execution writes call
+the application service and request a validated replan; synchronization calls the existing
+Collector transaction. The UI never patches Profile, CourseArchive, Execution Log, or Integrated
+Plan JSON directly. Write requests require JSON plus a custom local-request header, and the server
+does not enable cross-origin access.
 
 ## Update trust boundary
 

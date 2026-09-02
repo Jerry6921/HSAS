@@ -8,13 +8,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from hsas.application.ports.define_repositories import PlanningRepository
 from hsas.domain.planning.define_execution import ExecutionLog
 from hsas.domain.planning.define_plan import IntegratedPlan
 from hsas.domain.planning.validate_plan import PlanValidationReport, validate_integrated_plan
 from hsas.domain.planning.generate_plan import PlannerEngine
 from hsas.domain.planning.define_profile import StudentProfile
-from hsas.infrastructure.storage.persist_data import write_model
-from hsas.infrastructure.moodle.record_sync import sync_warnings
 from hsas.domain.courses import ArchiveIndex
 
 
@@ -50,17 +49,20 @@ class PlanFreshness:
     reasons: tuple[str, ...]
 
 
-def generate_validated_plan(request: PlanGenerationRequest) -> PlanGenerationResult:
+def generate_validated_plan(
+    request: PlanGenerationRequest,
+    repository: PlanningRepository,
+) -> PlanGenerationResult:
     resources = request.resources_dir
     profile_path = request.profile_path or resources / "student_profile.json"
     output_path = request.output_path or resources / "integrated_plan.json"
     execution_path = request.execution_path or resources / "execution_log.json"
-    profile = _load_profile(profile_path)
-    archives = _load_archives(resources)
+    profile = _load_profile(profile_path, repository)
+    archives = _load_archives(resources, repository)
     existing = None
-    if output_path.exists() and not request.fresh:
-        existing = _load_plan(output_path)
-    execution_log = _load_execution_log(execution_path)
+    if repository.plan_exists(output_path) and not request.fresh:
+        existing = _load_plan(output_path, repository)
+    execution_log = _load_execution_log(execution_path, repository)
     try:
         start_date = Date.fromisoformat(request.start) if request.start else None
     except ValueError as exc:
@@ -74,27 +76,30 @@ def generate_validated_plan(request: PlanGenerationRequest) -> PlanGenerationRes
         horizon_days=request.days,
     )
     course_ids = {index.archive.course.course_id for index in archives}
-    source_warnings = sync_warnings(resources, course_ids)
+    source_warnings = repository.sync_warnings(resources, course_ids)
     plan.source_snapshot.warnings = source_warnings
     plan.plan_warnings = list(dict.fromkeys([*plan.plan_warnings, *source_warnings]))
     report = validate_integrated_plan(plan, profile, archives, execution_log)
     if not report.valid:
         raise PlanGenerationError("generated Integrated Plan failed validation", report)
-    write_model(output_path, plan)
+    repository.save_plan(output_path, plan)
     return PlanGenerationResult(plan=plan, report=report, output_path=output_path)
 
 
-def assess_plan_freshness(resources_dir: Path) -> PlanFreshness:
+def assess_plan_freshness(
+    resources_dir: Path,
+    repository: PlanningRepository,
+) -> PlanFreshness:
     """Compare a plan's recorded source revisions with current validated inputs."""
     plan_path = resources_dir / "integrated_plan.json"
-    if not plan_path.is_file():
+    if not repository.plan_exists(plan_path):
         return PlanFreshness(False, ("Integrated Plan does not exist.",))
     reasons: list[str] = []
     try:
-        plan = _load_plan(plan_path)
-        profile = _load_profile(resources_dir / "student_profile.json")
-        execution = _load_execution_log(resources_dir / "execution_log.json")
-        archives = _load_archives(resources_dir)
+        plan = _load_plan(plan_path, repository)
+        profile = _load_profile(resources_dir / "student_profile.json", repository)
+        execution = _load_execution_log(resources_dir / "execution_log.json", repository)
+        archives = _load_archives(resources_dir, repository)
     except PlanGenerationError as exc:
         return PlanFreshness(False, (str(exc),))
     snapshot = plan.source_snapshot
@@ -115,41 +120,42 @@ def assess_plan_freshness(resources_dir: Path) -> PlanFreshness:
     }
     if expected != current:
         reasons.append("Course archives changed after the current Plan was generated.")
-    reasons.extend(sync_warnings(resources_dir, set(current)))
+    reasons.extend(repository.sync_warnings(resources_dir, set(current)))
     return PlanFreshness(not reasons, tuple(dict.fromkeys(reasons)))
 
 
-def _load_profile(path: Path) -> StudentProfile:
-    if not path.exists():
+def _load_profile(path: Path, repository: PlanningRepository) -> StudentProfile:
+    if not repository.profile_exists(path):
         raise PlanGenerationError(f"profile does not exist: {path}")
     try:
-        return StudentProfile.model_validate_json(path.read_text(encoding="utf-8"))
+        return repository.load_profile(path)
     except (OSError, ValidationError) as exc:
         raise PlanGenerationError(f"invalid Student Profile {path}: {exc}") from exc
 
 
-def _load_plan(path: Path) -> IntegratedPlan:
+def _load_plan(path: Path, repository: PlanningRepository) -> IntegratedPlan:
     try:
-        return IntegratedPlan.model_validate_json(path.read_text(encoding="utf-8"))
+        return repository.load_plan(path)
     except (OSError, ValidationError) as exc:
         raise PlanGenerationError(f"invalid Integrated Plan {path}: {exc}") from exc
 
 
-def _load_execution_log(path: Path) -> ExecutionLog:
-    if not path.exists():
-        return ExecutionLog()
+def _load_execution_log(path: Path, repository: PlanningRepository) -> ExecutionLog:
     try:
-        return ExecutionLog.model_validate_json(path.read_text(encoding="utf-8"))
+        return repository.load_execution_log(path)
     except (OSError, ValidationError) as exc:
         raise PlanGenerationError(f"invalid Execution Log {path}: {exc}") from exc
 
 
-def _load_archives(resources_dir: Path) -> list[ArchiveIndex]:
+def _load_archives(
+    resources_dir: Path,
+    repository: PlanningRepository,
+) -> list[ArchiveIndex]:
     courses_dir = resources_dir / "courses"
-    paths = sorted(courses_dir.glob("*/course.json"))
-    if not paths:
-        raise PlanGenerationError(f"no course archives found under {courses_dir}; sync Moodle first")
     try:
-        return [ArchiveIndex.from_json(path) for path in paths]
+        archives = repository.load_archives(resources_dir)
     except (OSError, ValidationError, ValueError) as exc:
         raise PlanGenerationError(f"invalid course archive: {exc}") from exc
+    if not archives:
+        raise PlanGenerationError(f"no course archives found under {courses_dir}; sync Moodle first")
+    return archives

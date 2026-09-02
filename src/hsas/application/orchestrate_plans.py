@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hsas.application.ports.define_repositories import PlanningRepository
 from hsas.application.generate_plans import (
     PlanGenerationRequest,
     PlanGenerationResult,
@@ -19,6 +20,8 @@ def generate_plan(
     days: int | None = None,
     start: str | None = None,
     fresh: bool = False,
+    *,
+    repository: PlanningRepository,
 ) -> PlanGenerationResult:
     if resources_dir is None:
         raise ValueError("resources_dir is required by the application boundary")
@@ -31,5 +34,6 @@ def generate_plan(
             days=days,
             start=start,
             fresh=fresh,
-        )
+        ),
+        repository,
     )

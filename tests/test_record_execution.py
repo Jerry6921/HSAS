@@ -21,9 +21,11 @@ from hsas.domain.planning.define_plan import (
     PriorityDecision,
 )
 from hsas.infrastructure.storage.persist_data import write_model
+from hsas.infrastructure.storage import JsonPlanningRepository
 
 
 ZONE = ZoneInfo("Asia/Hong_Kong")
+REPOSITORY = JsonPlanningRepository()
 
 
 def _paths(tmp_path: Path) -> tuple[Path, Path]:
@@ -70,6 +72,7 @@ def test_add_execution_derives_item_type_and_is_idempotent(tmp_path: Path) -> No
         "planned_minutes": 60,
         "record_id": "execution:test:1",
         "recorded_at": stamp,
+        "repository": REPOSITORY,
     }
 
     log, record, created = add_execution_record(log_path, plan_path, **arguments)
@@ -85,7 +88,7 @@ def test_add_execution_derives_item_type_and_is_idempotent(tmp_path: Path) -> No
     assert record.item_type == "assessment"
     assert record.planned_minutes == 60
     assert len(log.records) == len(retried_log.records) == 1
-    assert len(load_execution_log(log_path).records) == 1
+    assert len(load_execution_log(log_path, REPOSITORY).records) == 1
 
 
 def test_execution_duplicate_conflict_and_unknown_reference_do_not_write(
@@ -102,6 +105,7 @@ def test_execution_duplicate_conflict_and_unknown_reference_do_not_write(
         planned_minutes=60,
         record_id="execution:test:1",
         recorded_at=stamp,
+        repository=REPOSITORY,
     )
     before = log_path.read_text(encoding="utf-8")
 
@@ -115,6 +119,7 @@ def test_execution_duplicate_conflict_and_unknown_reference_do_not_write(
             planned_minutes=60,
             record_id="execution:test:1",
             recorded_at=stamp,
+            repository=REPOSITORY,
         )
     with pytest.raises(ExecutionServiceError, match="unknown plan_item_id"):
         add_execution_record(
@@ -124,6 +129,7 @@ def test_execution_duplicate_conflict_and_unknown_reference_do_not_write(
             actual_minutes=30,
             progress_minutes=30,
             planned_minutes=30,
+            repository=REPOSITORY,
         )
 
     assert log_path.read_text(encoding="utf-8") == before
@@ -141,6 +147,7 @@ def test_correct_execution_preserves_identity_and_revalidates_reference(
         progress_minutes=40,
         planned_minutes=60,
         record_id="execution:test:1",
+        repository=REPOSITORY,
     )
 
     log, corrected = correct_execution_record(
@@ -151,6 +158,7 @@ def test_correct_execution_preserves_identity_and_revalidates_reference(
         progress_minutes=50,
         item_completed=True,
         notes="Student-confirmed correction",
+        repository=REPOSITORY,
     )
 
     assert corrected.record_id == "execution:test:1"

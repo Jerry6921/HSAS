@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from hsas.infrastructure.storage.persist_data import read_json, write_model
+from hsas.application.ports.define_repositories import PlanningRepository
 from hsas.domain.planning.define_execution import ExecutionLog, ExecutionRecord
 from hsas.domain.planning.define_plan import IntegratedPlan, PlanItem
 
@@ -16,20 +16,18 @@ class ExecutionServiceError(ValueError):
     """Raised when an execution mutation is invalid or conflicts with the plan."""
 
 
-def load_execution_log(path: Path) -> ExecutionLog:
-    if not path.exists():
-        return ExecutionLog()
+def load_execution_log(path: Path, repository: PlanningRepository) -> ExecutionLog:
     try:
-        return ExecutionLog.model_validate(read_json(path))
+        return repository.load_execution_log(path)
     except (OSError, ValueError, ValidationError) as exc:
         raise ExecutionServiceError(f"invalid Execution Log {path}: {exc}") from exc
 
 
-def load_plan(path: Path) -> IntegratedPlan:
-    if not path.exists():
+def load_plan(path: Path, repository: PlanningRepository) -> IntegratedPlan:
+    if not repository.plan_exists(path):
         raise ExecutionServiceError(f"Integrated Plan does not exist: {path}")
     try:
-        return IntegratedPlan.model_validate(read_json(path))
+        return repository.load_plan(path)
     except (OSError, ValueError, ValidationError) as exc:
         raise ExecutionServiceError(f"invalid Integrated Plan {path}: {exc}") from exc
 
@@ -46,9 +44,10 @@ def add_execution_record(
     notes: str | None = None,
     record_id: str | None = None,
     recorded_at: datetime | None = None,
+    repository: PlanningRepository,
 ) -> tuple[ExecutionLog, ExecutionRecord, bool]:
     """Append one confirmed event; an identical record ID is a safe retry."""
-    plan = load_plan(plan_path)
+    plan = load_plan(plan_path, repository)
     item = _plan_item(plan, plan_item_id)
     stamp = recorded_at or datetime.now(UTC)
     if stamp.tzinfo is None:
@@ -72,7 +71,7 @@ def add_execution_record(
     except ValidationError as exc:
         raise ExecutionServiceError(f"execution record failed validation: {exc}") from exc
 
-    log = load_execution_log(log_path)
+    log = load_execution_log(log_path, repository)
     for existing in log.records:
         if existing.record_id != resolved_id:
             continue
@@ -88,7 +87,7 @@ def add_execution_record(
         validated = ExecutionLog.model_validate(log.model_dump(mode="json"))
     except ValidationError as exc:
         raise ExecutionServiceError(f"Execution Log failed validation: {exc}") from exc
-    write_model(log_path, validated)
+    repository.save_execution_log(log_path, validated)
     return validated, record, True
 
 
@@ -101,6 +100,7 @@ def correct_execution_record(
     progress_minutes: int | None = None,
     item_completed: bool | None = None,
     notes: str | None = None,
+    repository: PlanningRepository,
 ) -> tuple[ExecutionLog, ExecutionRecord]:
     """Correct confirmed mutable values while preserving record identity."""
     if all(
@@ -108,8 +108,8 @@ def correct_execution_record(
         for value in (actual_minutes, progress_minutes, item_completed, notes)
     ):
         raise ExecutionServiceError("provide at least one corrected value")
-    plan = load_plan(plan_path)
-    log = load_execution_log(log_path)
+    plan = load_plan(plan_path, repository)
+    log = load_execution_log(log_path, repository)
     position = next(
         (index for index, record in enumerate(log.records) if record.record_id == record_id),
         None,
@@ -141,7 +141,7 @@ def correct_execution_record(
     log.records[position] = corrected
     log.updated_at = datetime.now(UTC)
     validated = ExecutionLog.model_validate(log.model_dump(mode="json"))
-    write_model(log_path, validated)
+    repository.save_execution_log(log_path, validated)
     return validated, corrected
 
 

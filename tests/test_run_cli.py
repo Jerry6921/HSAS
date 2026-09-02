@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from hsas.interfaces.run_cli import app
 from hsas.domain.planning.define_profile import StudentProfile
 from hsas.application import assess_plan_freshness
-from hsas.application.synchronize_courses import (
+from hsas.infrastructure.moodle.synchronize_courses import (
     _persist_course,
     _resolve_course_target,
     sync_all,
@@ -17,11 +17,13 @@ from hsas.application.synchronize_courses import (
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.storage.persist_data import read_json, write_json, write_model
+from hsas.infrastructure.storage import JsonPlanningRepository
 from hsas.domain.courses.define_assessments import AssessmentOverview
 from hsas.infrastructure.moodle.map_courses import build_course_archive
 
 
 ROOT = Path(__file__).parents[1]
+REPOSITORY = JsonPlanningRepository()
 
 
 def test_cli_exposes_only_the_unified_commands() -> None:
@@ -114,14 +116,14 @@ def test_empty_course_discovery_preserves_last_known_sync_status(
     async def fake_discovery(*_args, **_kwargs):
         return []
 
-    monkeypatch.setattr("hsas.application.synchronize_courses.SyncProgress", FakeProgress)
+    monkeypatch.setattr("hsas.infrastructure.moodle.synchronize_courses.SyncProgress", FakeProgress)
     monkeypatch.setattr(
-        "hsas.application.synchronize_courses.persistent_context",
+        "hsas.infrastructure.moodle.synchronize_courses.persistent_context",
         fake_context,
     )
-    monkeypatch.setattr("hsas.application.synchronize_courses.open_page", fake_open_page)
+    monkeypatch.setattr("hsas.infrastructure.moodle.synchronize_courses.open_page", fake_open_page)
     monkeypatch.setattr(
-        "hsas.application.synchronize_courses.discover_all_course_states",
+        "hsas.infrastructure.moodle.synchronize_courses.discover_all_course_states",
         fake_discovery,
     )
 
@@ -222,7 +224,7 @@ def test_confirmed_profile_mutation_replans_canonical_resources(tmp_path: Path) 
 
     assert result.exit_code == 0
     assert "Plan refreshed and validated" in result.stdout
-    assert assess_plan_freshness(tmp_path).current is True
+    assert assess_plan_freshness(tmp_path, REPOSITORY).current is True
 
 
 def test_shared_sync_flow_always_runs_assessment_parser(
@@ -269,15 +271,15 @@ def test_shared_sync_flow_always_runs_assessment_parser(
         return AssessmentOverview()
 
     monkeypatch.setattr(
-        "hsas.application.synchronize_courses.download_course_files",
+        "hsas.infrastructure.moodle.synchronize_courses.download_course_files",
         fake_download,
     )
     monkeypatch.setattr(
-        "hsas.application.synchronize_courses.analyze_course_pdfs",
+        "hsas.infrastructure.moodle.synchronize_courses.analyze_course_pdfs",
         fake_pdf_analysis,
     )
     monkeypatch.setattr(
-        "hsas.application.synchronize_courses.build_assessment_overview",
+        "hsas.infrastructure.moodle.synchronize_courses.build_assessment_overview",
         fake_assessment_parser,
     )
 

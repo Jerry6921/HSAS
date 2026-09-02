@@ -22,16 +22,14 @@ from hsas.domain.planning.define_profile import StudentProfile
 from hsas.application.orchestrate_plans import generate_plan
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.domain.courses.detect_changes import CourseChangeSet
-from hsas.application.synchronize_courses import (
-    list_courses,
-    login as login_to_moodle,
-    sync_all,
-    sync_course,
-)
+from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
+from hsas.infrastructure.storage import JsonPlanningRepository
 from hsas.infrastructure.updates import UpdateError, update_installation
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PLANNING_REPOSITORY = JsonPlanningRepository()
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -74,7 +72,7 @@ def list_status(
     """Show Moodle, course sync, Profile, execution, and plan status."""
     resources_dir = resources_dir or _resources(ctx)
     typer.echo(f"Resources: {resources_dir}")
-    list_courses(Settings.load(output_dir=resources_dir))
+    _show_course_catalog(list_courses(Settings.load(output_dir=resources_dir)))
     typer.echo("\nPlanning status:")
     _show_profile(resources_dir / "student_profile.json")
     _show_execution_log(resources_dir / "execution_log.json")
@@ -123,8 +121,18 @@ def sync_courses(
     settings = Settings.load(output_dir=_resources(ctx))
     if course is None:
         result = sync_all(settings)
+        if result is not None:
+            typer.echo(
+                f"Synced {len(result.succeeded_course_ids)}/{result.discovered_course_count} "
+                f"courses; {len(result.failures)} failed -> {result.report_path}"
+            )
     else:
         result = sync_course(course, settings)
+        if result is not None:
+            typer.echo(
+                f"Synced {result.course_title}: {result.change_count} change(s) -> "
+                f"{result.output_path}"
+            )
     if replan and result is not None:
         _refresh_plan_if_ready(settings.output_dir)
 
@@ -172,6 +180,7 @@ def update_plan(
             days=days,
             start=start,
             fresh=fresh,
+            repository=PLANNING_REPOSITORY,
         )
     except (PlanGenerationError, ValueError) as exc:
         if isinstance(exc, PlanGenerationError) and exc.report is not None:
@@ -288,7 +297,7 @@ def _show_plan(path: Path) -> None:
 
 
 def _show_plan_freshness(resources_dir: Path) -> None:
-    freshness = assess_plan_freshness(resources_dir)
+    freshness = assess_plan_freshness(resources_dir, PLANNING_REPOSITORY)
     typer.echo(f"  Plan freshness: {'current' if freshness.current else 'stale'}")
     for reason in freshness.reasons:
         typer.echo(f"    - {reason}")
@@ -321,7 +330,10 @@ def _refresh_plan_if_ready(resources_dir: Path) -> None:
         typer.echo("Plan refresh deferred: Student Profile does not exist.")
         return
     try:
-        result = generate_plan(resources_dir=resources_dir)
+        result = generate_plan(
+            resources_dir=resources_dir,
+            repository=PLANNING_REPOSITORY,
+        )
     except (PlanGenerationError, ValueError) as exc:
         typer.echo(f"Plan refresh deferred; existing Plan retained: {exc}", err=True)
         return
@@ -339,6 +351,51 @@ def _print_validation_report(report) -> None:
     for issue in [*report.errors, *report.warnings]:
         paths = f" [{', '.join(issue.paths)}]" if issue.paths else ""
         typer.echo(f"  {issue.severity.upper()} {issue.code}: {issue.message}{paths}")
+
+
+def _course_service(settings: Settings | None = None) -> CourseSynchronizationService:
+    return CourseSynchronizationService(
+        MoodleCourseGateway(
+            settings,
+            notify=typer.echo,
+            wait_for_user=input,
+        )
+    )
+
+
+def login_to_moodle() -> None:
+    _course_service().login()
+
+
+def list_courses(settings: Settings):
+    return _course_service(settings).list_courses()
+
+
+def sync_course(course: str, settings: Settings):
+    return _course_service(settings).sync_course(course)
+
+
+def sync_all(settings: Settings):
+    return _course_service(settings).sync_all()
+
+
+def _show_course_catalog(catalog) -> None:
+    typer.echo(f"Login status: {catalog.login_status}")
+    if catalog.login_error:
+        typer.echo(f"Login check error: {catalog.login_error}")
+    typer.echo(f"\nAvailable courses ({len(catalog.available)}):")
+    if not catalog.available:
+        typer.echo("  None. Run `hsas login` if the session expired.")
+    for course in catalog.available:
+        local_status = "downloaded" if course.downloaded else "not downloaded"
+        typer.echo(f"  {course.course_id} [{local_status}] {course.title}")
+        if course.url:
+            typer.echo(f"    {course.url}")
+    typer.echo(f"\nDownloaded courses ({len(catalog.downloaded)}):")
+    if not catalog.downloaded:
+        typer.echo("  None")
+    for course in catalog.downloaded:
+        typer.echo(f"  {course.course_id} {course.title}")
 
 
 if __name__ == "__main__":

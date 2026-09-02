@@ -11,9 +11,11 @@ from hsas.domain.planning.define_profile import StudentProfile
 from hsas.application.update_profile import apply_profile_patch
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
 from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.storage import JsonPlanningRepository
 
 
 ROOT = Path(__file__).parents[1]
+REPOSITORY = JsonPlanningRepository()
 
 
 def test_plan_freshness_detects_confirmed_input_change(tmp_path: Path) -> None:
@@ -36,15 +38,16 @@ def test_plan_freshness_detects_confirmed_input_change(tmp_path: Path) -> None:
         ],
     )
 
-    generate_validated_plan(PlanGenerationRequest(resources_dir=resources))
-    assert assess_plan_freshness(resources).current is True
+    generate_validated_plan(PlanGenerationRequest(resources_dir=resources), REPOSITORY)
+    assert assess_plan_freshness(resources, REPOSITORY).current is True
 
     apply_profile_patch(
         profile_path,
         {"identity": {"preferred_name": "Jerry"}},
         confirmed=True,
+        repository=REPOSITORY,
     )
-    freshness = assess_plan_freshness(resources)
+    freshness = assess_plan_freshness(resources, REPOSITORY)
 
     assert freshness.current is False
     assert any("Profile changed" in reason for reason in freshness.reasons)

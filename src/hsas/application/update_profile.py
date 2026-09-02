@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 from pydantic import ValidationError
 
-from hsas.infrastructure.storage.persist_data import read_json, write_model
+from hsas.application.ports.define_repositories import PlanningRepository
 from hsas.domain.planning.define_profile import StudentProfile
 
 
@@ -33,11 +33,11 @@ class ProfileServiceError(ValueError):
     """Raised when a requested Profile mutation is unsafe or invalid."""
 
 
-def load_profile(path: Path) -> StudentProfile:
-    if not path.exists():
+def load_profile(path: Path, repository: PlanningRepository) -> StudentProfile:
+    if not repository.profile_exists(path):
         raise ProfileServiceError(f"profile does not exist: {path}")
     try:
-        return StudentProfile.model_validate(read_json(path))
+        return repository.load_profile(path)
     except (OSError, ValueError, ValidationError) as exc:
         raise ProfileServiceError(f"invalid Student Profile {path}: {exc}") from exc
 
@@ -47,6 +47,7 @@ def apply_profile_patch(
     patch: Mapping[str, Any],
     *,
     confirmed: bool,
+    repository: PlanningRepository,
 ) -> tuple[StudentProfile, list[str]]:
     """Deep-merge a confirmed patch, validate the whole Profile, and write it."""
     if not confirmed:
@@ -61,7 +62,7 @@ def apply_profile_patch(
             + ", ".join(protected)
         )
 
-    existing = load_profile(path)
+    existing = load_profile(path, repository)
     forbidden = DEFAULT_FORBIDDEN_KEYS | {
         _normalize_key(value) for value in existing.write_policy.never_store_fields
     }
@@ -91,7 +92,7 @@ def apply_profile_patch(
         profile = StudentProfile.model_validate(candidate)
     except ValidationError as exc:
         raise ProfileServiceError(f"Profile patch failed validation: {exc}") from exc
-    write_model(path, profile)
+    repository.save_profile(path, profile)
     return profile, changed_fields
 
 

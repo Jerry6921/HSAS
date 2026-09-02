@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hku-study-assistance-system"
-version = "0.3.0"
+version = "0.4.0"
 description = "HKU Study Assistance System with Moodle collection, deterministic prioritization, and local RAG"
 readme = "README.md"
 license = "MIT"

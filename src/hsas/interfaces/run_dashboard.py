@@ -22,12 +22,7 @@ from hsas.application import (
     generate_validated_plan,
 )
 from hsas.application.record_execution import ExecutionServiceError, add_execution_record
-from hsas.application.synchronize_courses import (
-    check_login_status,
-    login_until_ready,
-    sync_all,
-    sync_course,
-)
+from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.domain.courses import ArchiveIndex
 from hsas.domain.courses.define_courses import (
     CourseActivity,
@@ -37,6 +32,8 @@ from hsas.domain.courses.define_courses import (
 )
 from hsas.domain.planning.define_plan import IntegratedPlan, PlanItem
 from hsas.infrastructure.moodle.load_settings import Settings
+from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
+from hsas.infrastructure.storage import JsonPlanningRepository
 from hsas.infrastructure.storage.persist_data import read_json
 
 
@@ -48,6 +45,7 @@ ALLOWED_ASSETS = {
     "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
 PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "planned": 3}
+PLANNING_REPOSITORY = JsonPlanningRepository()
 
 
 class DashboardError(RuntimeError):
@@ -61,7 +59,7 @@ class DashboardService:
 
     def snapshot(self) -> dict[str, Any]:
         plan, plan_error = self._load_plan()
-        freshness = assess_plan_freshness(self.resources_dir)
+        freshness = assess_plan_freshness(self.resources_dir, PLANNING_REPOSITORY)
         courses = self._load_courses()
         sync_report = self._load_sync_report()
         items = [] if plan is None else [self._present_item(item) for item in plan.items]
@@ -137,6 +135,7 @@ class DashboardService:
                     item_completed=completed,
                     notes=notes,
                     record_id=record_id,
+                    repository=PLANNING_REPOSITORY,
                 )
             except ExecutionServiceError as exc:
                 raise DashboardError(str(exc)) from exc
@@ -145,7 +144,8 @@ class DashboardService:
             refresh_error: str | None = None
             try:
                 generate_validated_plan(
-                    PlanGenerationRequest(resources_dir=self.resources_dir)
+                    PlanGenerationRequest(resources_dir=self.resources_dir),
+                    PLANNING_REPOSITORY,
                 )
                 plan_refreshed = True
             except (PlanGenerationError, ValueError) as exc:
@@ -180,7 +180,8 @@ class DashboardService:
             if (self.resources_dir / "student_profile.json").is_file():
                 try:
                     generate_validated_plan(
-                        PlanGenerationRequest(resources_dir=self.resources_dir)
+                        PlanGenerationRequest(resources_dir=self.resources_dir),
+                        PLANNING_REPOSITORY,
                     )
                     plan_refreshed = True
                 except (PlanGenerationError, ValueError) as exc:
@@ -669,6 +670,26 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+
+def _course_service(settings: Settings) -> CourseSynchronizationService:
+    return CourseSynchronizationService(MoodleCourseGateway(settings))
+
+
+def check_login_status(settings: Settings):
+    return _course_service(settings).check_login_status()
+
+
+def login_until_ready(settings: Settings):
+    return _course_service(settings).login_until_ready()
+
+
+def sync_course(course: str, settings: Settings):
+    return _course_service(settings).sync_course(course)
+
+
+def sync_all(settings: Settings):
+    return _course_service(settings).sync_all()
 
 
 def build_dashboard_server(

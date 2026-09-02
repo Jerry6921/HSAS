@@ -277,7 +277,7 @@ def test_execution_requires_confirmation_then_uses_validated_service(
 
     monkeypatch.setattr(
         "hsas.interfaces.run_dashboard.generate_validated_plan",
-        lambda _request: object(),
+        lambda _request, _repository: object(),
     )
     payload["confirmed"] = True
     result = service.record_execution(payload)

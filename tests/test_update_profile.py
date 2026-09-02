@@ -10,6 +10,10 @@ from hsas.application.update_profile import (
     load_profile,
 )
 from hsas.infrastructure.storage.persist_data import write_model
+from hsas.infrastructure.storage import JsonPlanningRepository
+
+
+REPOSITORY = JsonPlanningRepository()
 
 
 def _profile_path(tmp_path: Path) -> Path:
@@ -38,6 +42,7 @@ def test_profile_patch_deep_merges_validates_and_sets_provenance(tmp_path: Path)
             },
         },
         confirmed=True,
+        repository=REPOSITORY,
     )
 
     assert changed == ["availability", "identity", "profile_status"]
@@ -46,7 +51,7 @@ def test_profile_patch_deep_merges_validates_and_sets_provenance(tmp_path: Path)
     assert profile.updated_at is not None
     assert profile.provenance.confirmed_by_user is True
     assert profile.provenance.last_confirmed_at is not None
-    assert load_profile(path) == profile
+    assert load_profile(path, REPOSITORY) == profile
 
 
 def test_profile_patch_requires_confirmation_and_rejects_secrets(tmp_path: Path) -> None:
@@ -54,12 +59,18 @@ def test_profile_patch_requires_confirmation_and_rejects_secrets(tmp_path: Path)
     original = path.read_text(encoding="utf-8")
 
     with pytest.raises(ProfileServiceError, match="explicit user confirmation"):
-        apply_profile_patch(path, {"identity": {"preferred_name": "J"}}, confirmed=False)
+        apply_profile_patch(
+            path,
+            {"identity": {"preferred_name": "J"}},
+            confirmed=False,
+            repository=REPOSITORY,
+        )
     with pytest.raises(ProfileServiceError, match="forbidden authentication"):
         apply_profile_patch(
             path,
             {"identity": {"cookie": "secret"}},
             confirmed=True,
+            repository=REPOSITORY,
         )
 
     assert path.read_text(encoding="utf-8") == original
@@ -86,6 +97,7 @@ def test_invalid_profile_patch_never_replaces_last_good_file(tmp_path: Path) -> 
                 }
             },
             confirmed=True,
+            repository=REPOSITORY,
         )
 
     assert json.loads(path.read_text(encoding="utf-8")) == before

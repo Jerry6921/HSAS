@@ -13,7 +13,9 @@ hsas.application
       v
 hsas.domain
 
-hsas.infrastructure implements Moodle, documents, storage, runtime, and updates.
+hsas.application owns ports (Python `Protocol` contracts). `hsas.infrastructure`
+implements those ports for Moodle and JSON storage; `hsas.interfaces` selects and
+injects the concrete adapters at each CLI or dashboard composition root.
 ```
 
 Folders are nouns that express architectural ownership. Ordinary Python module
@@ -27,6 +29,7 @@ presentation and exit codes; infrastructure owns external and filesystem effects
 src/hsas/
 ├── interfaces/       # CLI, local web UI, and agent adapters
 ├── application/      # synchronization, planning, retrieval, Profile/Execution use cases
+│   └── ports/         # narrow gateway/repository Protocols owned by use cases
 ├── domain/
 │   ├── courses/      # course, assessment, document contracts and rules
 │   └── planning/     # Profile, Execution, Plan models and deterministic rules
@@ -37,6 +40,11 @@ src/hsas/
     ├── runtime/      # platform paths and migration
     └── updates/      # pinned Git release updates
 ```
+
+The application layer must not import `hsas.infrastructure`, `hsas.interfaces`,
+Typer, or Playwright. Infrastructure may depend on application port contracts and
+domain models. Abstract base classes are intentionally not used: structural
+`Protocol` contracts keep adapters substitutable without imposing inheritance.
 
 ## Course synchronization transaction
 

@@ -18,6 +18,7 @@ ACTION_PREFIXES = {
     "generate",
     "handle",
     "index",
+    "implement",
     "load",
     "map",
     "migrate",
@@ -75,6 +76,31 @@ def test_domain_does_not_import_outer_layers() -> None:
                 modules = [node.module]
             for module in modules:
                 if module.startswith(OUTER_LAYER_PREFIXES):
+                    violations.append(
+                        f"{path.relative_to(ROOT).as_posix()}:{node.lineno} -> {module}"
+                    )
+
+    assert violations == []
+
+
+def test_application_does_not_import_outer_adapters_or_ui_frameworks() -> None:
+    forbidden_prefixes = (
+        "hsas.infrastructure",
+        "hsas.interfaces",
+        "playwright",
+        "typer",
+    )
+    violations: list[str] = []
+    for path in sorted((SOURCE_ROOT / "application").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            for module in modules:
+                if module.startswith(forbidden_prefixes):
                     violations.append(
                         f"{path.relative_to(ROOT).as_posix()}:{node.lineno} -> {module}"
                     )

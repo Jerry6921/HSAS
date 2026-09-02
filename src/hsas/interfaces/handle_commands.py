@@ -26,6 +26,7 @@ from hsas.application.update_profile import (
 from hsas.infrastructure.runtime import get_runtime_paths
 from hsas.application.retrieve_materials import search_for_plan_item, search_materials
 from hsas.infrastructure.storage.persist_data import read_json
+from hsas.infrastructure.storage import JsonPlanningRepository
 
 
 profile_app = typer.Typer(
@@ -40,6 +41,7 @@ materials_app = typer.Typer(
     no_args_is_help=True,
     help="Retrieve grounded excerpts from local course materials",
 )
+PLANNING_REPOSITORY = JsonPlanningRepository()
 
 
 @profile_app.command("show")
@@ -53,7 +55,7 @@ def profile_show(
     """Print the validated Student Profile as JSON."""
     profile_path = profile_path or _resources(ctx) / "student_profile.json"
     try:
-        profile = load_profile(profile_path)
+        profile = load_profile(profile_path, PLANNING_REPOSITORY)
     except ProfileServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(profile.model_dump_json(indent=2))
@@ -70,7 +72,7 @@ def profile_validate(
     """Validate the complete Student Profile without changing it."""
     profile_path = profile_path or _resources(ctx) / "student_profile.json"
     try:
-        profile = load_profile(profile_path)
+        profile = load_profile(profile_path, PLANNING_REPOSITORY)
     except ProfileServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
@@ -107,6 +109,7 @@ def profile_apply(
             profile_path,
             patch,
             confirmed=confirmed,
+            repository=PLANNING_REPOSITORY,
         )
     except (OSError, ValueError, ProfileServiceError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -131,7 +134,7 @@ def execution_list(
     """Print validated execution records as JSON."""
     execution_path = execution_path or _resources(ctx) / "execution_log.json"
     try:
-        log = load_execution_log(execution_path)
+        log = load_execution_log(execution_path, PLANNING_REPOSITORY)
     except ExecutionServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(log.model_dump_json(indent=2))
@@ -148,7 +151,7 @@ def execution_validate(
     """Validate the complete Execution Log without changing it."""
     execution_path = execution_path or _resources(ctx) / "execution_log.json"
     try:
-        log = load_execution_log(execution_path)
+        log = load_execution_log(execution_path, PLANNING_REPOSITORY)
     except ExecutionServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
@@ -217,6 +220,7 @@ def execution_add(
             planned_minutes=planned_minutes,
             notes=notes,
             record_id=record_id,
+            repository=PLANNING_REPOSITORY,
         )
     except ExecutionServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -270,6 +274,7 @@ def execution_correct(
             progress_minutes=progress_minutes,
             item_completed=completed,
             notes=notes,
+            repository=PLANNING_REPOSITORY,
         )
     except ExecutionServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -355,7 +360,10 @@ def _resources(ctx: typer.Context) -> Path:
 
 def _refresh_plan(resources: Path) -> None:
     try:
-        result = generate_validated_plan(PlanGenerationRequest(resources_dir=resources))
+        result = generate_validated_plan(
+            PlanGenerationRequest(resources_dir=resources),
+            PLANNING_REPOSITORY,
+        )
     except PlanGenerationError as exc:
         typer.echo(
             f"Confirmed input saved; Plan refresh failed and the previous Plan was retained: {exc}",

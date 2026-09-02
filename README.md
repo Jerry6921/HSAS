@@ -9,6 +9,36 @@ HSAS 是面向 HKU 学生的本地学习辅助系统。它同步 Moodle 中的�
 它也会通过本地 RAG 从真实课件中寻找相关内容，让 AI 根据课程文件解释知识、设计练习，
 并标明文件与页码来源。学生记录实际进度后，后续计划会随之更新。
 
+## 与 AI Agent 配合
+
+HSAS 已设计好可供 AI Agent 读取的 AI Skills。Skills 描述系统能力、操作入口、数据写入
+流程、计划解释方法和学习指导规则，让 Agent 能与 HSAS 联合运行：检查数据新鲜度、同步
+课程、解释优先级、检索课件，并根据课程依据设计学习方法和自测标准。
+
+~~~text
+src/AI_Skills/
+├── SKILL.md
+├── Handbook.md
+├── Task.md
+├── agents/
+│   └── openai.yaml
+└── references/
+    ├── data-write-protocols.md
+    ├── evals.md
+    ├── operations.md
+    ├── plan-explanation.md
+    └── study-guidance.md
+~~~
+
+例如：
+
+~~~text
+同步课程并更新计划，然后解释最高优先级的三项任务。
+检索最高优先事项对应的课件，告诉我应该先理解什么。
+根据课件内容设计一组练习，并说明每道题检验什么。
+记录我今天的完成进度，再重新评估剩余任务。
+~~~
+
 ## UI 演示
 
 ### 今日优先事项
@@ -42,12 +72,12 @@ Dashboard 将跨课程优先事项、预计剩余时间、计划状态和任务�
 
 ## 目录
 
+- [与 AI Agent 配合](#与-ai-agent-配合)
 - [UI 演示](#ui-演示)
 - [核心痛点与解决方式](#核心痛点与解决方式)
 - [一次完整的使用流程](#一次完整的使用流程)
 - [与相关产品的对比](#与相关产品的对比)
 - [快速开始](#快速开始)
-- [与 AI Agent 配合](#与-ai-agent-配合)
 - [本地数据](#本地数据)
 - [项目文档](#项目文档)
 - [License](#license)
@@ -131,36 +161,6 @@ hsas update-plan       # 刷新优先事项
 ~~~
 
 运行 hsas --help 或相应子命令的 --help 可以查看完整选项。
-
-## 与 AI Agent 配合
-
-HSAS 已设计好可供 AI Agent 读取的 AI Skills。Skills 描述系统能力、操作入口、数据写入
-流程、计划解释方法和学习指导规则，让 Agent 能与 HSAS 联合运行：检查数据新鲜度、同步
-课程、解释优先级、检索课件，并根据课程依据设计学习方法和自测标准。
-
-~~~text
-src/AI_Skills/
-├── SKILL.md
-├── Handbook.md
-├── Task.md
-├── agents/
-│   └── openai.yaml
-└── references/
-    ├── data-write-protocols.md
-    ├── evals.md
-    ├── operations.md
-    ├── plan-explanation.md
-    └── study-guidance.md
-~~~
-
-例如：
-
-~~~text
-同步课程并更新计划，然后解释最高优先级的三项任务。
-检索最高优先事项对应的课件，告诉我应该先理解什么。
-根据课件内容设计一组练习，并说明每道题检验什么。
-记录我今天的完成进度，再重新评估剩余任务。
-~~~
 
 ## 本地数据
 

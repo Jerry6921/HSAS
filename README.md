@@ -9,8 +9,40 @@ HSAS 是面向 HKU 学生的本地学习辅助系统。它同步 Moodle 中的�
 它也会通过本地 RAG 从真实课件中寻找相关内容，让 AI 根据课程文件解释知识、设计练习，
 并标明文件与页码来源。学生记录实际进度后，后续计划会随之更新。
 
+## UI 演示
+
+### 今日优先事项
+
+![HSAS 今日优先事项 Dashboard](docs/images/ui/today-priorities.png)
+
+Dashboard 将跨课程优先事项、预计剩余时间、计划状态和任务依据放在同一视野中。
+
+<table>
+  <tr>
+    <td width="50%">
+      <strong>Assessment 与占分结构</strong><br>
+      <img src="docs/images/ui/course-assessments.png" alt="HSAS 课程 Assessment 与占分结构">
+    </td>
+    <td width="50%">
+      <strong>课程结构与本地课件</strong><br>
+      <img src="docs/images/ui/course-materials.png" alt="HSAS 课程结构与本地课件">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <strong>HKU SSO/MFA 登录引导</strong><br>
+      <img src="docs/images/ui/moodle-login.png" alt="HSAS Moodle 登录引导">
+    </td>
+    <td width="50%">
+      <strong>课程同步确认</strong><br>
+      <img src="docs/images/ui/course-sync.png" alt="HSAS 课程同步确认">
+    </td>
+  </tr>
+</table>
+
 ## 目录
 
+- [UI 演示](#ui-演示)
 - [HSAS 带来的改变](#hsas-带来的改变)
 - [核心痛点与解决方式](#核心痛点与解决方式)
 - [一次完整的使用流程](#一次完整的使用流程)

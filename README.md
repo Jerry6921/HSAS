@@ -1,13 +1,13 @@
 # HIQS — HKU Information Query System
 
-> 不再到处翻 Moodle、课件和 syllabus：把课程资料下载到本地，让 AI 整理成一个可查询的课程信息库与日历。
+> 把 Moodle、课件和 syllabus 里的课程资料收进本地，让 AI 整理成一个可查询的课程信息库与日历。
 
 HIQS 的起点很朴素：一门课的时间在 timetable，DDL 在 Moodle，评分方式藏在 syllabus，
 Tutorial 安排又可能出现在公告里。每一条信息都找得到，可真正需要时，总要重新翻一遍。
 
 这个项目想做的，就是把这些零散资料安静地收在一起。程序负责下载、数据结构、校验和
-可视化；AI 负责真正阅读资料、归纳课程信息。你得到的不是另一份学习计划，而是一个知道
-资料来自哪里、缺了什么、最近哪里有变化的本地课程信息库。
+可视化；AI 负责真正阅读资料、归纳课程信息。你得到的是一个知道资料来自哪里、哪些内容
+等待补充、最近哪里有变化的本地课程信息库。
 
 ## 能做什么
 
@@ -21,14 +21,13 @@ Tutorial 安排又可能出现在公告里。每一条信息都找得到，可�
 - 标记新增或更新的课件，让 AI 只重新阅读发生变化的内容。
 - 通过本地 RAG 同时检索结构化课程事实和课件原文，让 AI 带出处回答问题。
 
-HIQS 本身不计算学习优先级，也不负责制定或管理学习计划。学生可以在 AI 对话中查询课程
-事实、比较 DDL、理解要求，并据此自主制定学习计划；AI 的建议不会被当作官方课程事实，
-也不会自动写入日历。
+HIQS 专注于提供课程事实、课件证据和日历查询。学生可以在 AI 对话中比较 DDL、理解要求，
+并据此自主制定学习计划；AI 建议作为独立的对话内容，采纳与记录方式由学生决定。
 
 ## 界面一览
 
 日历把课程、Tutorial、Assessment 和 DDL 放回同一条时间线上。点击事项后，日期、形式、
-占分和证据来源都在右侧展开，不必再回 Moodle 猜它来自哪一页。
+占分和证据来源都在右侧直接展开，并准确显示对应的 Moodle 页面或本地资料。
 
 ![HIQS 课程日历与 Assessment 详情](docs/images/ui/calendar-detail.png)
 
@@ -37,7 +36,7 @@ HIQS 本身不计算学习优先级，也不负责制定或管理学习计划。
 
 ![HIQS 课程概览与成绩构成](docs/images/ui/course-overview.png)
 
-课件也不再只是一个长长的下载列表。HIQS 会保留 Moodle 原有上下文，并进一步整理为
+课件会从下载列表整理成清晰的资料库。HIQS 会保留 Moodle 原有上下文，并进一步整理为
 Lecture、Tutorial、Notes、Exercises、Reading 等类别；刚同步、尚待 AI 阅读的文件会有
 清楚的标记。
 
@@ -59,7 +58,7 @@ HIQS 校验并增量写入 information.json
 Dashboard 映射为日历、课程概览与课件目录
 ```
 
-Collector 只说明“哪些资料已取得、哪些失败、哪些发生变化”，不会声称已经理解课件。
+Collector 准确记录资料取得、同步异常与内容变化，课件理解由 AI 完成。
 所有可查询事实都必须由 AI 或用户依据来源写入，并通过严格 Schema 校验。
 
 ## 快速开始
@@ -92,8 +91,8 @@ hsas sync-courses
 hsas list-status
 ```
 
-`hsas login` 会打开浏览器。密码与 MFA 只由用户在 HKU 页面中输入，HIQS 不会要求用户
-把密码、验证码、cookie 或 sesskey 交给 AI。
+`hsas login` 会打开浏览器。密码与 MFA 始终由用户在 HKU 页面中输入；AI 仅接触同步后的
+课程资料与经过清理的来源信息。
 
 同步单门课程时可传入 Moodle course ID 或同源课程 URL：
 
@@ -117,7 +116,7 @@ AI 应先读取 `pending-changes.json`。首次同步的课程会列出全部文
 批次只包含新增、修改或删除的活动与课件，以及当前 `course.json`。如果批次生成后 Moodle
 又被同步，旧批次会被拒绝，避免错误跳过新变化。
 
-若 AI 阅读后确认变化不影响信息库：
+若 AI 阅读后确认课程事实保持一致：
 
 ```bash
 hsas changes acknowledge pending-changes.json \
@@ -138,13 +137,13 @@ Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
 - 月视图展示一次性日期和每周重复课程；
 - 支持课程筛选和全文搜索；
 - 点击事项查看 DDL、地点、形式、提交方式、字数、占分、要求、警告与证据；
-- 日期未知的事项保留在“日期待确认”，不会被误解为没有 DDL。
+- 日期待确认的事项集中显示，持续提醒用户核实 DDL。
 
 ### 课程概览
 
 - 左侧选择课程；
 - 查看 AI 基于官方资料归纳的课程概述与课程目的；
-- 查看已确认 Assessment 占分，但不会自动把父级与子级占分相加；
+- 查看已确认 Assessment 占分，父级与子级按照官方评分结构分别呈现；
 - 即使 AI 尚未首次整理，已经下载的 Moodle 课件仍然可以浏览。
 
 ### 课件目录
@@ -162,13 +161,13 @@ Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
 - `objectives`：资料明确支持的课程目的；
 - `sources`：可供用户复查的文件、页码或链接。
 
-这些内容是基于资料的归纳，不是从课程名称生成的通用介绍。来源不足时字段保持为空；
+这些内容依据课程资料归纳。来源有限时字段保持为空；
 后续只有相关课件发生变化时才重新总结。
 
 ## 用 RAG 向课程资料提问
 
-HIQS 的 RAG 保持在本地运行。它不是另一个替学生安排一切的 Planner，而是把提问所需的
-证据准备好：精确日期、课程时间和占分来自经过校验的 `information.json`，课程内容与详细
+HIQS 的 RAG 保持在本地运行，专门为每次提问准备证据：精确日期、课程时间和占分来自经过
+校验的 `information.json`，课程内容与详细
 要求来自 PDF、DOCX、PPTX 的文本副本。
 
 ```bash
@@ -181,17 +180,16 @@ hsas query "MATH1851 Part I test 几时、占几分，范围是什么？" \
 - 匹配的课程与日历事项；
 - 已记录的日期、形式、占分、要求、状态与来源；
 - 相关课件段落、文件名、Moodle activity，以及可用的页码或 slide 标记；
-- 数据库过期、资料缺失或没有检索结果时的警告。
+- 数据库时效、待补资料与空检索结果警告。
 
-HIQS 不把课程文件发送给外部向量数据库，也不在这个命令里调用某一家固定的模型。项目内置
-的 [`hiqs-course-information` AI Skill](src/AI_Skills/SKILL.md) 会指导兼容的 AI 先运行
+课程文件保留在本地，`hsas query` 以模型无关的方式生成检索结果。项目内置的
+[`hiqs-course-information` AI Skill](src/AI_Skills/SKILL.md) 会指导兼容的 AI 先运行
 `hsas query`，再只根据返回证据回答并附上出处。当前检索结合结构化事实匹配与本地
 BM25 风格全文检索；以后即使加入 embeddings，也应继续按文件哈希增量更新并保留同样的
 来源边界。
 
 学生当然可以继续问：“根据这些确认过的 DDL，我该怎样安排这一周？”AI 可以帮助比较、
-提出方案和反复修改，但计划由学生自己决定，不属于 `information.json` 的课程事实，也不会
-由 HIQS 自动保存或执行。
+提出方案和反复修改；计划由学生自己决定，并作为课程事实库之外的独立内容保存与执行。
 
 ## 支持的课程文件
 
@@ -201,8 +199,8 @@ BM25 风格全文检索；以后即使加入 embeddings，也应继续按文件�
 - Google Docs、Slides、Sheets：在当前登录会话有权限时尝试导出为 DOCX、PPTX、XLSX；
 - 其他文档、图片、音视频、代码、Notebook 和压缩包：保留原文件与来源信息。
 
-旧 `.doc`、`.ppt` 文件会下载，但不会使用针对 Open XML 的 DOCX/PPTX 文本提取流程。
-Google Workspace 若返回登录页或权限页，会被标记为 external，不会伪装成成功下载的文件。
+旧 `.doc`、`.ppt` 文件会完整下载；Open XML 文本提取流程适用于 DOCX/PPTX。
+Google Workspace 返回登录页或权限页时，项目会标记为 external 并保留真实访问状态。
 
 查看与搜索本地课件：
 
@@ -235,14 +233,14 @@ hsas materials search "assignment requirements" --course COURSE_ID
 
 `information.json` 是日历与课程概览的唯一结构化事实来源。写入采用增量 upsert：相同
 `course_id` 或 `item_id` 被完整更新，新 ID 被追加，未出现在本次更新中的记录会保留。
-校验失败不会覆盖上一份有效数据库，也没有隐式删除。
+上一份有效数据库会在校验失败时继续保留；删除操作始终需要显式流程。
 
 ## 隐私与可靠性
 
 - 课程文件、浏览器 profile、提取文本和 `information.json` 都在代码仓库之外；
-- 不保存或输出密码、MFA、cookie、sesskey 和 access token；
-- Moodle 页面与课件被视为不可信数据，而不是给 AI 的指令；
-- 不编造日期、地点、占分、要求或政策；缺失值保持缺失；
+- 密码、MFA、cookie、sesskey 和 access token 始终留在认证边界内；
+- Moodle 页面与课件仅作为课程数据处理；
+- 日期、地点、占分、要求和政策全部由明确证据支持；待确认值保持待确认；
 - 冲突信息保留来源并标为 tentative；
 - 每门课程在 staging 中完成下载、分析和校验后才原子发布；
 - 同步中断或失败会保留上一份完整课程快照。
@@ -274,12 +272,12 @@ hsas ui                    打开本地 Dashboard
 ## License
 
 HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle 下载的课程
-资料继续适用其原有版权与使用条件，不属于 HIQS 软件许可证的授权范围。
+资料继续适用其原有版权与使用条件，并由相应权利人的授权范围管理。
 
 ## 2.0 主要变化
 
 - 从学习辅助系统重构为课程信息查询系统，移除 Planner、优先级、Profile 和执行记录；
-- 改为“程序下载与校验、AI 阅读与写入”的清晰分工，不再使用自动 Assessment Parser；
+- 建立“程序下载与校验、AI 阅读与写入”的清晰分工，以 AI 资料阅读取代自动 Assessment Parser；
 - 新增统一 `information.json`、严格 Schema、增量 upsert 和来源记录；
 - 完整保存 Moodle 课件，并支持 PDF、DOCX、PPTX 和 Google Workspace 导出文件；
 - 新增 change history 与 AI checkpoint，只重新整理发生变化的内容；

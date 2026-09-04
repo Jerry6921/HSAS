@@ -1,7 +1,8 @@
 # Contributing
 
-Keep user data outside the checkout and never add `.env`, browser profiles,
-downloaded course materials, extracted text, or `information.json` to Git.
+Keep user data outside the checkout. Git tracks source and public fixtures;
+`.env`, browser profiles, downloaded course materials, extracted text, and
+`information.json` stay in the private runtime directory.
 
 Install and verify changes with:
 
@@ -13,7 +14,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
 
 Preserve the dependency direction documented in `ARCHITECTURE.md`. Collector
 changes require download-coverage, last-known-good and failure-path tests.
-Information changes require strict-schema, atomic-upsert and no-data-loss tests;
+Information changes require strict-schema, atomic-upsert, and data-preservation tests;
 calendar changes require API and browser-level rendering checks.
 
 Place code under the noun-based `hsas/interfaces`, `hsas/application`,

@@ -1,7 +1,7 @@
 # HIQS 架构与数据流
 
-HIQS 把课程资料收集、AI 理解和日历展示分开。程序不通过脆弱的规则推断完整 Assessment；
-它负责完整保存资料、提供可读副本、验证 AI 写入的事实，并把事实确定性映射到日历。
+HIQS 把课程资料收集、AI 理解和日历展示分开。程序负责完整保存资料、提供可读副本、验证
+AI 写入的事实，并把事实确定性映射到日历；完整 Assessment 由 AI 依据来源归纳。
 
 ## 主链路
 
@@ -24,7 +24,7 @@ flowchart LR
 
 职责边界：
 
-- Collector：发现 Moodle 活动、下载文件、记录来源与失败，不判断哪些事项最重要；
+- Collector：发现 Moodle 活动、下载文件、记录来源与失败；
 - AI：阅读原文件或文本副本，识别课程、tutorial、DDL、课业要求、形式和占分；
 - Information Service：检查类型、范围、唯一 ID、课程引用与时间关系，原子写入；
 - Change Queue：区分首次全量与后续增量，提供精确文件路径并记录处理游标；
@@ -55,7 +55,7 @@ interfaces ──> application ──> domain
      └───────> infrastructure ──> application ports + domain
 ```
 
-领域层不依赖 Typer、Playwright、HTTP 服务或文件系统。应用层通过
+领域层保持纯模型与规则。应用层通过
 `InformationRepository` 端口保存信息库，基础设施层提供 JSON 实现。
 
 ## Moodle Collector
@@ -73,15 +73,15 @@ flowchart LR
     Validate --> Publish[原子发布]
 ```
 
-下载器接受 Moodle `pluginfile.php` 附件及非 HTML 文件响应，不以少量扩展名作为唯一
-白名单。文件受最大大小、超时和并发配置约束。原始字节不执行，只写入本地。
+下载器接受 Moodle `pluginfile.php` 附件及各类文件响应，并通过响应类型与来源规则确认
+文件。文件受最大大小、超时和并发配置约束。原始字节仅写入本地存储。
 
 Google Workspace 链接是受控例外：`docs.google.com/document`、`presentation` 和
 `spreadsheets` 链接分别尝试导出 DOCX、PPTX、XLSX。若导出返回登录页或权限页，活动
 标为 external，并记录原因。
 
-条件请求使用 ETag 和 Last-Modified；内容未变时复用原路径。失败同步不覆盖上一份有效
-课程目录。
+条件请求使用 ETag 和 Last-Modified；内容一致时复用原路径。失败同步期间继续使用上一份
+有效课程目录。
 
 ## AI 可读资料
 
@@ -98,8 +98,8 @@ Google Workspace 链接是受控例外：`docs.google.com/document`、`presentat
 - DOCX 包含正文及可见的页眉、页脚、脚注、尾注和批注文本。
 
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
-`hsas materials search` 对已有文本副本作本地检索。没有文本副本不代表文件不存在，
-AI 仍可按格式使用相应文档工具。
+`hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
+文档工具读取各类资料。
 
 ## Incremental AI Review
 
@@ -107,16 +107,16 @@ AI 仍可按格式使用相应文档工具。
 `courses/<course_id>/changes/history/`。课件变化携带原文件、文本副本和来源 URL；历史记录
 随课程快照事务保留。
 
-`ai-state/change-checkpoint.json` 为每门课程保存 AI 已处理到的 `collected_at`。如果课程
-没有游标，`changes show` 生成 `full` review；否则只汇总游标之后的 change sets。输出批次
+`ai-state/change-checkpoint.json` 为每门课程保存 AI 已处理到的 `collected_at`。课程等待
+首个游标时，`changes show` 生成 `full` review；已有游标时则汇总之后的 change sets。输出批次
 携带 `acknowledge_through`，因此生成批次后发生的新同步会使旧批次失效。
 
 ```text
 changes show → AI 阅读列出的 files → information apply --changes → checkpoint
 ```
 
-信息写入失败时不推进 checkpoint。若信息已保存但确认游标失败，变化仍保持 pending，允许
-安全重试。只有审查后确认不影响任何课程事实时，才使用带双重确认的独立 acknowledge。
+checkpoint 在信息写入成功后推进。信息已保存而游标确认失败时，变化保持 pending 以支持
+安全重试。审查确认课程事实保持一致时，使用带双重确认的独立 acknowledge。
 
 ## Information Store
 
@@ -160,22 +160,22 @@ project、report、reading、deadline 和 other。
 5. 验证合并结果中所有 item 都指向已存在课程；
 6. fsync 临时文件后用 `os.replace` 原子替换。
 
-省略记录会保留，更新中没有隐式删除。任何失败都发生在替换前。
+省略记录会保留，删除使用显式流程。任何失败都发生在替换前。
 
 ## Calendar
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
 store。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按课程和全文筛选，
-并把没有日期的事项单独列出。
+并把日期待确认的事项单独列出。
 
 课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
 `information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记
 来自最新 Moodle archive 与 pending review。程序综合 activity 类型、标题、section 与
 文件名，在学习材料/课程信息两大区内继续标记 Lecture、Tutorial、Notes、Exercises、
-Reading、Assessment 等类型。页面不解析课件内容，也不会补猜缺失的课程事实。
+Reading、Assessment 等类型。课件内容由 AI 阅读，页面呈现经过验证的课程事实。
 
 日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接和
-来源。AI 写入的字符串使用 DOM `textContent`，不插入为 HTML。
+来源。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
 
 ## 有限兼容
 

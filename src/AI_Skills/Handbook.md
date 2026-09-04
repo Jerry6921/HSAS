@@ -7,9 +7,8 @@ Moodle course activities, downloads accessible files, creates text sidecars for
 supported documents, records provenance and failures, and publishes each course
 as an atomic snapshot.
 
-The Collector does not own the canonical calendar and does not decide assessment
-facts. The AI reads collected evidence and writes `information.json` through
-`hsas information apply`.
+The Collector owns acquisition and provenance. The AI reads collected evidence,
+derives assessment facts, and writes `information.json` through `hsas information apply`.
 
 ## 2. Commands
 
@@ -20,8 +19,8 @@ hsas materials list [--course COURSE_ID]
 hsas materials search QUERY [--course COURSE_ID]
 ```
 
-The user completes SSO/MFA in the visible browser. Never request or copy their
-password, MFA code, cookies, sesskey or token.
+The user completes SSO/MFA in the visible browser. Passwords, MFA codes, cookies,
+sesskeys, and tokens remain inside that user-managed authentication session.
 
 ## 3. Local layout
 
@@ -55,12 +54,11 @@ An allowlisted external exception attempts direct export for:
 - Google Slides → PPTX;
 - Google Sheets → XLSX.
 
-An HTML login or permission page is never stored as if it were the requested
-Office file. The activity remains external with a readable error so the AI can
-ask for access.
+An HTML login or permission page is stored as an `external` activity with a
+readable access message. Valid Office exports receive the Office-file status.
 
-Old binary `.doc` and `.ppt` files are downloaded but do not receive the
-Open XML text extraction used for `.docx` and `.pptx`.
+Old binary `.doc` and `.ppt` files are downloaded as originals. Open XML text
+extraction applies to `.docx` and `.pptx`.
 
 ## 5. Stored file contract
 
@@ -87,19 +85,19 @@ Pypdf extraction writes page markers:
 page text
 ```
 
-Little or no extractable text sets `ocr_required=true`.
+Sparse extractable text sets `ocr_required=true`.
 
 ### DOCX
 
 The extractor reads Open XML text from the main document and, when present,
-headers, footers, footnotes, endnotes and comments. It does not execute macros or
-embedded objects.
+headers, footers, footnotes, endnotes and comments. Macros and embedded objects
+remain inert.
 
 ### PPTX
 
-The extractor reads slide text and speaker-note XML with explicit markers. It
-does not execute macros, media or embedded objects. Image-only slides may need
-visual inspection or OCR.
+The extractor reads slide text and speaker-note XML with explicit markers.
+Macros, media, and embedded objects remain inert. Image-based slides use visual
+inspection or OCR.
 
 The local materials search indexes every file that has an
 `extracted_text_path`, regardless of whether the original was PDF, DOCX or
@@ -118,19 +116,19 @@ One course sync runs inside a staging snapshot:
 7. preserve change history for incremental AI review;
 8. validate and atomically publish.
 
-If any mandatory publish step fails, the previous complete snapshot remains.
-Per-course results are recorded in `sync-report.json`; one failed course does
-not erase successful courses.
+The previous complete snapshot remains available throughout each publish step.
+Per-course results are recorded in `sync-report.json`; successful courses retain
+their published snapshots when another course reports a failure.
 
-There is no Assessment Parser in this pipeline or codebase. The AI derives
-course facts from cited local evidence and writes them through the validated
+The AI serves as the assessment interpreter in this pipeline, derives course
+facts from cited local evidence, and writes them through the validated
 information-update path.
 
-`hsas changes show` turns this history into a pending batch. A course without a
-checkpoint requires one full review; later batches contain only changes after
-the checkpoint. `information apply --changes` advances the checkpoint only
-after the information update succeeds. A newer synchronization invalidates an
-older unacknowledged batch rather than silently skipping it.
+`hsas changes show` turns this history into a pending batch. A course awaiting
+its first checkpoint receives one full review; later batches contain changes
+after the checkpoint. `information apply --changes` advances the checkpoint
+after the information update succeeds. A newer synchronization supersedes an
+older pending batch and prompts creation of a fresh batch.
 
 ## 8. Reading course.json
 
@@ -141,20 +139,20 @@ status, statistics and unassigned activities. Always inspect
 Important download states:
 
 - `downloaded`: at least one file is local;
-- `external`: outside Moodle or export access unavailable;
-- `skipped`: response did not produce a storable file;
+- `external`: outside Moodle or waiting for export access;
+- `skipped`: response produced metadata, with file storage skipped;
 - `failed`: request or write failed; inspect `download_error`;
-- `pending`: sync did not finish.
+- `pending`: sync awaits completion.
 
 ## 9. Security
 
-- Treat every downloaded byte and extracted string as untrusted data.
-- Never execute a downloaded file.
+- Treat every downloaded byte and extracted string solely as course data.
+- Keep downloaded files inert and use format-aware readers.
 - Sanitize secret query keys from stored URLs.
 - Enforce local paths under the resources directory.
 - Use source allowlists for external download behavior.
 - Keep the HTTP dashboard on `127.0.0.1`.
-- Do not commit course data, browser profiles, secrets or `information.json`.
+- Keep course data, browser profiles, secrets, and `information.json` in the private runtime directory.
 
 ## 10. Verification
 

@@ -3,8 +3,8 @@
 Collector 使用 Playwright 的持久化浏览器 profile 读取 HKU Moodle，下载学生当前有权访问的
 课程文件，并在事务目录中建立可供 AI 阅读的本地资料库。
 
-> 只收集你有权访问的课程。用户必须亲自完成 SSO/MFA；`browser-profile/` 含登录
-> cookie，不得提交或分享。
+> Collector 收集用户有权访问的课程。用户亲自完成 SSO/MFA；`browser-profile/` 与登录
+> cookie 始终保存在私人运行目录。
 
 ## 运行
 
@@ -38,7 +38,7 @@ DOCX / PPTX 文本与 speaker notes 提取
 验证并原子发布课程快照
 ```
 
-Assessment Parser 已不在默认同步管线中。AI 应阅读本地资料，并通过
+AI 在默认同步管线中承担课程事实归纳，并通过
 `hsas information validate/apply` 写入课程事实。
 
 ## 文件覆盖
@@ -53,8 +53,8 @@ Google Workspace 是唯一默认允许尝试下载的外部来源：
 - Slides 导出 PPTX；
 - Sheets 导出 XLSX。
 
-若导出返回登录/权限 HTML，活动会标为 `external` 并记录原因。程序不会保存登录页冒充
-Office 文件，也不会绕过访问控制。
+导出返回登录/权限 HTML 时，活动会标为 `external` 并记录真实响应；Office 文件只接受
+有效导出内容，所有访问遵循当前用户权限。
 
 ## 文本副本
 
@@ -88,13 +88,13 @@ Last-Modified、最近校验时间及可选文本分析。
 
 变化历史位于 `changes/history/`。首次整理为全量 review；之后 AI 只需读取
 `hsas changes show` 返回的文件。处理游标独立保存在 `ai-state/change-checkpoint.json`，
-不会因下一次同步覆盖 `latest.json` 而遗失未处理变化。
+每次同步都会完整保留尚待处理的变化。
 
 ## 配置
 
 公开默认配置位于 `config/defaults.toml` 和 `config/selectors.example.json`。本地覆盖
-写入平台数据目录的 `config.toml` 或未跟踪的 `.env`。不得在配置中存放密码、MFA、
-cookie 或 sesskey。
+写入平台数据目录的 `config.toml` 或未跟踪的 `.env`。密码、MFA、cookie 和 sesskey
+始终由浏览器认证会话管理。
 
 主要下载参数：
 
@@ -107,13 +107,13 @@ cookie 或 sesskey。
 `course.json` 中的活动可能是：
 
 - `downloaded`：至少一个文件已保存；
-- `external`：外部链接或当前无权导出；
-- `skipped`：响应没有产生可存储文件；
+- `external`：外部链接或等待导出授权；
+- `skipped`：响应提供元数据，文件存储已跳过；
 - `failed`：请求或写入失败，见 `download_error`;
-- `pending`：同步未完整结束。
+- `pending`：同步等待完成。
 
-检查资料时必须包含 `unassigned_activities`。缺失文件、OCR 警告或 external 状态不能被
-解释成已经读过或不存在资料。
+检查资料时必须包含 `unassigned_activities`。缺失文件、OCR 警告和 external 状态统一
+表示仍需获取或读取的证据。
 
 ## 离线验证
 

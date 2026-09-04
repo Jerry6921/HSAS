@@ -9,6 +9,7 @@ import typer
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.application.manage_changes import collect_pending_changes
+from hsas.application.retrieve_course_context import build_course_question_context
 from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
@@ -91,6 +92,48 @@ def list_status(ctx: typer.Context) -> None:
         f"AI review: {len(pending.courses)} course(s), "
         f"{pending.pending_change_count} pending review item(s)"
     )
+
+
+@app.command("query")
+def query(
+    ctx: typer.Context,
+    question: Annotated[
+        str,
+        typer.Argument(help="Course question to retrieve grounded context for"),
+    ],
+    course_ids: Annotated[
+        list[str] | None,
+        typer.Option("--course", help="Restrict retrieval to course IDs"),
+    ] = None,
+    material_limit: Annotated[
+        int,
+        typer.Option(min=1, max=20, help="Maximum source-text excerpts"),
+    ] = 6,
+    item_limit: Annotated[
+        int,
+        typer.Option(min=1, max=100, help="Maximum structured information items"),
+    ] = 20,
+) -> None:
+    """Return a cited local RAG packet for an AI to answer from."""
+    resources = _resources(ctx)
+    information_path = resources / "information.json"
+    try:
+        information = (
+            INFORMATION_REPOSITORY.load(information_path)
+            if INFORMATION_REPOSITORY.exists(information_path)
+            else None
+        )
+        context = build_course_question_context(
+            resources,
+            question,
+            information=information,
+            course_ids=set(course_ids) if course_ids else None,
+            material_limit=material_limit,
+            item_limit=item_limit,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(context.model_dump_json(indent=2))
 
 
 @app.command("login")

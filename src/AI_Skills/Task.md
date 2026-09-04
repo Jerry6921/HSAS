@@ -2,9 +2,11 @@
 
 ## 1. Mission
 
-Answer course-information questions from the validated local database, or read
-authorized sources and prepare a validated update. Do not turn the request into
-study planning, priority ranking, tutoring, or workload estimation.
+Answer course-information questions from the validated local database and
+downloaded sources, or prepare a validated update. HIQS itself is not a study
+planner. If a student asks for help thinking through a plan, ground the
+conversation in retrieved course facts, keep suggestions distinct from facts,
+and leave decisions with the student.
 
 ## 2. Facts to capture
 
@@ -22,9 +24,10 @@ Unknown values stay unknown. A missing date never means that no deadline exists.
 ## 3. Query workflow
 
 1. Run `hsas list-status` to locate resources and check material coverage.
-2. Run `hsas information show` and resolve the exact course.
-3. Filter the minimum matching records.
-4. Answer the question directly.
+2. Resolve the exact course and run `hsas query "QUESTION" --course COURSE_ID`.
+3. Use structured matches for exact course facts and material excerpts for
+   requirements or course content.
+4. Answer the question directly with nearby source citations.
 5. Name missing or tentative fields.
 6. Cite the stored source title, page, path or URL when available.
 7. Offer a data refresh only when the current source is stale or incomplete.
@@ -135,8 +138,9 @@ calendar and use the normal validation plus `--confirmed` write path.
 | Course | Assessment | Due | Weight | Format | Status/source |
 ```
 
-No priority column is included unless the user explicitly asks for a separate
-sorting rule.
+No priority column is included by default. In a student-led planning
+conversation, explain any user-chosen sorting rule and do not present it as an
+official property of the course.
 
 ### Assessment detail
 

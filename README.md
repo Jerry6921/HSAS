@@ -19,8 +19,11 @@ Tutorial 安排又可能出现在公告里。每一条信息都找得到，可�
 - 浏览全部 Moodle 项目，并区分 Lecture、Tutorial、Notes、Exercises、Reading、
   Assessment、Course Information、Announcements 等类型；
 - 标记新增或更新的课件，让 AI 只重新阅读发生变化的内容。
+- 通过本地 RAG 同时检索结构化课程事实和课件原文，让 AI 带出处回答问题。
 
-HIQS 不会计算学习优先级、生成学习计划、估算学习时间或记录学习表现。
+HIQS 本身不计算学习优先级，也不负责制定或管理学习计划。学生可以在 AI 对话中查询课程
+事实、比较 DDL、理解要求，并据此自主制定学习计划；AI 的建议不会被当作官方课程事实，
+也不会自动写入日历。
 
 ## 界面一览
 
@@ -162,6 +165,34 @@ Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
 这些内容是基于资料的归纳，不是从课程名称生成的通用介绍。来源不足时字段保持为空；
 后续只有相关课件发生变化时才重新总结。
 
+## 用 RAG 向课程资料提问
+
+HIQS 的 RAG 保持在本地运行。它不是另一个替学生安排一切的 Planner，而是把提问所需的
+证据准备好：精确日期、课程时间和占分来自经过校验的 `information.json`，课程内容与详细
+要求来自 PDF、DOCX、PPTX 的文本副本。
+
+```bash
+hsas query "MATH1851 Part I test 几时、占几分，范围是什么？" \
+  --course COURSE_ID
+```
+
+命令会输出机器可读的 RAG context，其中包括：
+
+- 匹配的课程与日历事项；
+- 已记录的日期、形式、占分、要求、状态与来源；
+- 相关课件段落、文件名、Moodle activity，以及可用的页码或 slide 标记；
+- 数据库过期、资料缺失或没有检索结果时的警告。
+
+HIQS 不把课程文件发送给外部向量数据库，也不在这个命令里调用某一家固定的模型。项目内置
+的 [`hiqs-course-information` AI Skill](src/AI_Skills/SKILL.md) 会指导兼容的 AI 先运行
+`hsas query`，再只根据返回证据回答并附上出处。当前检索结合结构化事实匹配与本地
+BM25 风格全文检索；以后即使加入 embeddings，也应继续按文件哈希增量更新并保留同样的
+来源边界。
+
+学生当然可以继续问：“根据这些确认过的 DDL，我该怎样安排这一周？”AI 可以帮助比较、
+提出方案和反复修改，但计划由学生自己决定，不属于 `information.json` 的课程事实，也不会
+由 HIQS 自动保存或执行。
+
 ## 支持的课程文件
 
 - PDF：提取文字并保留页码标记；扫描件会提示可能需要 OCR；
@@ -228,6 +259,7 @@ hsas changes show          导出 AI 应阅读的范围
 hsas information show      查看结构化信息库
 hsas materials list        查看全部本地文件
 hsas materials search      搜索文本副本
+hsas query                 为 AI 检索课程事实与课件证据
 hsas ui                    打开本地 Dashboard
 ```
 

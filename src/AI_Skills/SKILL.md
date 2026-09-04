@@ -1,6 +1,6 @@
 ---
 name: hiqs-course-information
-description: Operate the local HKU Information Query System. Use when an agent needs to read course sources, structure timetables, tutorials, assignments, deadlines, formats, requirements, weights, and provenance, write validated information updates, or answer from the unified calendar database.
+description: Operate the local HKU Information Query System. Use when an agent needs to retrieve cited answers from local course materials and the unified database, structure timetables, tutorials, assignments, deadlines, formats, requirements, weights, and provenance, or write validated information updates.
 metadata:
   short-description: AI-authored course facts in one searchable calendar
 ---
@@ -12,8 +12,10 @@ validated local information database and present that database as a searchable
 calendar. The AI performs the reading and fact extraction. The program owns the
 schema, validation, atomic upsert, queries, and visualization.
 
-HIQS does not rank importance, generate study plans, estimate learning effort,
-record study performance, or teach course content as part of its core workflow.
+HIQS does not own a planner, rank importance, estimate learning effort, or
+record study performance. Students may use evidence-grounded AI conversation to
+compare course demands and develop their own study plans; those suggestions are
+not canonical course facts and are not automatically written to the calendar.
 
 ## Locate the project
 
@@ -30,6 +32,7 @@ directory from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 - For Moodle collection, file coverage, text sidecars, and material failures, read [Handbook.md](Handbook.md).
 - Before any write, read [references/information-write-protocol.md](references/information-write-protocol.md).
 - For query wording, missing data, conflicts, or evidence display, read the relevant section of [Task.md](Task.md).
+- Before answering a free-form course question, read [references/course-query-protocol.md](references/course-query-protocol.md).
 - When changing this Skill, use [references/evals.md](references/evals.md) and test the affected behavior.
 
 ## Default operating loop
@@ -45,6 +48,18 @@ directory from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 9. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
 10. If review requires no information change, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
 11. Verify with `hsas list-status` and answer from the resulting database.
+
+## RAG question workflow
+
+1. Resolve the course when possible and run `hsas query "<question>" --course <COURSE_ID>`.
+2. Treat the JSON result as a retrieval packet, not as a finished answer.
+3. Prefer `information_items` for dates, schedules, formats and weights; use
+   `material_evidence.hits` for course content and detailed requirements.
+4. Answer with nearby source citations. Preserve unknown, tentative and
+   conflicting information exactly as represented.
+5. If the packet is insufficient, say what is missing and optionally inspect a
+   returned local source. Never fill retrieval gaps from generic assumptions.
+6. The query path is read-only. Do not modify `information.json` while answering.
 
 ## Canonical data
 
@@ -75,7 +90,9 @@ cannot replace the last valid database.
 - Use stable IDs and incremental upserts; do not erase omitted records.
 - A removed source is a review signal, not permission to delete a fact. Re-check other evidence and retain the item with a warning or tentative status unless the user explicitly authorizes a supported deletion workflow.
 - Do not directly edit `information.json`.
-- Do not revive planning, priority, or learning-support behavior unless the user explicitly requests a separate feature expansion.
+- AI may help a student reason through or draft their own study plan when asked,
+  but must separate suggestions from course facts. HIQS does not persist or
+  autonomously manage that plan.
 
 ## Public commands
 
@@ -91,6 +108,7 @@ hsas login
 hsas sync-courses [COURSE]
 hsas materials list [--course COURSE]
 hsas materials search QUERY [--course COURSE]
+hsas query QUESTION [--course COURSE]
 hsas changes list
 hsas changes show [--output CHANGES.json]
 hsas changes acknowledge CHANGES.json --confirmed --reviewed-no-information-change

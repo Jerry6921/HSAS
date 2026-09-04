@@ -68,5 +68,7 @@ def test_pptx_slides_and_speaker_notes_are_extracted(tmp_path: Path) -> None:
     assert analysis.status == "complete"
     assert analysis.document_kind == "pptx"
     assert analysis.extraction_method == "pptx_xml"
+    assert "--- Slide 1 ---" in text
+    assert "--- Speaker notes 1 ---" in text
     assert "Lecture topic" in text
     assert "Explain this example" in text

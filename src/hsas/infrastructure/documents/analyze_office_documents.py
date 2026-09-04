@@ -109,7 +109,12 @@ def analyze_office_document(
             label = "Document part" if kind == "docx" else (
                 "Speaker notes" if "notesSlides" in name else "Slide"
             )
-            rendered.append(f"--- {label} {index} ---\n{value}")
+            unit_number = index
+            if kind == "pptx":
+                number_match = re.search(r"(?:notesSlide|slide)(\d+)\.xml$", name)
+                if number_match:
+                    unit_number = int(number_match.group(1))
+            rendered.append(f"--- {label} {unit_number} ---\n{value}")
         full_text = "\n\n".join(rendered).strip()
         write_text(text_path, full_text)
         words = len(_tokens(full_text))

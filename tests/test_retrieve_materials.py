@@ -57,3 +57,51 @@ def test_local_search_returns_page_and_activity_provenance(tmp_path: Path) -> No
     assert result.hits[0].activity_name == "Thalamic Bridge Reading"
     assert result.hits[0].filename == "bridge.pdf"
     assert result.hits[0].page_start == 2
+    assert result.hits[0].source_unit_label == "Page"
+    assert result.hits[0].source_unit_start == 2
+
+
+def test_local_search_returns_slide_provenance(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Neuroscience Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    activity = archive.sections[0].activities[0]
+    text_relative = "courses/138907/analysis/text/lecture.txt"
+    stamp = datetime(2026, 9, 1, 8, 0, tzinfo=ZONE)
+    activity.files.append(
+        StoredFile(
+            filename="lecture.pptx",
+            relative_path="courses/138907/files/lecture.pptx",
+            source_url="https://moodle.example.edu/pluginfile.php/lecture.pptx",
+            content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            size_bytes=100,
+            sha256="2" * 64,
+            downloaded_at=stamp,
+            analysis=PdfAnalysis(
+                status="complete",
+                analyzed_at=stamp,
+                page_count=2,
+                pages_with_text=2,
+                word_count=20,
+                character_count=120,
+                estimated_reading_minutes=1,
+                extracted_text_path=text_relative,
+                extracted_text_sha256="3" * 64,
+            ),
+        )
+    )
+    write_model(resources / "courses/138907/course.json", archive)
+    write_text(
+        resources / text_relative,
+        "--- Slide 1 ---\nOrdinary introduction.\n\n"
+        "--- Speaker notes 1 ---\nThalamic relay explanation.",
+    )
+
+    result = search_materials(resources, "thalamic relay", course_ids={"138907"})
+
+    assert result.hits[0].filename == "lecture.pptx"
+    assert result.hits[0].source_unit_label == "Speaker notes"
+    assert result.hits[0].source_unit_start == 1
+    assert result.hits[0].page_start is None

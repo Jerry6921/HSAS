@@ -13,7 +13,10 @@ from pydantic import Field
 from hsas.domain.courses import ArchiveIndex, StrictModel, iter_files
 
 
-PAGE_MARKER = re.compile(r"^--- Page (\d+) ---\s*$", re.MULTILINE)
+UNIT_MARKER = re.compile(
+    r"^--- (Page|Slide|Speaker notes|Document part) (\d+) ---\s*$",
+    re.MULTILINE,
+)
 WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
 
 
@@ -27,6 +30,9 @@ class MaterialHit(StrictModel):
     relative_text_path: str
     page_start: int | None = None
     page_end: int | None = None
+    source_unit_label: str | None = None
+    source_unit_start: int | None = None
+    source_unit_end: int | None = None
     chunk_index: int = Field(ge=0)
     text: str
 
@@ -50,6 +56,9 @@ class _Chunk:
     relative_text_path: str
     page_start: int | None
     page_end: int | None
+    source_unit_label: str | None
+    source_unit_start: int | None
+    source_unit_end: int | None
     chunk_index: int
     text: str
     tokens: tuple[str, ...]
@@ -114,6 +123,9 @@ def search_materials(
             relative_text_path=chunk.relative_text_path,
             page_start=chunk.page_start,
             page_end=chunk.page_end,
+            source_unit_label=chunk.source_unit_label,
+            source_unit_start=chunk.source_unit_start,
+            source_unit_end=chunk.source_unit_end,
             chunk_index=chunk.chunk_index,
             text=chunk.text,
         )
@@ -141,12 +153,12 @@ def _chunk_document(
     words_per_chunk: int = 260,
     overlap_words: int = 40,
 ) -> list[_Chunk]:
-    pages = _split_pages(text)
+    units = _split_units(text)
     chunks: list[_Chunk] = []
     chunk_index = 0
     step = max(words_per_chunk - overlap_words, 1)
-    for page_number, page_text in pages:
-        words = page_text.split()
+    for unit_label, unit_number, unit_text in units:
+        words = unit_text.split()
         for start in range(0, len(words), step):
             selected = words[start : start + words_per_chunk]
             if not selected:
@@ -169,8 +181,11 @@ def _chunk_document(
                     activity_name=activity_name,
                     filename=filename,
                     relative_text_path=relative_text_path,
-                    page_start=page_number,
-                    page_end=page_number,
+                    page_start=unit_number if unit_label == "Page" else None,
+                    page_end=unit_number if unit_label == "Page" else None,
+                    source_unit_label=unit_label,
+                    source_unit_start=unit_number,
+                    source_unit_end=unit_number,
                     chunk_index=chunk_index,
                     text=content,
                     tokens=tokens,
@@ -182,18 +197,20 @@ def _chunk_document(
     return chunks
 
 
-def _split_pages(text: str) -> list[tuple[int | None, str]]:
-    matches = list(PAGE_MARKER.finditer(text))
+def _split_units(text: str) -> list[tuple[str | None, int | None, str]]:
+    matches = list(UNIT_MARKER.finditer(text))
     if not matches:
-        return [(None, text.strip())]
-    pages: list[tuple[int | None, str]] = []
+        return [(None, None, text.strip())]
+    units: list[tuple[str | None, int | None, str]] = []
     prefix = text[: matches[0].start()].strip()
     if prefix:
-        pages.append((None, prefix))
+        units.append((None, None, prefix))
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        pages.append((int(match.group(1)), text[match.end() : end].strip()))
-    return pages
+        units.append(
+            (match.group(1), int(match.group(2)), text[match.end() : end].strip())
+        )
+    return units
 
 
 def _tokenize(text: str) -> list[str]:

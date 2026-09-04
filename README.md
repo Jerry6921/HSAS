@@ -69,6 +69,15 @@ Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 
 - 可访问 HKU Moodle 的账号；
 - 用户本人完成 HKU SSO 和 MFA。
 
+### Agent 启动提示词
+
+将以下提示词交给能够操作本地终端的 Agent：
+
+```text
+请定位 HIQS 项目根目录，完整阅读 AGENTS.md 和 src/AI_Skills/SKILL.md，
+然后按照 Skill 启动 HIQS，并向我报告运行状态与 Dashboard 访问地址。
+```
+
 ### 安装
 
 ```bash

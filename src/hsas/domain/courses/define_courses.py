@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 
-from .define_assessments import AssessmentOverview
 from .define_documents import PdfAnalysis
 from .define_models import StrictModel
 
@@ -129,6 +128,8 @@ class CollectionStats(StrictModel):
     failed_download_count: int = Field(default=0, ge=0)
     analyzed_pdf_count: int = Field(default=0, ge=0)
     pdf_word_count: int = Field(default=0, ge=0)
+    analyzed_document_count: int = Field(default=0, ge=0)
+    extracted_text_word_count: int = Field(default=0, ge=0)
 
 
 class CourseArchive(StrictModel):
@@ -140,4 +141,12 @@ class CourseArchive(StrictModel):
     unassigned_activities: list[CourseActivity] = Field(default_factory=list)
     stats: CollectionStats = Field(default_factory=CollectionStats)
     raw_state_path: str
-    assessments: AssessmentOverview = Field(default_factory=AssessmentOverview)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_parser_output(cls, value: Any) -> Any:
+        """Keep previously downloaded archives readable after parser removal."""
+        if isinstance(value, dict) and "assessments" in value:
+            value = dict(value)
+            value.pop("assessments", None)
+        return value

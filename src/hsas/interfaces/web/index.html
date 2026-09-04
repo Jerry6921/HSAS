@@ -4,156 +4,122 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>HSAS</title>
+  <title>HIQS · HKU 课程信息查询</title>
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">H</span><span><strong>HSAS</strong><small>HKU Study Assistant</small></span></div>
-      <div class="topbar-actions">
-        <div class="privacy-state"><span class="status-dot"></span>本地运行 · 资料未上传</div>
-        <div class="session-controls">
-          <span id="moodle-session-state" class="session-state unknown">Moodle：检查中</span>
-          <button type="button" id="check-moodle-session" class="topbar-button">重新检查</button>
-          <button type="button" id="open-moodle-login" class="topbar-button primary">登录 Moodle</button>
-        </div>
-      </div>
+      <a class="brand" href="/" aria-label="返回日历">
+        <span class="brand-mark">H</span>
+        <span><strong>HIQS</strong><small>HKU Information Query System</small></span>
+      </a>
+      <div class="local-state"><span aria-hidden="true"></span>仅限本机 · 数据由 AI 整理</div>
     </header>
 
     <div class="app-body">
       <aside class="sidebar">
-        <nav aria-label="主导航">
-          <button type="button" class="nav-button active" data-page="today"><span aria-hidden="true">⌂</span>今天</button>
-          <button type="button" class="nav-button" data-page="courses"><span aria-hidden="true">▤</span>课程</button>
-          <button type="button" class="nav-button" data-page="about"><span aria-hidden="true">◉</span>关于数据</button>
+        <div class="sidebar-heading">
+          <p class="eyebrow">QUERY</p>
+          <h2>课程导航</h2>
+        </div>
+        <nav class="view-navigation" aria-label="主要视图">
+          <button id="show-calendar" class="view-link active" type="button">
+            <span>日历</span><small>全部课程事项</small>
+          </button>
+          <p class="nav-label">课程概览</p>
+          <div id="course-navigation" class="course-navigation"></div>
         </nav>
-        <p class="sidebar-note">计划由确定性规则生成。你决定何时学习，也可以检查每项排序依据。</p>
+        <label class="search-field">
+          <span>搜索</span>
+          <input id="search-input" type="search" placeholder="作业、地点、要求…" autocomplete="off">
+        </label>
+        <section class="filter-section" aria-labelledby="course-filter-title">
+          <div class="filter-heading">
+            <h3 id="course-filter-title">课程</h3>
+            <button id="select-all-courses" type="button">全部</button>
+          </div>
+          <div id="course-filters" class="course-filters"></div>
+        </section>
+        <div class="sidebar-guide">
+          <strong>资料怎么进入这里？</strong>
+          <p>让 AI 阅读课程资料，按模板生成更新文件，再通过校验命令写入。程序本身不猜测课程事实。</p>
+          <code>hsas information template</code>
+        </div>
       </aside>
 
       <main>
-        <div id="loading" class="loading-state" role="status">正在读取本地计划…</div>
         <div id="global-error" class="notice error hidden" role="alert"></div>
+        <div id="data-warning" class="notice warning hidden" role="status"></div>
+        <div id="operation-status" class="notice success hidden" role="status"></div>
 
-        <section id="page-today" class="page hidden">
-          <header class="page-heading">
-            <div><p class="eyebrow">优先事项</p><h1>今天最值得做什么</h1><p id="plan-caption">根据最近一次有效计划整理。</p></div>
-            <button type="button" id="reload-dashboard" class="button">重新载入</button>
-          </header>
-
-          <div id="plan-warnings" class="notice warning hidden"></div>
-
-          <div class="metrics" aria-label="计划摘要">
-            <article><span>紧急事项</span><strong id="metric-urgent">—</strong><small>最高与较高优先级</small></article>
-            <article><span>预计剩余</span><strong id="metric-effort">—</strong><small>不是固定日程</small></article>
-            <article><span>计划状态</span><strong id="metric-status">—</strong><small id="metric-updated">尚未读取</small></article>
+        <header class="page-heading">
+          <div>
+            <p id="page-eyebrow" class="eyebrow">CALENDAR</p>
+            <h1 id="page-title">课程信息，一眼查清</h1>
+            <p id="data-caption">正在读取本地信息库…</p>
           </div>
+          <div class="page-actions" aria-label="Moodle 与日历操作">
+            <button id="login-moodle" class="button" type="button">登录 Moodle</button>
+            <button id="sync-courses" class="button primary" type="button">同步课程</button>
+            <button id="reload-data" class="button" type="button">重新载入</button>
+          </div>
+        </header>
 
-          <div class="section-heading"><h2>关键事项</h2><span>选择一项查看依据</span></div>
-          <section id="task-filters" class="task-filters" aria-label="关键事项筛选">
-            <div class="filter-group"><span class="filter-label">课程</span><div id="course-filter-options" class="filter-options"></div></div>
-            <div class="filter-group date-filter-group">
-              <span class="filter-label">日期范围</span>
-              <label>从 <input id="filter-date-from" type="date"></label>
-              <label>至 <input id="filter-date-to" type="date"></label>
-              <label class="compact-check"><input id="filter-date-unconfirmed" type="checkbox" checked>日期未确认</label>
-              <label class="compact-check"><input id="filter-date-missing" type="checkbox" checked>日期未公布</label>
-              <button type="button" id="reset-task-filters" class="button ghost small">重置</button>
-            </div>
-            <p id="task-filter-summary" class="filter-summary"></p>
+        <div id="calendar-view">
+          <section class="metrics" aria-label="信息库摘要">
+            <article><span>课程</span><strong id="metric-courses">—</strong><small>统一课程目录</small></article>
+            <article><span>信息事项</span><strong id="metric-items">—</strong><small>课程、tutorial 与 assessment</small></article>
+            <article><span>本月日程</span><strong id="metric-month">—</strong><small>含每周重复时间</small></article>
+            <article><span>日期待确认</span><strong id="metric-unknown">—</strong><small>不会被当作“无 DDL”</small></article>
+            <article><span>待 AI 整理</span><strong id="metric-pending">—</strong><small>仅处理新增或变化资料</small></article>
           </section>
-          <div class="task-workspace">
-            <div id="task-list" class="task-list" role="listbox" aria-label="优先事项"></div>
-            <aside id="task-detail" class="task-detail" aria-live="polite">
-              <div class="empty-state">当前计划没有可显示的事项。</div>
+
+          <div class="workspace">
+            <section class="calendar-card" aria-labelledby="calendar-title">
+              <div class="calendar-toolbar">
+                <div>
+                  <p class="eyebrow">MONTH VIEW</p>
+                  <h2 id="calendar-title">课程日历</h2>
+                </div>
+                <div class="calendar-controls">
+                  <button id="previous-month" class="icon-button" type="button" aria-label="上个月">←</button>
+                  <button id="today-button" class="button compact" type="button">今天</button>
+                  <button id="next-month" class="icon-button" type="button" aria-label="下个月">→</button>
+                  <strong id="calendar-label"></strong>
+                </div>
+              </div>
+              <div class="weekday-row" aria-hidden="true">
+                <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+              </div>
+              <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
+            </section>
+
+            <aside id="detail-panel" class="detail-panel" aria-live="polite">
+              <div class="empty-detail">
+                <span>↗</span>
+                <h2>点击日历事项</h2>
+                <p>在这里查看 DDL、课业形式、要求、GPA 占比、地点和证据来源。</p>
+              </div>
             </aside>
           </div>
-        </section>
 
-        <section id="page-courses" class="page hidden">
-          <header class="page-heading">
-            <div><p class="eyebrow">Moodle</p><h1>课程状态</h1><p>这里只显示本地归档和最近一次同步结果。</p></div>
-            <button type="button" id="open-sync" class="button primary" disabled>正在检查登录状态</button>
-          </header>
-          <div id="course-list" class="course-list"></div>
-        </section>
+          <section class="unscheduled-card" aria-labelledby="unscheduled-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">TO VERIFY</p><h2 id="unscheduled-title">日期待确认</h2></div>
+              <span id="unscheduled-count">0 项</span>
+            </div>
+            <p class="section-note">这些事项仍然保留在查询结果中；日期缺失不等于没有截止时间。</p>
+            <div id="unscheduled-list" class="unscheduled-list"></div>
+          </section>
+        </div>
 
-        <section id="page-materials" class="page hidden">
-          <header class="page-heading">
-            <div><p class="eyebrow">本地课件</p><h1 id="materials-course-title">课程课件</h1><p id="materials-caption">按 Moodle section 和 activity 展示。</p></div>
-            <button type="button" id="back-to-courses" class="button">返回课程</button>
-          </header>
-          <div id="materials-summary" class="materials-summary"></div>
-          <div id="materials-list" class="materials-list"><div class="loading-state">正在读取课件目录…</div></div>
-        </section>
-
-        <section id="page-course-info" class="page hidden">
-          <header class="page-heading">
-            <div><p class="eyebrow">CourseArchive</p><h1 id="course-info-title">课程信息</h1><p id="course-info-caption">经过模型验证的 course.json 只读视图。</p></div>
-            <div class="heading-actions"><button type="button" id="copy-course-json" class="button">复制 JSON</button><button type="button" id="back-from-course-info" class="button">返回课程</button></div>
-          </header>
-          <div class="json-notice">只读展示。空值表示 Moodle 未返回或 Collector 未提取，不应自动解释为零或“不存在”。Assessment group 与其子项目不会重复计入总权重。</div>
-          <div id="course-info-tabs" class="course-info-tabs" role="tablist" aria-label="课程信息类别">
-            <button type="button" class="info-tab active" data-info-tab="overview" role="tab" aria-selected="true">概览</button>
-            <button type="button" class="info-tab" data-info-tab="assessments" role="tab" aria-selected="false">Assessments</button>
-            <button type="button" class="info-tab" data-info-tab="structure" role="tab" aria-selected="false">课程结构</button>
-            <button type="button" class="info-tab" data-info-tab="quality" role="tab" aria-selected="false">文件与数据质量</button>
-            <button type="button" class="info-tab" data-info-tab="raw" role="tab" aria-selected="false">原始 JSON</button>
-          </div>
-          <div id="course-info-content" class="course-info-content"><div class="loading-state">正在读取 course.json…</div></div>
-        </section>
-
-        <section id="page-about" class="page hidden">
-          <header class="page-heading"><div><p class="eyebrow">隐私边界</p><h1>你的资料留在本机</h1><p>UI 只绑定 127.0.0.1，不提供外网访问。</p></div></header>
-          <div class="about-grid">
-            <article><h2>课程事实</h2><p>来自你有权访问的 Moodle 页面与已下载课件。同步失败时保留上一份有效资料。</p></article>
-            <article><h2>计划</h2><p>由现有 Planner 生成。UI 只读取和解释，不直接修改 integrated_plan.json。</p></article>
-            <article><h2>进度记录</h2><p>只有你确认的实际时间、等效进度和完成状态才会通过验证服务写入。</p></article>
-          </div>
+        <section id="course-overview-view" class="course-overview-view hidden" aria-live="polite">
+          <div id="course-overview"></div>
         </section>
       </main>
     </div>
   </div>
-
-  <div id="execution-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="execution-title">
-    <form id="execution-form" class="dialog">
-      <h2 id="execution-title">记录学习进度</h2>
-      <p id="execution-item-title"></p>
-      <div class="field-grid">
-        <label>原计划投入（分钟）<input id="planned-minutes" name="planned_minutes" type="number" min="1" required></label>
-        <label>实际学习时间（分钟）<input id="actual-minutes" name="actual_minutes" type="number" min="0" required></label>
-        <label>完成的等效计划量（分钟）<input id="progress-minutes" name="progress_minutes" type="number" min="0" required></label>
-      </div>
-      <label class="checkbox-row"><input id="completed" name="completed" type="checkbox">整个事项已经完成</label>
-      <label>备注（可选）<textarea id="execution-notes" name="notes" rows="3"></textarea></label>
-      <p class="field-help">实际时间和等效进度可以不同；例如学习 75 分钟，可能只完成原计划的 60 分钟内容。</p>
-      <label class="checkbox-row confirm-row"><input id="execution-confirmed" type="checkbox" required>我确认以上是本次真实学习记录</label>
-      <div id="execution-error" class="notice error hidden" role="alert"></div>
-      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">确认记录</button></div>
-    </form>
-  </div>
-
-  <div id="sync-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="sync-title">
-    <form id="sync-form" class="dialog">
-      <h2 id="sync-title">同步全部课程？</h2>
-      <p>这会访问 Moodle、下载有变化的课程文件，并在成功后重新生成计划。过程中会保留上一份有效归档。</p>
-      <label class="checkbox-row confirm-row"><input id="sync-confirmed" type="checkbox" required>我确认现在同步所有可访问课程</label>
-      <div id="sync-error" class="notice error hidden" role="alert"></div>
-      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">开始同步</button></div>
-    </form>
-  </div>
-
-  <div id="login-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="login-title">
-    <form id="login-form" class="dialog">
-      <h2 id="login-title">登录 Moodle</h2>
-      <p>HSAS 会打开独立的真实浏览器窗口。请在该窗口亲自完成 HKU SSO/MFA；密码和验证码不会进入 HSAS UI。</p>
-      <p>登录成功并返回 Moodle Dashboard 后，窗口会保存本机登录状态。</p>
-      <div id="login-error" class="notice error hidden" role="alert"></div>
-      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">打开登录窗口</button></div>
-    </form>
-  </div>
-
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/assets/app.js"></script>
 </body>
 </html>

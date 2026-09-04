@@ -1,753 +1,738 @@
-(() => {
-  "use strict";
+const categoryLabels = {
+  class: "课程",
+  tutorial: "Tutorial",
+  lab: "实验",
+  office_hour: "Office hour",
+  assignment: "Assignment",
+  quiz: "Quiz",
+  exam: "考试",
+  presentation: "汇报",
+  project: "项目",
+  report: "报告",
+  reading: "阅读",
+  deadline: "截止时间",
+  other: "其他",
+};
 
-  const state = {
-    snapshot: null,
-    selectedItemId: null,
-    recordId: null,
-    courseInformation: null,
-    courseInfoTab: "overview",
-    courseColors: new Map(),
-    taskFilters: { courseIds: null, knownCourseIds: null, dateFrom: "", dateTo: "", includeUnconfirmed: true, includeMissing: true },
-  };
-  const byId = (id) => document.getElementById(id);
-  const escapeHtml = (value) => String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+const materialTypeLabels = {
+  lecture: "Lecture",
+  tutorial: "Tutorial",
+  notes: "Notes",
+  exercises: "Exercises",
+  reading: "Reading",
+  assessment: "Assessment",
+  course_information: "Course Information",
+  announcement: "Announcements",
+  other: "Other",
+};
 
-  const priorityLabels = {
-    critical: "最高",
-    high: "较高",
-    medium: "中等",
-    planned: "计划中",
-  };
-  const courseStateLabels = {
-    current: "已同步",
-    failed: "上次失败",
-    unknown: "状态未知",
-    invalid: "归档无效",
-  };
+const materialTypeOrder = [
+  "lecture",
+  "tutorial",
+  "notes",
+  "exercises",
+  "reading",
+  "assessment",
+  "course_information",
+  "announcement",
+  "other",
+];
 
-  function formatMinutes(value) {
-    if (value === null || value === undefined) return "未估算";
-    const minutes = Number(value);
-    if (minutes < 60) return `${minutes} 分钟`;
-    const hours = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    return rest ? `${hours} 小时 ${rest} 分` : `${hours} 小时`;
+const state = {
+  data: null,
+  currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  selectedCourses: new Set(),
+  selectedItemId: null,
+  selectedDateKey: null,
+  selectedOverviewCourseId: null,
+  view: "calendar",
+  query: "",
+};
+
+const byId = (id) => document.getElementById(id);
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function parseDateOnly(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function dateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isoDateKey(value) {
+  return typeof value === "string" && value.length >= 10 ? value.slice(0, 10) : null;
+}
+
+function addDays(date, amount) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + amount);
+  return result;
+}
+
+function mondayIndex(date) {
+  return (date.getDay() + 6) % 7;
+}
+
+function visibleRange() {
+  const first = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth(), 1);
+  const start = addDays(first, -mondayIndex(first));
+  return { start, end: addDays(start, 41) };
+}
+
+function courseFor(item) {
+  return state.data.courses.find((course) => course.course_id === item.course_id) || {
+    code: item.course_id,
+    title: item.course_id,
+    color: "#64748b",
+  };
+}
+
+function itemMatches(item) {
+  if (!state.selectedCourses.has(item.course_id)) return false;
+  if (!state.query) return true;
+  const course = courseFor(item);
+  const haystack = [
+    item.title,
+    item.description,
+    item.location,
+    item.assessment_format,
+    item.submission_method,
+    course.code,
+    course.title,
+    ...(item.requirements || []),
+    ...(item.policies || []),
+    ...(item.warnings || []),
+  ].filter(Boolean).join(" ").toLocaleLowerCase();
+  return haystack.includes(state.query);
+}
+
+function primaryDateKey(item) {
+  return isoDateKey(item.due_at) || item.due_on || item.scheduled_on || isoDateKey(item.starts_at) || isoDateKey(item.opens_at);
+}
+
+function occurrenceTime(item) {
+  if (item.recurrence) return item.recurrence.start_time.slice(0, 5);
+  const value = item.due_at || item.starts_at || item.opens_at;
+  return value && value.includes("T") ? value.slice(11, 16) : "";
+}
+
+function buildOccurrences() {
+  if (!state.data) return [];
+  const { start, end } = visibleRange();
+  const startKey = dateKey(start);
+  const endKey = dateKey(end);
+  const occurrences = [];
+
+  for (const item of state.data.items.filter(itemMatches)) {
+    if (item.recurrence) {
+      const recurrence = item.recurrence;
+      const excluded = new Set(recurrence.excluded_dates || []);
+      const dates = new Set();
+      let cursor = parseDateOnly(recurrence.valid_from > startKey ? recurrence.valid_from : startKey);
+      const last = parseDateOnly(recurrence.valid_until < endKey ? recurrence.valid_until : endKey);
+      while (cursor <= last) {
+        const key = dateKey(cursor);
+        if (recurrence.weekdays.includes(mondayIndex(cursor)) && !excluded.has(key)) dates.add(key);
+        cursor = addDays(cursor, 1);
+      }
+      for (const key of recurrence.additional_dates || []) {
+        if (key >= startKey && key <= endKey && !excluded.has(key)) dates.add(key);
+      }
+      for (const key of dates) occurrences.push({ item, key, time: occurrenceTime(item) });
+      continue;
+    }
+    const key = primaryDateKey(item);
+    if (key && key >= startKey && key <= endKey) {
+      occurrences.push({ item, key, time: occurrenceTime(item) });
+    }
   }
+  return occurrences.sort((left, right) =>
+    left.key.localeCompare(right.key) || left.time.localeCompare(right.time) || left.item.title.localeCompare(right.item.title)
+  );
+}
 
-  function formatDateTime(value) {
-    if (!value) return "时间未知";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
+function renderCourseFilters() {
+  const container = byId("course-filters");
+  container.replaceChildren();
+  if (!state.data.courses.length) {
+    container.append(element("p", "empty-list", "暂无课程"));
+    return;
+  }
+  for (const course of state.data.courses) {
+    const label = element("label", "course-filter");
+    label.style.setProperty("--course-color", course.color);
+    const input = element("input");
+    input.type = "checkbox";
+    input.checked = state.selectedCourses.has(course.course_id);
+    input.addEventListener("change", () => {
+      if (input.checked) state.selectedCourses.add(course.course_id);
+      else state.selectedCourses.delete(course.course_id);
+      renderDataViews();
+    });
+    label.append(input, element("span", "check"), element("span", "course-name", course.code || course.title));
+    label.title = course.title;
+    container.append(label);
+  }
+}
+
+function renderCourseNavigation() {
+  const container = byId("course-navigation");
+  container.replaceChildren();
+  if (!state.data.courses.length) {
+    container.append(element("p", "nav-empty", "暂无课程"));
+    return;
+  }
+  for (const course of state.data.courses) {
+    const button = element("button", "course-nav-item");
+    button.type = "button";
+    button.style.setProperty("--course-color", course.color);
+    if (state.view === "course" && state.selectedOverviewCourseId === course.course_id) {
+      button.classList.add("active");
+    }
+    button.append(
+      element("span", "course-nav-dot"),
+      element("strong", "", course.code || course.title),
+      element("small", "", course.title),
+    );
+    button.addEventListener("click", () => showCourseOverview(course.course_id));
+    container.append(button);
+  }
+}
+
+function showCalendar() {
+  state.view = "calendar";
+  byId("calendar-view").classList.remove("hidden");
+  byId("course-overview-view").classList.add("hidden");
+  byId("show-calendar").classList.add("active");
+  byId("page-eyebrow").textContent = "CALENDAR";
+  byId("page-title").textContent = "课程信息，一眼查清";
+  byId("data-caption").textContent = dataCaption();
+  renderCourseNavigation();
+}
+
+function showCourseOverview(courseId) {
+  state.view = "course";
+  state.selectedOverviewCourseId = courseId;
+  byId("calendar-view").classList.add("hidden");
+  byId("course-overview-view").classList.remove("hidden");
+  byId("show-calendar").classList.remove("active");
+  renderCourseNavigation();
+  renderCourseOverview();
+}
+
+function dataCaption() {
+  return state.data && state.data.updated_at
+    ? `最近更新：${formatDateTime(state.data.updated_at)} · 时区 ${state.data.timezone}`
+    : "尚未写入课程资料；AI 整理后会补充综合信息，Moodle 课件仍可浏览。";
+}
+
+function appendOverviewList(parent, values, emptyText) {
+  if (!values || !values.length) {
+    parent.append(element("p", "overview-empty", emptyText));
+    return;
+  }
+  const list = element("ul", "overview-list");
+  for (const value of values) list.append(element("li", "", value));
+  parent.append(list);
+}
+
+function renderGradeDistribution(parent, course) {
+  const values = course.grade_distribution || [];
+  if (!values.length) {
+    parent.append(element("p", "overview-empty", "尚未从官方资料确认成绩构成。"));
+    return;
+  }
+  const list = element("div", "grade-list");
+  for (const item of values) {
+    const row = element("div", "grade-row");
+    const label = element("div", "grade-label");
+    label.append(element("strong", "", item.title), element("span", "", `${item.weight_percent}%`));
+    const track = element("div", "grade-track");
+    const bar = element("span", "grade-bar");
+    bar.style.width = `${Math.min(item.weight_percent, 100)}%`;
+    track.append(bar);
+    row.append(label, track);
+    list.append(row);
+  }
+  parent.append(list);
+  parent.append(element("p", "grade-total", "仅列出已确认占分；父项与子项不会自动相加。"));
+}
+
+function formatBytes(value) {
+  if (value === null || value === undefined) return null;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderMaterialGroup(parent, title, subtitle, materials) {
+  const section = element("section", "materials-group");
+  const heading = element("div", "materials-heading");
+  const headingCopy = element("div");
+  headingCopy.append(element("h3", "", title), element("p", "", subtitle));
+  heading.append(headingCopy, element("span", "material-count", `${materials.length} 项`));
+  section.append(heading);
+  if (!materials.length) {
+    const list = element("div", "materials-list");
+    list.append(element("p", "overview-empty", "当前 Moodle 快照中没有此类资料。"));
+    section.append(list);
+  }
+  const grouped = new Map();
+  for (const material of materials) {
+    const type = material.material_type || "other";
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type).push(material);
+  }
+  for (const type of materialTypeOrder.filter((value) => grouped.has(value))) {
+    const subgroup = element("section", "material-subgroup");
+    const values = grouped.get(type);
+    const subgroupHeading = element("div", "material-subgroup-heading");
+    subgroupHeading.append(
+      element("h4", "", materialTypeLabels[type] || type),
+      element("span", "", `${values.length} 项`),
+    );
+    subgroup.append(subgroupHeading);
+    const list = element("div", "materials-list");
+    for (const material of values) renderMaterialCard(list, material);
+    subgroup.append(list);
+    section.append(subgroup);
+  }
+  parent.append(section);
+}
+
+function renderMaterialCard(list, material) {
+    const localUrl = material.relative_path && material.exists
+      ? `/api/material?path=${encodeURIComponent(material.relative_path)}`
+      : null;
+    const remoteUrl = material.source_url && /^https?:\/\//i.test(material.source_url)
+      ? material.source_url
+      : null;
+    const card = element(localUrl || remoteUrl ? "a" : "article", "material-card");
+    if (localUrl || remoteUrl) {
+      card.href = localUrl || remoteUrl;
+      card.target = "_blank";
+      card.rel = "noreferrer";
+    }
+    const icon = element("span", "material-icon", material.relative_path ? "FILE" : "LINK");
+    const copy = element("div", "material-copy");
+    const titleLine = element("div", "material-title-line");
+    titleLine.append(
+      element("strong", "", material.title),
+      element("span", "material-type-badge", materialTypeLabels[material.material_type] || "Other"),
+    );
+    if (material.change_action) {
+      const labels = { baseline: "首次待整理", added: "新增", modified: "已更新", removed: "已删除" };
+      titleLine.append(element("span", "update-badge", labels[material.change_action] || "有变化"));
+    }
+    const meta = [
+      material.section_title,
+      material.activity_name !== material.title ? material.activity_name : null,
+      formatBytes(material.size_bytes),
+      material.text_available ? "已有文本副本" : null,
+    ].filter(Boolean).join(" · ");
+    copy.append(titleLine, element("small", "", meta || categoryLabels[material.category] || material.category));
+    if (material.download_error) copy.append(element("small", "material-error", material.download_error));
+    card.append(icon, copy, element("span", "material-open", localUrl || remoteUrl ? "↗" : "—"));
+    list.append(card);
+}
+
+function renderCourseOverview() {
+  const course = state.data.courses.find((value) => value.course_id === state.selectedOverviewCourseId);
+  const container = byId("course-overview");
+  container.replaceChildren();
+  if (!course) {
+    container.append(element("p", "overview-empty", "找不到这门课程。"));
+    return;
+  }
+  byId("page-eyebrow").textContent = "COURSE OVERVIEW";
+  byId("page-title").textContent = course.code || course.title;
+  byId("data-caption").textContent = [course.title, course.semester].filter(Boolean).join(" · ");
+
+  const hero = element("section", "course-hero");
+  hero.style.setProperty("--course-color", course.color);
+  const heroCopy = element("div");
+  heroCopy.append(element("p", "eyebrow", "COURSE"), element("h2", "", course.title));
+  const facts = [course.semester, ...(course.instructors || [])].filter(Boolean).join(" · ");
+  heroCopy.append(element("p", "", facts || "课程身份已建立，其他资料待 AI 整理。"));
+  hero.append(heroCopy);
+  if (course.moodle && /^https?:\/\//i.test(course.moodle.url)) {
+    const link = element("a", "button", "打开 Moodle");
+    link.href = course.moodle.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    hero.append(link);
+  }
+  container.append(hero);
+
+  const upper = element("div", "overview-upper");
+  const summary = element("section", "overview-card");
+  summary.append(element("p", "eyebrow", "AI SUMMARY"), element("h3", "", "课程综合信息"));
+  summary.append(element("p", "summary-provenance", "由 AI 根据已下载课程资料归纳；事实仍以所列来源为准。"));
+  summary.append(element("h4", "", "课程概述"));
+  summary.append(element("p", course.overview ? "overview-copy" : "overview-empty", course.overview || "尚未从官方资料录入课程概述。"));
+  summary.append(element("h4", "", "课程目的"));
+  appendOverviewList(summary, course.objectives, "尚未从官方资料录入课程目的。");
+  const grades = element("section", "overview-card");
+  grades.append(element("p", "eyebrow", "ASSESSMENT"), element("h3", "", "成绩构成"));
+  renderGradeDistribution(grades, course);
+  upper.append(summary, grades);
+  container.append(upper);
+
+  const materials = element("section", "course-materials-card");
+  const materialHeading = element("div", "course-materials-title");
+  materialHeading.append(element("div", "", null));
+  materialHeading.firstChild.append(element("p", "eyebrow", "MOODLE ARCHIVE"), element("h2", "", "全部课件"));
+  const counts = course.moodle
+    ? `${course.moodle.downloaded_file_count} 个本地文件 · ${course.moodle.activity_count} 个 Moodle 项目`
+    : "尚未同步 Moodle 快照";
+  materialHeading.append(element("span", "archive-summary", counts));
+  materials.append(materialHeading);
+  renderMaterialGroup(materials, "课程学习材料", "Lecture slides、notes、readings 与其他学习内容", course.materials?.learning || []);
+  renderMaterialGroup(materials, "课程信息", "Introduction、assessment、课程安排与公告", course.materials?.information || []);
+  container.append(materials);
+}
+
+function renderMetrics(occurrences) {
+  const filteredItems = state.data.items.filter(itemMatches);
+  const monthPrefix = dateKey(state.currentMonth).slice(0, 7);
+  byId("metric-courses").textContent = state.selectedCourses.size;
+  byId("metric-items").textContent = filteredItems.length;
+  byId("metric-month").textContent = occurrences.filter((value) => value.key.startsWith(monthPrefix)).length;
+  byId("metric-unknown").textContent = filteredItems.filter((item) => item.date_status === "unknown").length;
+  byId("metric-pending").textContent = state.data.pending_review?.change_count || 0;
+}
+
+function renderCalendar(occurrences) {
+  const grid = byId("calendar-grid");
+  grid.replaceChildren();
+  const label = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long" }).format(state.currentMonth);
+  byId("calendar-label").textContent = label;
+  const grouped = new Map();
+  for (const occurrence of occurrences) {
+    if (!grouped.has(occurrence.key)) grouped.set(occurrence.key, []);
+    grouped.get(occurrence.key).push(occurrence);
+  }
+  const { start } = visibleRange();
+  const today = dateKey(new Date());
+  for (let index = 0; index < 42; index += 1) {
+    const day = addDays(start, index);
+    const key = dateKey(day);
+    const cell = element("div", "calendar-day");
+    if (day.getMonth() !== state.currentMonth.getMonth()) cell.classList.add("outside");
+    if (key === today) cell.classList.add("today");
+    cell.append(element("span", "day-number", day.getDate()));
+    const list = element("div", "day-events");
+    const values = grouped.get(key) || [];
+    for (const occurrence of values.slice(0, 4)) {
+      const course = courseFor(occurrence.item);
+      const chip = element("button", "event-chip");
+      chip.type = "button";
+      chip.style.setProperty("--course-color", course.color);
+      if (occurrence.item.date_status !== "confirmed") chip.classList.add("tentative");
+      if (state.selectedItemId === occurrence.item.item_id && state.selectedDateKey === key) chip.classList.add("selected");
+      if (occurrence.time) chip.append(element("time", "", occurrence.time));
+      chip.append(document.createTextNode(occurrence.item.title));
+      chip.title = `${course.code} · ${occurrence.item.title}`;
+      chip.addEventListener("click", () => {
+        state.selectedItemId = occurrence.item.item_id;
+        state.selectedDateKey = key;
+        renderDetail(occurrence.item, key);
+        renderCalendar(occurrences);
+      });
+      list.append(chip);
+    }
+    if (values.length > 4) list.append(element("span", "more-count", `另有 ${values.length - 4} 项`));
+    cell.append(list);
+    grid.append(cell);
+  }
+}
+
+function appendFact(list, label, value) {
+  if (value === null || value === undefined || value === "") return;
+  const row = element("div");
+  row.append(element("dt", "", label), element("dd", "", value));
+  list.append(row);
+}
+
+function formatDateTime(value) {
+  if (!value) return null;
+  if (!value.includes("T")) return value;
+  try {
     return new Intl.DateTimeFormat("zh-HK", {
-      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-    }).format(date);
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: state.data.timezone,
+    }).format(new Date(value));
+  } catch (_error) {
+    return value;
   }
+}
 
-  function formatDue(value, confirmed) {
-    if (!value) return "未公布日期";
-    const date = new Date(value.length === 10 ? `${value}T00:00:00` : value);
-    const formatted = Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("zh-HK", {
-      month: "short", day: "numeric", hour: value.length === 10 ? undefined : "2-digit", minute: value.length === 10 ? undefined : "2-digit",
-    }).format(date);
-    return `${confirmed ? "官方日期" : "日期待确认"} · ${formatted}`;
+function appendListBlock(panel, title, values, extraClass = "") {
+  if (!values || !values.length) return;
+  const block = element("section", `detail-block ${extraClass}`.trim());
+  block.append(element("h3", "", title));
+  const list = element("ul");
+  for (const value of values) list.append(element("li", "", value));
+  block.append(list);
+  panel.append(block);
+}
+
+function renderDetail(item, occurrenceKey = null) {
+  const panel = byId("detail-panel");
+  const course = courseFor(item);
+  panel.replaceChildren();
+  panel.style.setProperty("--course-color", course.color);
+  panel.append(element("div", "detail-course", `${course.code} · ${categoryLabels[item.category] || item.category}`));
+  panel.append(element("h2", "", item.title));
+
+  const pills = element("div", "detail-pills");
+  pills.append(element("span", "pill", item.date_status === "confirmed" ? "日期已确认" : item.date_status === "tentative" ? "日期待核实" : "日期未知"));
+  if (item.weight_percent !== null && item.weight_percent !== undefined) pills.append(element("span", "pill", `占分 ${item.weight_percent}%`));
+  if (item.warnings && item.warnings.length) pills.append(element("span", "pill warning", `${item.warnings.length} 项提醒`));
+  panel.append(pills);
+  if (item.description) panel.append(element("p", "detail-description", item.description));
+
+  const facts = element("dl", "detail-facts");
+  if (item.recurrence) {
+    appendFact(facts, "本次日期", occurrenceKey || "每周重复");
+    appendFact(facts, "时间", `${item.recurrence.start_time.slice(0, 5)}–${item.recurrence.end_time.slice(0, 5)}`);
+    appendFact(facts, "有效日期", `${item.recurrence.valid_from} 至 ${item.recurrence.valid_until}`);
+  } else {
+    appendFact(facts, "开放", formatDateTime(item.opens_at));
+    appendFact(facts, "开始", formatDateTime(item.starts_at));
+    appendFact(facts, "结束", formatDateTime(item.ends_at));
+    appendFact(facts, "DDL", formatDateTime(item.due_at) || item.due_on);
+    appendFact(facts, "安排日期", item.scheduled_on);
   }
+  appendFact(facts, "地点", item.location);
+  appendFact(facts, "课业形式", item.assessment_format);
+  appendFact(facts, "GPA 占比", item.weight_percent === null || item.weight_percent === undefined ? null : `${item.weight_percent}%`);
+  appendFact(facts, "字数限制", item.word_limit === null || item.word_limit === undefined ? null : `${item.word_limit} 字`);
+  appendFact(facts, "提交方式", item.submission_method);
+  appendFact(facts, "最近核实", formatDateTime(item.last_verified_at));
+  panel.append(facts);
 
-  function courseCode(item) {
-    const match = String(item.course_title || "").match(/[A-Z]{2,8}\d{3,5}/i);
-    return match ? match[0].toUpperCase() : String(item.course_id || "未知课程");
-  }
+  appendListBlock(panel, "课业要求", item.requirements);
+  appendListBlock(panel, "相关政策", item.policies);
+  appendListBlock(panel, "提醒与冲突", item.warnings, "warning-list");
 
-  function courseHue(courseId) {
-    let hash = 0;
-    for (const character of String(courseId)) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
-    return Math.abs(hash) % 360;
-  }
-
-  function assignCourseColors(items) {
-    const used = new Set(state.courseColors.values());
-    [...new Set(items.map((item) => item.course_id))].sort().forEach((courseId) => {
-      if (state.courseColors.has(courseId)) return;
-      let slot = courseHue(courseId) % 16;
-      for (let offset = 0; offset < 16 && used.has(slot); offset += 1) slot = (slot + 1) % 16;
-      state.courseColors.set(courseId, slot);
-      used.add(slot);
-    });
-  }
-
-  function courseColorClass(courseId) {
-    return `course-color-${state.courseColors.get(courseId) ?? courseHue(courseId) % 16}`;
-  }
-
-  function shortDate(value) {
-    if (!value) return null;
-    const date = new Date(value.length === 10 ? `${value}T00:00:00` : value);
-    if (Number.isNaN(date.getTime())) return value;
-    return new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(date);
-  }
-
-  function dateKey(value) {
-    return value ? String(value).slice(0, 10) : null;
-  }
-
-  async function request(path, options = {}) {
-    const response = await fetch(path, options);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-    return data;
-  }
-
-  function setBusy(button, busy, text) {
-    if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
-    button.disabled = busy;
-    button.textContent = busy ? text : button.dataset.originalText;
-  }
-
-  function showToast(message) {
-    const toast = byId("toast");
-    toast.textContent = message;
-    toast.classList.remove("hidden");
-    window.setTimeout(() => toast.classList.add("hidden"), 2600);
-  }
-
-  function showError(message) {
-    const error = byId("global-error");
-    error.textContent = message;
-    error.classList.toggle("hidden", !message);
-  }
-
-  async function loadDashboard() {
-    byId("loading").classList.remove("hidden");
-    showError("");
-    try {
-      state.snapshot = await request("/api/dashboard");
-      renderDashboard();
-      document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-      byId("page-today").classList.remove("hidden");
-    } catch (error) {
-      showError(error.message);
-    } finally {
-      byId("loading").classList.add("hidden");
+  if (item.links && item.links.length) {
+    const block = element("section", "detail-block");
+    block.append(element("h3", "", "相关链接"));
+    for (const link of item.links) {
+      const safe = /^https?:\/\//i.test(link.url);
+      const node = element(safe ? "a" : "div", "source-card", link.label);
+      if (safe) {
+        node.href = link.url;
+        node.target = "_blank";
+        node.rel = "noreferrer";
+      }
+      block.append(node);
     }
+    panel.append(block);
   }
 
-  function renderMoodleSession(result) {
-    const label = byId("moodle-session-state");
-    const syncButton = byId("open-sync");
-    label.className = "session-state";
-    if (result.status === "logged_in") {
-      label.classList.add("logged-in");
-      label.textContent = `Moodle：已登录 · ${result.available_course_count} 门课`;
-      byId("open-moodle-login").classList.add("hidden");
-      syncButton.disabled = false;
-      syncButton.textContent = "同步全部课程";
-    } else if (result.status === "logged_out") {
-      label.classList.add("logged-out");
-      label.textContent = "Moodle：未登录";
-      byId("open-moodle-login").classList.remove("hidden");
-      syncButton.disabled = true;
-      syncButton.textContent = "请先登录 Moodle";
+  if (item.sources && item.sources.length) {
+    const block = element("section", "detail-block");
+    block.append(element("h3", "", "证据来源"));
+    for (const source of item.sources) {
+      const pages = source.page_numbers && source.page_numbers.length ? ` · 第 ${source.page_numbers.join("、")} 页` : "";
+      const note = source.note ? ` · ${source.note}` : "";
+      const caption = `${source.title}${pages}${note}`;
+      const safe = source.url && /^https?:\/\//i.test(source.url);
+      const node = element(safe ? "a" : "div", "source-card", caption);
+      if (safe) {
+        node.href = source.url;
+        node.target = "_blank";
+        node.rel = "noreferrer";
+      } else if (source.relative_path) {
+        node.append(element("small", "", ` · ${source.relative_path}`));
+      }
+      block.append(node);
+    }
+    panel.append(block);
+  }
+}
+
+function renderUnscheduled() {
+  const items = state.data.items.filter((item) => itemMatches(item) && !primaryDateKey(item) && !item.recurrence);
+  const container = byId("unscheduled-list");
+  container.replaceChildren();
+  byId("unscheduled-count").textContent = `${items.length} 项`;
+  if (!items.length) {
+    container.append(element("p", "empty-list", "当前筛选范围没有日期待确认事项。"));
+    return;
+  }
+  for (const item of items) {
+    const course = courseFor(item);
+    const button = element("button", "unscheduled-item");
+    button.type = "button";
+    button.style.setProperty("--course-color", course.color);
+    const copy = element("span");
+    copy.append(element("strong", "", item.title), element("small", "", `${course.code} · ${categoryLabels[item.category] || item.category}`));
+    button.append(copy);
+    button.addEventListener("click", () => {
+      state.selectedItemId = item.item_id;
+      state.selectedDateKey = null;
+      renderDetail(item);
+    });
+    container.append(button);
+  }
+}
+
+function renderDataViews() {
+  const occurrences = buildOccurrences();
+  renderMetrics(occurrences);
+  renderCalendar(occurrences);
+  renderUnscheduled();
+  if (state.selectedItemId) {
+    const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
+    if (selected) renderDetail(selected, state.selectedDateKey);
+  }
+  if (state.view === "course") renderCourseOverview();
+}
+
+async function loadInformation() {
+  byId("global-error").classList.add("hidden");
+  try {
+    const response = await fetch("/api/information", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "无法读取信息库");
+    state.data = payload;
+    state.selectedCourses = new Set(payload.courses.map((course) => course.course_id));
+    if (!state.selectedOverviewCourseId && payload.courses.length) {
+      state.selectedOverviewCourseId = payload.courses[0].course_id;
+    }
+    byId("data-caption").textContent = dataCaption();
+    const warning = byId("data-warning");
+    if (payload.warnings && payload.warnings.length) {
+      warning.textContent = payload.warnings.join(" ");
+      warning.classList.remove("hidden");
     } else {
-      label.classList.add("unknown");
-      label.textContent = "Moodle：状态检查失败";
-      byId("open-moodle-login").classList.remove("hidden");
-      syncButton.disabled = true;
-      syncButton.textContent = "登录状态未确认";
+      warning.classList.add("hidden");
     }
-    label.dataset.error = result.error || "";
+    renderCourseNavigation();
+    renderCourseFilters();
+    renderDataViews();
+  } catch (error) {
+    const alert = byId("global-error");
+    alert.textContent = error.message;
+    alert.classList.remove("hidden");
   }
+}
 
-  async function checkMoodleSession(showFailure = true) {
-    const button = byId("check-moodle-session");
-    setBusy(button, true, "检查中…");
-    try {
-      const result = await request("/api/moodle/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-HSAS-Request": "1" },
-        body: "{}",
-      });
-      renderMoodleSession(result);
-      if (showFailure && result.error) showToast(result.error);
-    } catch (error) {
-      renderMoodleSession({ status: "unknown", available_course_count: 0, error: error.message });
-      if (showFailure) showToast(`登录状态检查失败：${error.message}`);
-    } finally {
-      setBusy(button, false);
-    }
+function setOperationState(running, message = "") {
+  const loginButton = byId("login-moodle");
+  const syncButton = byId("sync-courses");
+  loginButton.disabled = running;
+  syncButton.disabled = running;
+  const status = byId("operation-status");
+  if (message) {
+    status.textContent = message;
+    status.classList.remove("hidden");
+  } else {
+    status.classList.add("hidden");
   }
+}
 
-  function renderDashboard() {
-    const data = state.snapshot;
-    assignCourseColors(data.items);
-    byId("metric-urgent").textContent = data.summary.urgent_item_count;
-    byId("metric-effort").textContent = formatMinutes(data.summary.remaining_minutes);
-    byId("metric-status").textContent = data.summary.status === "current" ? "最新" : data.summary.status === "stale" ? "需更新" : "不可用";
-    byId("metric-updated").textContent = data.summary.updated_at ? `${formatDateTime(data.summary.updated_at)} 更新` : "尚无有效计划";
-    byId("plan-caption").textContent = data.summary.key_item_count
-      ? `当前计划包含 ${data.summary.key_item_count} 个关键事项；学习时段仍由你决定。`
-      : "同步课程并生成计划后，这里会显示优先事项。";
-
-    const warningBox = byId("plan-warnings");
-    const warnings = data.warnings || [];
-    warningBox.innerHTML = warnings.length ? `<ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : "";
-    warningBox.classList.toggle("hidden", warnings.length === 0);
-
-    if (!state.selectedItemId || !data.items.some((item) => item.plan_item_id === state.selectedItemId)) {
-      state.selectedItemId = data.items[0]?.plan_item_id || null;
-    }
-    renderTaskList();
-    renderTaskDetail();
-    renderCourses();
-    renderTaskFilters();
-  }
-
-  function filteredTasks() {
-    if (!state.snapshot) return [];
-    const filters = state.taskFilters;
-    return state.snapshot.items.filter((item) => {
-      if (filters.courseIds && !filters.courseIds.has(item.course_id)) return false;
-      const date = dateKey(item.due);
-      if (!date) return filters.includeMissing;
-      if (!item.due_confirmed && !filters.includeUnconfirmed) return false;
-      if (filters.dateFrom && date < filters.dateFrom) return false;
-      if (filters.dateTo && date > filters.dateTo) return false;
-      return true;
+async function runMoodleOperation(path, pendingMessage) {
+  byId("global-error").classList.add("hidden");
+  setOperationState(true, pendingMessage);
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-HIQS-Request": "1",
+      },
+      body: JSON.stringify({ confirmed: true }),
     });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "操作失败");
+    return payload;
+  } catch (error) {
+    setOperationState(false);
+    const alert = byId("global-error");
+    alert.textContent = error.message;
+    alert.classList.remove("hidden");
+    return null;
   }
+}
 
-  function renderTaskFilters() {
-    const courses = [...new Map(state.snapshot.items.map((item) => [item.course_id, item])).values()];
-    const availableIds = new Set(courses.map((item) => item.course_id));
-    if (state.taskFilters.courseIds === null) {
-      state.taskFilters.courseIds = new Set(availableIds);
-    } else {
-      availableIds.forEach((id) => {
-        if (!state.taskFilters.knownCourseIds?.has(id)) state.taskFilters.courseIds.add(id);
-      });
-    }
-    state.taskFilters.courseIds = new Set([...state.taskFilters.courseIds].filter((id) => availableIds.has(id)));
-    state.taskFilters.knownCourseIds = availableIds;
-    const options = byId("course-filter-options");
-    options.innerHTML = courses.map((item) => `
-      <label class="course-filter-chip ${courseColorClass(item.course_id)}">
-        <input type="checkbox" data-filter-course="${escapeHtml(item.course_id)}" ${state.taskFilters.courseIds.has(item.course_id) ? "checked" : ""}>
-        <span>${escapeHtml(courseCode(item))}</span>
-      </label>
-    `).join("") || '<span class="muted-text">暂无课程</span>';
-    byId("filter-date-from").value = state.taskFilters.dateFrom;
-    byId("filter-date-to").value = state.taskFilters.dateTo;
-    byId("filter-date-unconfirmed").checked = state.taskFilters.includeUnconfirmed;
-    byId("filter-date-missing").checked = state.taskFilters.includeMissing;
-    options.querySelectorAll("[data-filter-course]").forEach((input) => input.addEventListener("change", () => {
-      if (input.checked) state.taskFilters.courseIds.add(input.dataset.filterCourse);
-      else state.taskFilters.courseIds.delete(input.dataset.filterCourse);
-      applyTaskFilters();
-    }));
-    updateFilterSummary();
-  }
+async function loginMoodle() {
+  const confirmed = window.confirm(
+    "将打开一个 Moodle 登录窗口。请只在该窗口中输入账号并亲自完成 SSO/MFA。继续吗？",
+  );
+  if (!confirmed) return;
+  const result = await runMoodleOperation(
+    "/api/moodle/login",
+    "等待你在新窗口完成 Moodle 登录…",
+  );
+  if (!result) return;
+  setOperationState(
+    false,
+    `Moodle 登录成功，可访问 ${result.available_course_count} 门课程。`,
+  );
+}
 
-  function applyTaskFilters() {
-    const visible = filteredTasks();
-    if (!visible.some((item) => item.plan_item_id === state.selectedItemId)) {
-      state.selectedItemId = visible[0]?.plan_item_id || null;
-    }
-    renderTaskList();
-    renderTaskDetail();
-    updateFilterSummary();
-  }
+async function synchronizeCourses() {
+  const confirmed = window.confirm(
+    "将同步全部可访问课程，并下载课程文件到本机。同步不会自动改写日历信息库。继续吗？",
+  );
+  if (!confirmed) return;
+  const result = await runMoodleOperation(
+    "/api/sync",
+    "正在同步 Moodle 课程与文件，请保持此页面打开…",
+  );
+  if (!result) return;
+  const failure = result.failed_course_count
+    ? `，${result.failed_course_count} 门失败`
+    : "";
+  await loadInformation();
+  const pending = result.pending_review?.change_count || 0;
+  setOperationState(
+    false,
+    `同步完成：${result.succeeded_course_count}/${result.discovered_course_count} 门成功${failure}。待 AI 整理 ${pending} 项。`,
+  );
+}
 
-  function updateFilterSummary() {
-    const count = filteredTasks().length;
-    byId("task-filter-summary").textContent = `显示 ${count} / ${state.snapshot.items.length} 项`;
-  }
+byId("previous-month").addEventListener("click", () => {
+  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
+  renderDataViews();
+});
+byId("next-month").addEventListener("click", () => {
+  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
+  renderDataViews();
+});
+byId("today-button").addEventListener("click", () => {
+  const now = new Date();
+  state.currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  renderDataViews();
+});
+byId("search-input").addEventListener("input", (event) => {
+  state.query = event.target.value.trim().toLocaleLowerCase();
+  renderDataViews();
+});
+byId("select-all-courses").addEventListener("click", () => {
+  state.selectedCourses = new Set(state.data.courses.map((course) => course.course_id));
+  renderCourseFilters();
+  renderDataViews();
+});
+byId("show-calendar").addEventListener("click", showCalendar);
+byId("reload-data").addEventListener("click", loadInformation);
+byId("login-moodle").addEventListener("click", loginMoodle);
+byId("sync-courses").addEventListener("click", synchronizeCourses);
 
-  function renderTaskList() {
-    const list = byId("task-list");
-    const items = filteredTasks();
-    if (!items.length) {
-      list.innerHTML = '<div class="empty-state">没有符合当前筛选条件的关键事项。</div>';
-      return;
-    }
-    list.innerHTML = items.map((item, index) => `
-      <button type="button" class="task-row ${item.plan_item_id === state.selectedItemId ? "selected" : ""}" data-task-index="${index}" role="option" aria-selected="${item.plan_item_id === state.selectedItemId}">
-        <span class="task-title-line"><span class="tagged-title"><span class="course-chip ${courseColorClass(item.course_id)}">${escapeHtml(courseCode(item))}</span><span class="date-chip ${item.due ? (item.due_confirmed ? "" : "unconfirmed") : "missing"}">${escapeHtml(item.due ? shortDate(item.due) : "日期未公布")}${item.due && !item.due_confirmed ? " · 未确认" : ""}</span><strong>${escapeHtml(item.title)}</strong></span><span class="priority-label priority-${item.priority}">${priorityLabels[item.priority]}</span></span>
-        <span class="task-meta"><span>${escapeHtml(item.course_title)}</span><span>${formatMinutes(item.remaining_minutes)}剩余</span><span>${escapeHtml(formatDue(item.due, item.due_confirmed))}</span></span>
-        <span class="progress-head"><span>已完成 ${formatMinutes(item.completed_minutes)}</span><span>${item.progress_percent}%</span></span>
-        <span class="progress-track" role="progressbar" aria-valuenow="${item.progress_percent}" aria-valuemin="0" aria-valuemax="100"><span class="progress-bar" style="width:${item.progress_percent}%"></span></span>
-      </button>
-    `).join("");
-    list.querySelectorAll("[data-task-index]").forEach((button) => button.addEventListener("click", () => {
-      state.selectedItemId = items[Number(button.dataset.taskIndex)].plan_item_id;
-      renderTaskList();
-      renderTaskDetail();
-    }));
-  }
-
-  function renderTaskDetail() {
-    const panel = byId("task-detail");
-    const item = state.snapshot.items.find((candidate) => candidate.plan_item_id === state.selectedItemId);
-    if (!item) {
-      panel.innerHTML = '<div class="empty-state">选择一个事项查看详情。</div>';
-      return;
-    }
-    const reasons = item.reasons.length ? item.reasons : ["Planner 未提供额外说明。"];
-    const criteria = item.completion_criteria.length ? item.completion_criteria : ["尚未定义完成标准。"];
-    const sources = item.source_references.length
-      ? item.source_references.map((source) => {
-          const pages = source.page_numbers.length ? ` · 第 ${source.page_numbers.join("、")} 页` : "";
-          const path = source.relative_path ? `<code>${escapeHtml(source.relative_path)}</code>` : escapeHtml(source.source_type);
-          return `<li>${path}${escapeHtml(pages)}${source.note ? ` · ${escapeHtml(source.note)}` : ""}</li>`;
-        }).join("")
-      : "<li>当前事项未附本地课件引用。</li>";
-    panel.innerHTML = `
-      <span class="course-tag">${escapeHtml(item.course_title)}</span>
-      <h2>${escapeHtml(item.title)}</h2>
-      <p class="detail-description">${escapeHtml(item.description || item.priority_rationale)}</p>
-      <div class="detail-block"><h3>为什么现在做</h3><ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("")}</ul></div>
-      <div class="detail-block"><h3>怎样算完成</h3><ul>${criteria.map((criterion) => `<li>${escapeHtml(criterion)}</li>`).join("")}</ul></div>
-      <details class="detail-block"><summary>课件与课程依据（${item.source_references.length}）</summary><ul class="source-list">${sources}</ul></details>
-      ${item.warnings.length ? `<div class="notice warning"><ul>${item.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>` : ""}
-      <div class="detail-actions"><button type="button" id="record-progress" class="button primary">记录进度</button></div>
-    `;
-    byId("record-progress").addEventListener("click", openExecutionDialog);
-  }
-
-  function renderCourses() {
-    const list = byId("course-list");
-    if (!state.snapshot.courses.length) {
-      list.innerHTML = '<div class="empty-state">尚无本地课程归档。可以先登录 Moodle，再同步课程。</div>';
-      return;
-    }
-    list.innerHTML = state.snapshot.courses.map((course) => `
-      <article class="course-row">
-        <div><h2>${escapeHtml(course.title)}</h2><p>${escapeHtml(course.course_id)} · ${course.activity_count} 个活动 · ${course.file_count} 份文件 · ${formatDateTime(course.collected_at)}${course.change_count ? ` · ${course.change_count} 项变更` : ""}</p>${course.error ? `<p class="priority-critical">${escapeHtml(course.error)}</p>` : ""}</div>
-        <div class="course-actions"><span class="course-state ${course.sync_status}">${courseStateLabels[course.sync_status]}</span><button type="button" class="button" data-course-info="${escapeHtml(course.course_id)}">课程信息</button><button type="button" class="button" data-course-materials="${escapeHtml(course.course_id)}">查看课件</button></div>
-      </article>
-    `).join("");
-    list.querySelectorAll("[data-course-info]").forEach((button) => button.addEventListener("click", () => {
-      openCourseInformation(button.dataset.courseInfo);
-    }));
-    list.querySelectorAll("[data-course-materials]").forEach((button) => button.addEventListener("click", () => {
-      openCourseMaterials(button.dataset.courseMaterials);
-    }));
-  }
-
-  function displayValue(value, suffix = "") {
-    return value === null || value === undefined || value === "" ? "未提供" : `${value}${suffix}`;
-  }
-
-  function infoMetric(label, value, note = "") {
-    return `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong>${note ? `<small>${escapeHtml(note)}</small>` : ""}</article>`;
-  }
-
-  function infoRows(rows) {
-    return `<dl class="info-kv">${rows.map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
-  }
-
-  function allCourseActivities(archive) {
-    return [
-      ...(archive.sections || []).flatMap((section) => (section.activities || []).map((activity) => ({ section, activity }))),
-      ...(archive.unassigned_activities || []).map((activity) => ({ section: null, activity })),
-    ];
-  }
-
-  function renderInfoOverview(archive) {
-    const stats = archive.stats || {};
-    const course = archive.course || {};
-    const assessments = archive.assessments || {};
-    const types = Object.entries(stats.activity_types || {});
-    return `
-      <div class="info-stat-grid">
-        ${infoMetric("Sections", displayValue(stats.section_count))}
-        ${infoMetric("Activities", displayValue(stats.activity_count))}
-        ${infoMetric("已下载文件", displayValue(stats.downloaded_file_count), stats.downloaded_bytes === null || stats.downloaded_bytes === undefined ? "大小未提供" : formatBytes(stats.downloaded_bytes))}
-        ${infoMetric("已分析 PDF", displayValue(stats.analyzed_pdf_count), stats.pdf_word_count === null || stats.pdf_word_count === undefined ? "字数未提供" : `${stats.pdf_word_count} 词`)}
-      </div>
-      <div class="info-grid">
-        <section class="info-panel"><h2>课程与归档</h2>${infoRows([
-          ["课程 ID", displayValue(course.course_id)],
-          ["Schema", displayValue(archive.schema_version)],
-          ["来源", displayValue(archive.source)],
-          ["采集时间", formatDateTime(archive.collected_at)],
-          ["Moodle 声明 Sections", displayValue(course.declared_section_count)],
-          ["实际返回 Sections", displayValue(course.returned_section_count)],
-          ["最大上传大小", course.max_upload_bytes === null || course.max_upload_bytes === undefined ? "未提供" : formatBytes(course.max_upload_bytes)],
-          ["原始状态路径", displayValue(archive.raw_state_path)],
-        ])}${course.url ? `<a class="text-link" href="${escapeHtml(course.url)}" target="_blank" rel="noreferrer">在 Moodle 打开课程</a>` : ""}</section>
-        <section class="info-panel"><h2>活动类型</h2>${types.length ? `<div class="type-counts">${types.map(([type, count]) => `<span><strong>${escapeHtml(count)}</strong>${escapeHtml(type)}</span>`).join("")}</div>` : '<p class="muted-text">未提供活动类型统计。</p>'}<h2 class="subheading">Assessment 摘要</h2>${infoRows([
-          ["评分构成", displayValue(assessments.grading_basis)],
-          ["普通权重合计", assessments.total_weight_percent === null || assessments.total_weight_percent === undefined ? "未知" : `${assessments.total_weight_percent}%`],
-          ["Assessment 项目", String((assessments.items || []).length)],
-          ["分组", String((assessments.groups || []).length)],
-        ])}</section>
-      </div>`;
-  }
-
-  function renderAssessmentSources(sources) {
-    if (!sources?.length) return '<li>未提供来源。</li>';
-    return sources.map((source) => {
-      const pages = source.page_numbers?.length ? ` · 第 ${source.page_numbers.join("、")} 页` : "";
-      const location = source.relative_path || source.section_id || source.activity_id || "未提供位置";
-      return `<li><strong>${escapeHtml(source.source_type)}</strong> · ${escapeHtml(location)}${escapeHtml(pages)}${source.note ? ` · ${escapeHtml(source.note)}` : ""}</li>`;
-    }).join("");
-  }
-
-  function renderInfoAssessments(archive) {
-    const data = archive.assessments || {};
-    const warnings = data.warnings || [];
-    const items = data.items || [];
-    const groups = data.groups || [];
-    return `
-      ${warnings.length ? `<div class="notice warning"><strong>数据提醒</strong><ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul></div>` : ""}
-      <section class="info-panel assessment-summary"><h2>评分摘要</h2>${infoRows([
-        ["评分构成", displayValue(data.grading_basis)],
-        ["普通权重合计", data.total_weight_percent === null || data.total_weight_percent === undefined ? "未知" : `${data.total_weight_percent}%`],
-        ["解析器", displayValue(data.parser_version)],
-      ])}<p class="info-note">分组权重用于解释结构；下列子项目的普通权重才用于逐项展示，避免重复相加。Bonus 独立显示。</p></section>
-      ${groups.length ? `<section class="info-panel"><h2>Assessment 分组</h2><div class="assessment-group-list">${groups.map((group) => `<article><div><strong>${escapeHtml(group.title)}</strong><span>${group.weight_percent === null || group.weight_percent === undefined ? "权重未知" : `${group.weight_percent}%`}</span></div>${group.description ? `<p>${escapeHtml(group.description)}</p>` : ""}<small>置信度 ${displayValue(group.confidence)} · ${escapeHtml((group.extraction_methods || []).join("、") || "提取方式未提供")}</small></article>`).join("")}</div></section>` : ""}
-      <section class="assessment-list"><h2>Assessment 项目（${items.length}）</h2>${items.length ? items.map((item) => {
-        const timing = [
-          item.opens_on ? `开放：${shortDate(item.opens_on)}` : null,
-          item.due_at ? `截止：${formatDateTime(item.due_at)}` : item.due_on ? `截止：${shortDate(item.due_on)}` : null,
-          item.scheduled_on ? `安排：${shortDate(item.scheduled_on)}` : null,
-        ].filter(Boolean);
-        return `<article class="assessment-card">
-          <div class="assessment-head"><div><span class="assessment-type">${escapeHtml(item.assessment_type || "类型未提供")}</span><h3>${escapeHtml(item.title)}</h3></div><div class="weight-stack"><strong>${item.weight_percent === null || item.weight_percent === undefined ? "权重未知" : `${item.weight_percent}%`}</strong>${item.bonus_percent === null || item.bonus_percent === undefined ? "" : `<span>Bonus +${escapeHtml(item.bonus_percent)}%</span>`}</div></div>
-          <div class="assessment-facts"><span>${timing.length ? timing.map(escapeHtml).join(" · ") : "日期未提供"}</span><span>字数：${escapeHtml(displayValue(item.word_limit))}</span><span>状态：${escapeHtml(displayValue(item.status))}</span><span>置信度：${escapeHtml(displayValue(item.confidence))}</span><span>${item.visible_in_course ? "课程页可见" : "课程页未见"}</span></div>
-          ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}
-          ${item.requirements?.length ? `<div class="compact-list"><strong>要求</strong><ul>${item.requirements.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul></div>` : ""}
-          <details><summary>提取依据与来源</summary><p class="info-note">${escapeHtml((item.extraction_methods || []).join("、") || "提取方式未提供")}</p><ul class="source-list">${renderAssessmentSources(item.sources)}</ul></details>
-        </article>`;
-      }).join("") : '<div class="empty-state compact">course.json 未提供 Assessment 项目。</div>'}</section>
-      ${(data.policies || []).length ? `<section class="info-panel"><h2>课程政策</h2><ul>${data.policies.map((policy) => `<li>${escapeHtml(policy)}</li>`).join("")}</ul></section>` : ""}`;
-  }
-
-  function renderInfoActivity(activity) {
-    const status = [activity.module_name || activity.module || activity.category, activity.download_status, activity.visible === false ? "隐藏" : null, activity.has_restrictions ? "有限制" : null].filter(Boolean);
-    const completion = activity.completion_state === null || activity.completion_state === undefined ? "未提供" : String(activity.completion_state);
-    const metadata = Object.entries(activity.metadata || {});
-    return `<article class="structure-activity"><div><h3>${escapeHtml(activity.name)}</h3><p>${status.map(escapeHtml).join(" · ")} · 完成状态 ${escapeHtml(completion)} · ${activity.files?.length || 0} 个文件</p></div>${activity.url ? `<a class="text-link" href="${escapeHtml(activity.url)}" target="_blank" rel="noreferrer">Moodle</a>` : ""}${activity.download_error ? `<p class="file-warning">${escapeHtml(activity.download_error)}</p>` : ""}${metadata.length ? `<details><summary>Metadata</summary>${infoRows(metadata.map(([key, value]) => [key, typeof value === "object" ? JSON.stringify(value) : displayValue(value)]))}</details>` : ""}</article>`;
-  }
-
-  function renderInfoStructure(archive) {
-    const sections = archive.sections || [];
-    const unassigned = archive.unassigned_activities || [];
-    return `<div class="structure-list">${sections.map((section, index) => `<details class="material-section" ${section.current || index === 0 ? "open" : ""}><summary>${escapeHtml(section.title || "未命名 Section")}<span>${section.activities?.length || 0} 项${section.current ? " · 当前" : ""}${section.visible === false ? " · 隐藏" : ""}</span></summary><div>${(section.activities || []).map(renderInfoActivity).join("") || '<p class="empty-inline">没有 Activity</p>'}</div></details>`).join("")}${unassigned.length ? `<details class="material-section"><summary>未归属 Section<span>${unassigned.length} 项</span></summary><div>${unassigned.map(renderInfoActivity).join("")}</div></details>` : ""}</div>`;
-  }
-
-  function renderInfoQuality(archive) {
-    const activities = allCourseActivities(archive);
-    const failed = activities.filter(({ activity }) => activity.download_error);
-    const files = activities.flatMap(({ section, activity }) => (activity.files || []).map((file) => ({ section, activity, file })));
-    const stats = archive.stats || {};
-    return `
-      <div class="info-stat-grid">${infoMetric("下载成功", displayValue(stats.downloaded_file_count))}${infoMetric("下载失败", displayValue(stats.failed_download_count))}${infoMetric("下载总量", stats.downloaded_bytes === null || stats.downloaded_bytes === undefined ? "未提供" : formatBytes(stats.downloaded_bytes))}${infoMetric("PDF 总词数", displayValue(stats.pdf_word_count))}</div>
-      ${failed.length ? `<div class="notice error"><strong>下载失败</strong><ul>${failed.map(({ activity }) => `<li>${escapeHtml(activity.name)}：${escapeHtml(activity.download_error)}</li>`).join("")}</ul></div>` : '<div class="notice success">course.json 未记录下载失败。</div>'}
-      <section class="info-panel"><h2>文件清单（${files.length}）</h2><div class="quality-files">${files.length ? files.map(({ section, activity, file }) => {
-        const analysis = file.analysis;
-        const coverage = analysis?.page_count ? `${analysis.pages_with_text}/${analysis.page_count} 页有文本` : "文本覆盖未提供";
-        const warnings = analysis?.warnings || [];
-        return `<details><summary><span><strong>${escapeHtml(file.filename)}</strong><small>${escapeHtml(section?.title || "未归属")} · ${escapeHtml(activity.name)}</small></span><span>${escapeHtml(formatBytes(file.size_bytes))}</span></summary>${infoRows([
-          ["相对路径", displayValue(file.relative_path)], ["Content-Type", displayValue(file.content_type)], ["SHA-256", displayValue(file.sha256)], ["下载时间", formatDateTime(file.downloaded_at)], ["验证时间", formatDateTime(file.validated_at)], ["PDF 分析", analysis ? `${displayValue(analysis.status)} · ${coverage}` : "未进行"], ["词数", analysis ? displayValue(analysis.word_count) : "未提供"], ["预计阅读", analysis?.estimated_reading_minutes === null || analysis?.estimated_reading_minutes === undefined ? "未提供" : `${analysis.estimated_reading_minutes} 分钟`], ["OCR", analysis ? (analysis.ocr_required ? "需要" : "不需要") : "未提供"],
-        ])}${warnings.length ? `<p class="file-warning">${warnings.map(escapeHtml).join("；")}</p>` : ""}</details>`;
-      }).join("") : '<p class="muted-text">没有文件。</p>'}</div></section>`;
-  }
-
-  function renderCourseInformationTab(tab) {
-    if (!state.courseInformation) return;
-    state.courseInfoTab = tab;
-    document.querySelectorAll("[data-info-tab]").forEach((button) => {
-      const active = button.dataset.infoTab === tab;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-    const archive = state.courseInformation.course_json;
-    const content = byId("course-info-content");
-    if (tab === "overview") content.innerHTML = renderInfoOverview(archive);
-    else if (tab === "assessments") content.innerHTML = renderInfoAssessments(archive);
-    else if (tab === "structure") content.innerHTML = renderInfoStructure(archive);
-    else if (tab === "quality") content.innerHTML = renderInfoQuality(archive);
-    else {
-      content.innerHTML = '<pre id="course-json-view" class="json-view" aria-label="course.json 内容"></pre>';
-      byId("course-json-view").textContent = JSON.stringify(archive, null, 2);
-    }
-  }
-
-  async function openCourseInformation(courseId) {
-    document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-    byId("page-course-info").classList.remove("hidden");
-    byId("course-info-title").textContent = "课程信息";
-    byId("course-info-caption").textContent = "正在读取并验证 course.json…";
-    byId("course-info-content").innerHTML = '<div class="loading-state">正在读取 course.json…</div>';
-    byId("copy-course-json").disabled = true;
-    state.courseInformation = null;
-    state.courseInfoTab = "overview";
-    try {
-      const information = await request(`/api/courses/${encodeURIComponent(courseId)}`);
-      state.courseInformation = information;
-      byId("course-info-title").textContent = information.course_title;
-      byId("course-info-caption").textContent = `Course ${information.course_id} · 采集于 ${formatDateTime(information.collected_at)}`;
-      byId("copy-course-json").disabled = false;
-      renderCourseInformationTab("overview");
-    } catch (error) {
-      byId("course-info-content").innerHTML = `<div class="notice error">无法读取课程信息：${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  async function openCourseMaterials(courseId) {
-    document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-    byId("page-materials").classList.remove("hidden");
-    byId("materials-course-title").textContent = "课程课件";
-    byId("materials-caption").textContent = "正在读取本地课程归档…";
-    byId("materials-summary").textContent = "";
-    byId("materials-list").innerHTML = '<div class="loading-state">正在读取课件目录…</div>';
-    try {
-      const catalog = await request(`/api/courses/${encodeURIComponent(courseId)}/materials`);
-      renderMaterials(catalog);
-    } catch (error) {
-      byId("materials-list").innerHTML = `<div class="notice error" role="alert">${escapeHtml(error.message)}</div>`;
-    }
-  }
-
-  function renderMaterials(catalog) {
-    byId("materials-course-title").textContent = catalog.course_title;
-    byId("materials-caption").textContent = `本地归档采集于 ${formatDateTime(catalog.collected_at)}。`;
-    byId("materials-summary").textContent = `${catalog.downloaded_file_count} 份已下载文件 · ${catalog.analyzed_pdf_count} 份 PDF 已分析 · ${catalog.failed_download_count} 项下载失败`;
-    const sections = catalog.sections.filter((section) => section.activities.length);
-    if (!sections.length) {
-      byId("materials-list").innerHTML = '<div class="empty-state">这门课程的本地归档没有课件活动。</div>';
-      return;
-    }
-    byId("materials-list").innerHTML = sections.map((section, sectionIndex) => `
-      <details class="material-section" ${section.current || sectionIndex === 0 ? "open" : ""}>
-        <summary>${escapeHtml(section.title || "未命名 Section")}<span>${section.activities.length} 项内容${section.visible ? "" : " · 当前隐藏"}</span></summary>
-        <div>${section.activities.map(renderMaterialActivity).join("")}</div>
-      </details>
-    `).join("");
-  }
-
-  function renderMaterialActivity(activity) {
-    const files = activity.files.length
-      ? `<div class="file-list">${activity.files.map((file) => renderMaterialFile(file)).join("")}</div>`
-      : "";
-    const statusBits = [activity.download_status.replaceAll("_", " ")];
-    if (!activity.visible) statusBits.push("当前不可见");
-    if (activity.has_restrictions) statusBits.push("有限制");
-    if (activity.download_error) statusBits.push(activity.download_error);
-    const moodleLink = activity.moodle_url
-      ? `<a class="text-link moodle-link" href="${escapeHtml(activity.moodle_url)}" target="_blank" rel="noreferrer">在 Moodle 查看</a>`
-      : "";
-    return `
-      <article class="material-activity">
-        <div class="activity-heading"><h2>${escapeHtml(activity.name)}</h2><span>${escapeHtml(activity.category)}</span></div>
-        <p class="activity-meta">${statusBits.map(escapeHtml).join(" · ")}</p>
-        ${files}${moodleLink}
-      </article>
-    `;
-  }
-
-  function renderMaterialFile(file) {
-    const analysis = file.analysis;
-    const detail = analysis
-      ? `${analysis.page_count} 页 · ${analysis.word_count} 词 · 文本提取 ${analysis.status}`
-      : `${formatBytes(file.size_bytes)} · 未进行 PDF 文本分析`;
-    const warnings = analysis && (analysis.ocr_required || analysis.warnings.length)
-      ? `<small class="file-warning">${analysis.ocr_required ? "需要 OCR；" : ""}${analysis.warnings.map(escapeHtml).join("；")}</small>`
-      : "";
-    const action = file.available
-      ? `<a class="text-link" href="${escapeHtml(file.open_url)}" target="_blank" rel="noreferrer">打开本地文件</a>`
-      : '<span class="course-state failed">文件缺失</span>';
-    return `<div class="file-row"><div><strong>${escapeHtml(file.filename)}</strong><small>${escapeHtml(detail)}</small>${warnings}</div>${action}</div>`;
-  }
-
-  function formatBytes(value) {
-    const bytes = Number(value || 0);
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  }
-
-  function openExecutionDialog() {
-    const item = state.snapshot.items.find((candidate) => candidate.plan_item_id === state.selectedItemId);
-    if (!item) return;
-    state.recordId = `execution:web:${crypto.randomUUID()}`;
-    byId("execution-item-title").textContent = item.title;
-    byId("planned-minutes").value = item.remaining_minutes ? Math.min(item.remaining_minutes, 90) : 60;
-    byId("actual-minutes").value = "";
-    byId("progress-minutes").value = "";
-    byId("completed").checked = false;
-    byId("execution-notes").value = "";
-    byId("execution-confirmed").checked = false;
-    byId("execution-error").classList.add("hidden");
-    byId("execution-dialog").classList.remove("hidden");
-    byId("actual-minutes").focus();
-  }
-
-  function closeDialogs() {
-    document.querySelectorAll(".dialog-backdrop").forEach((dialog) => dialog.classList.add("hidden"));
-  }
-
-  document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => {
-    document.querySelectorAll(".nav-button").forEach((candidate) => candidate.classList.toggle("active", candidate === button));
-    document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-    byId(`page-${button.dataset.page}`).classList.remove("hidden");
-  }));
-  document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", closeDialogs));
-  document.querySelectorAll(".dialog-backdrop").forEach((dialog) => dialog.addEventListener("click", (event) => {
-    if (event.target === dialog) closeDialogs();
-  }));
-
-  byId("reload-dashboard").addEventListener("click", async (event) => {
-    setBusy(event.currentTarget, true, "正在载入…");
-    await loadDashboard();
-    setBusy(event.currentTarget, false);
-  });
-
-  ["filter-date-from", "filter-date-to"].forEach((id) => byId(id).addEventListener("change", () => {
-    state.taskFilters.dateFrom = byId("filter-date-from").value;
-    state.taskFilters.dateTo = byId("filter-date-to").value;
-    applyTaskFilters();
-  }));
-  byId("filter-date-unconfirmed").addEventListener("change", (event) => {
-    state.taskFilters.includeUnconfirmed = event.currentTarget.checked;
-    applyTaskFilters();
-  });
-  byId("filter-date-missing").addEventListener("change", (event) => {
-    state.taskFilters.includeMissing = event.currentTarget.checked;
-    applyTaskFilters();
-  });
-  byId("reset-task-filters").addEventListener("click", () => {
-    state.taskFilters = {
-      courseIds: new Set(state.snapshot.items.map((item) => item.course_id)),
-      knownCourseIds: new Set(state.snapshot.items.map((item) => item.course_id)),
-      dateFrom: "",
-      dateTo: "",
-      includeUnconfirmed: true,
-      includeMissing: true,
-    };
-    renderTaskFilters();
-    applyTaskFilters();
-  });
-
-  document.querySelectorAll("[data-info-tab]").forEach((button) => button.addEventListener("click", () => {
-    renderCourseInformationTab(button.dataset.infoTab);
-  }));
-
-  byId("execution-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.currentTarget.querySelector('button[type="submit"]');
-    const errorBox = byId("execution-error");
-    errorBox.classList.add("hidden");
-    setBusy(button, true, "正在记录…");
-    try {
-      const result = await request("/api/executions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-HSAS-Request": "1" },
-        body: JSON.stringify({
-          plan_item_id: state.selectedItemId,
-          record_id: state.recordId,
-          planned_minutes: Number(byId("planned-minutes").value),
-          actual_minutes: Number(byId("actual-minutes").value),
-          progress_minutes: Number(byId("progress-minutes").value),
-          completed: byId("completed").checked,
-          notes: byId("execution-notes").value,
-          confirmed: byId("execution-confirmed").checked,
-        }),
-      });
-      closeDialogs();
-      await loadDashboard();
-      showToast(result.plan_refreshed ? "进度已记录，计划已重新生成" : `进度已记录；计划更新失败：${result.refresh_error}`);
-    } catch (error) {
-      errorBox.textContent = error.message;
-      errorBox.classList.remove("hidden");
-    } finally {
-      setBusy(button, false);
-    }
-  });
-
-  byId("open-sync").addEventListener("click", () => {
-    byId("sync-confirmed").checked = false;
-    byId("sync-error").classList.add("hidden");
-    byId("sync-dialog").classList.remove("hidden");
-  });
-
-  byId("check-moodle-session").addEventListener("click", () => checkMoodleSession(true));
-  byId("open-moodle-login").addEventListener("click", () => {
-    byId("login-error").classList.add("hidden");
-    byId("login-dialog").classList.remove("hidden");
-  });
-
-  byId("login-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.currentTarget.querySelector('button[type="submit"]');
-    const errorBox = byId("login-error");
-    errorBox.classList.add("hidden");
-    setBusy(button, true, "等待完成 SSO/MFA…");
-    try {
-      const result = await request("/api/moodle/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-HSAS-Request": "1" },
-        body: JSON.stringify({ confirmed: true }),
-      });
-      renderMoodleSession(result);
-      closeDialogs();
-      showToast(`Moodle 登录成功，发现 ${result.available_course_count} 门课程`);
-    } catch (error) {
-      errorBox.textContent = error.message;
-      errorBox.classList.remove("hidden");
-    } finally {
-      setBusy(button, false);
-    }
-  });
-
-  byId("back-to-courses").addEventListener("click", () => {
-    document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-    byId("page-courses").classList.remove("hidden");
-  });
-
-  byId("back-from-course-info").addEventListener("click", () => {
-    document.querySelectorAll(".page").forEach((page) => page.classList.add("hidden"));
-    byId("page-courses").classList.remove("hidden");
-  });
-
-  byId("copy-course-json").addEventListener("click", async () => {
-    const content = state.courseInformation ? JSON.stringify(state.courseInformation.course_json, null, 2) : "";
-    try {
-      await navigator.clipboard.writeText(content);
-      showToast("course.json 已复制");
-    } catch (_error) {
-      showToast("浏览器未允许复制；可以在 JSON 视图中手动选择");
-    }
-  });
-
-  byId("sync-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.currentTarget.querySelector('button[type="submit"]');
-    const errorBox = byId("sync-error");
-    errorBox.classList.add("hidden");
-    setBusy(button, true, "正在同步…");
-    try {
-      const result = await request("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-HSAS-Request": "1" },
-        body: JSON.stringify({ confirmed: byId("sync-confirmed").checked }),
-      });
-      closeDialogs();
-      await loadDashboard();
-      showToast(`同步完成：${result.succeeded} 门成功，${result.failed} 门失败`);
-    } catch (error) {
-      errorBox.textContent = error.message;
-      errorBox.classList.remove("hidden");
-    } finally {
-      setBusy(button, false);
-    }
-  });
-
-  loadDashboard();
-  checkMoodleSession(false);
-})();
+loadInformation();

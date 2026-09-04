@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from hsas.infrastructure.moodle.download_files import sanitize_source_url
-from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.moodle.map_courses import build_course_archive, map_activity
 
 
 ROOT = Path(__file__).parents[1]
@@ -34,3 +34,17 @@ def test_sensitive_query_values_are_not_persisted() -> None:
     assert "secret" not in result
     assert "sesskey" not in result
     assert "forcedownload=1" in result
+
+
+def test_url_activities_are_inspected_for_downloadable_google_documents() -> None:
+    activity = map_activity(
+        {
+            "id": 7,
+            "module": "url",
+            "name": "Shared brief",
+            "url": "https://moodle.example.edu/mod/url/view.php?id=7",
+        }
+    )
+
+    assert activity.category == "url"
+    assert activity.download_status == "pending"

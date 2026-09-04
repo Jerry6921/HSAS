@@ -1,248 +1,184 @@
-# HSAS 架构、依赖关系与内部工作流
+# HIQS 架构与数据流
 
-本文说明 HSAS 的代码分层、目录与文件职责、依赖方向、运行时目录，以及课程同步、规划、
-学习反馈和本地 RAG 的内部运作过程。面向学生的产品介绍与安装方法见 [README](README.md)。
+HIQS 把课程资料收集、AI 理解和日历展示分开。程序不通过脆弱的规则推断完整 Assessment；
+它负责完整保存资料、提供可读副本、验证 AI 写入的事实，并把事实确定性映射到日历。
 
-## 整体架构
+## 主链路
 
-HSAS 使用四层架构。接口层接收 CLI、Dashboard 和 Agent 请求；应用层编排完整用例；领域层
-保存课程、规划模型和确定性规则；基础设施层连接 Moodle、PDF、文件系统和 Git。
+```mermaid
+flowchart LR
+    Moodle[HKU Moodle 与授权外部文件] --> Collector[Collector]
+    Collector --> Files[本地原文件]
+    Collector --> Text[PDF DOCX PPTX 文本副本]
+    Collector --> Queue[待处理变化队列]
+    Files --> AI[AI 阅读]
+    Text --> AI
+    Queue --> AI
+    User[用户在 AI 对话中补充] --> AI
+    AI --> Update[information update JSON]
+    Update --> Validator[Schema 校验与原子 upsert]
+    Validator --> Store[information.json]
+    Validator --> Checkpoint[成功后推进 AI 处理游标]
+    Store --> Calendar[本地查询日历]
+```
 
-~~~mermaid
-flowchart TB
-    User[用户或 AI Agent] --> Interfaces[interfaces<br/>CLI 与本地 Dashboard]
-    Interfaces --> Application[application<br/>业务用例]
-    Application --> Ports[application/ports<br/>外部能力契约]
-    Application --> Domain[domain<br/>模型与确定性规则]
-    Interfaces -. 创建并注入 .-> Infrastructure[infrastructure<br/>外部系统适配器]
-    Infrastructure -. 实现 .-> Ports
-    Infrastructure --> Domain
-    Infrastructure --> Moodle[HKU Moodle / Playwright]
-    Infrastructure --> Resources[本地 JSON / PDF / 运行状态]
-~~~
+职责边界：
 
-层间主要依赖关系为：
+- Collector：发现 Moodle 活动、下载文件、记录来源与失败，不判断哪些事项最重要；
+- AI：阅读原文件或文本副本，识别课程、tutorial、DDL、课业要求、形式和占分；
+- Information Service：检查类型、范围、唯一 ID、课程引用与时间关系，原子写入；
+- Change Queue：区分首次全量与后续增量，提供精确文件路径并记录处理游标；
+- Calendar：只读投影，展开重复时间并显示具体项目；
+- 用户：授权资料范围，并可通过 AI 对话确认额外事实或更正。
 
-~~~text
-interfaces ───────> application ───────> domain
-     │                   │
-     │                   └──> application/ports
-     │
-     └──> infrastructure ───> application/ports + domain
-~~~
+## 四层代码结构
 
-应用层拥有外部能力的 Python Protocol 契约，基础设施适配器以结构化类型实现这些契约。
-接口层作为组合根创建具体适配器并注入应用服务。领域层不依赖 Typer、Playwright、平台路径、
-文件持久化或更新传输。
-
-项目采用 Protocol 而非抽象基类，使测试替身和基础设施适配器可以通过行为结构满足契约，
-无需继承共同父类。tests/test_enforce_architecture.py 检查模块命名、目录层级和依赖方向。
-
-## 目录职责
-
-文件夹使用名词表达架构归属，普通 Python 模块使用动词短语表达行为。Python 规定的
-__init__.py 与 __main__.py 为模块命名例外。
-
-~~~text
+```text
 src/hsas/
-├── interfaces/          # CLI、Dashboard、HTTP 请求与结果展示
-├── application/         # 同步、规划、Profile、Execution、课件检索用例
-│   └── ports/           # CourseGateway、PlanningRepository 等应用契约
+├── interfaces/       CLI、本地 HTTP API、HTML/CSS/JavaScript
+├── application/      信息 upsert、资料检索与课程同步用例
 ├── domain/
-│   ├── courses/         # 课程、Assessment、课件模型与课程变化规则
-│   └── planning/        # Profile、Execution、Plan 模型与规划算法
+│   ├── information/  information.json 与 update 的严格模型
+│   └── courses/      Moodle 归档、文件与文本分析模型
 └── infrastructure/
-    ├── moodle/          # Moodle 登录、发现、采集、下载、转换与同步事务
-    ├── documents/       # PDF 文本、元数据、摘要和阅读量分析
-    ├── storage/         # 原子读写、仓储实现与课程快照发布
-    ├── runtime/         # 用户数据目录、自动建目录与旧数据迁移
-    └── updates/         # 固定 Git commit 的事务更新
-~~~
+    ├── moodle/       登录、发现、下载和快照事务
+    ├── documents/    PDF、DOCX、PPTX 文本提取
+    ├── storage/      原子 JSON/文件持久化
+    └── runtime/      本地数据目录
+```
 
-## 主要文件与依赖关系
+依赖方向保持：
 
-### 接口层
+```text
+interfaces ──> application ──> domain
+     │
+     └───────> infrastructure ──> application ports + domain
+```
 
-| 文件 | 职责 | 调用关系 |
-|---|---|---|
-| interfaces/run_cli.py | hsas 命令入口、目录初始化、参数解析、输出和退出码 | 创建仓储和 Moodle 适配器，调用应用用例 |
-| interfaces/handle_commands.py | Profile、Execution 与 Materials 子命令 | 调用 Profile、Execution、Plan 和检索服务 |
-| interfaces/run_dashboard.py | 本地 Dashboard API 与静态文件服务 | 使用与 CLI 相同的应用服务和基础设施适配器 |
-| interfaces/web/ | Dashboard 的 HTML、CSS 和 JavaScript | 调用本地 JSON API，展示应用服务返回的数据 |
+领域层不依赖 Typer、Playwright、HTTP 服务或文件系统。应用层通过
+`InformationRepository` 端口保存信息库，基础设施层提供 JSON 实现。
 
-接口层负责输入输出和适配器装配。业务规则由应用层与领域层执行，因此 CLI 与 Dashboard
-共享同一组验证和规划行为。
+## Moodle Collector
 
-### 应用层与端口
+一次同步在 staging 目录内完成，成功后才替换上一份课程快照：
 
-| 文件 | 职责 | 主要依赖 |
-|---|---|---|
-| application/ports/define_gateways.py | 定义 CourseGateway 及同步、登录、课程列表返回类型 | 领域模型 |
-| application/ports/define_repositories.py | 定义 PlanningRepository | 规划领域模型 |
-| application/synchronize_courses.py | 表达登录、课程发现和同步用例 | CourseGateway |
-| application/generate_plans.py | 加载规划输入、调用 Planner、验证并保存 Plan；检查 Plan 新鲜度 | PlanningRepository、planning domain |
-| application/orchestrate_plans.py | 将接口参数转换成 PlanGenerationRequest | generate_plans.py |
-| application/update_profile.py | 合并并验证 Profile 更新 | PlanningRepository、StudentProfile |
-| application/record_execution.py | 幂等添加或纠正真实学习记录 | PlanningRepository、Plan 与 Execution 模型 |
-| application/retrieve_materials.py | 对本地 PDF 提取文本进行分页、分块和 BM25 风格检索 | CourseArchive、PlanItem |
-
-应用层描述“完成一次操作需要哪些步骤”，并通过端口访问外部系统。它返回结果或类型化错误，
-由接口层决定如何展示。
-
-### 课程领域
-
-| 文件 | 职责 |
-|---|---|
-| domain/courses/define_models.py | 课程领域的严格 Pydantic 模型基类 |
-| domain/courses/define_courses.py | CourseArchive、Section、Activity、StoredFile 和统计模型 |
-| domain/courses/define_assessments.py | Assessment、评分组、候选项与来源证据模型 |
-| domain/courses/define_documents.py | PDF 元数据、正文分析与阅读时间模型 |
-| domain/courses/index_courses.py | 为 CourseArchive 建立 section、activity 和 file 索引 |
-| domain/courses/calculate_statistics.py | 重新计算课程、活动和下载统计 |
-| domain/courses/detect_changes.py | 比较新旧课程中的 DDL、Assessment、Activity 和文件变化 |
-| domain/courses/expose_contracts.py | 暴露稳定的课程数据契约 |
-
-### 规划领域
-
-| 文件 | 职责 |
-|---|---|
-| domain/planning/define_profile.py | 学生目标、课程优先级、能力、偏好、限制和确认状态 |
-| domain/planning/define_execution.py | 真实学习记录及其写入模型 |
-| domain/planning/define_plan.py | IntegratedPlan、PlanItem、优先级、工作量、来源快照和里程碑 |
-| domain/planning/calculate_priority.py | 根据 DDL、占分、难度、准备状态、工作量和 Profile 计算优先级 |
-| domain/planning/calculate_feedback.py | 使用 Execution Log 校准进度和预计工作量 |
-| domain/planning/generate_plan.py | 构造、筛选和排序关键事项，生成阶段里程碑 |
-| domain/planning/validate_plan.py | 检查来源、引用、依赖、汇总、里程碑与 Execution 一致性 |
-
-领域层保存可独立测试的模型和规则。优先级、工作量、反馈与里程碑由确定性函数计算，外部系统
-的变化不会进入这些模块。
-
-### 基础设施层
-
-| 文件 | 职责 | 主要协作对象 |
-|---|---|---|
-| infrastructure/moodle/synchronize_courses.py | CourseGateway 的 Moodle 实现；协调完整同步事务 | fetch、map、download、PDF、Assessment、change、snapshot |
-| infrastructure/moodle/fetch_moodle.py | 浏览器会话、登录检查、课程发现与 Moodle AJAX 获取 | Playwright、Settings |
-| infrastructure/moodle/map_courses.py | 将 Moodle state 转换为 CourseArchive | courses domain |
-| infrastructure/moodle/download_files.py | 同源校验、增量下载、大小限制、缓存验证和旧文件复用 | storage、CourseArchive |
-| infrastructure/moodle/parse_html.py | 从 Moodle HTML 提取课程和活动信息 | courses domain |
-| infrastructure/moodle/display_progress.py | 显示课程同步阶段与下载进度 | Rich |
-| infrastructure/moodle/record_sync.py | 维护每门课程的同步结果和 Plan 警告 | sync-report.json |
-| infrastructure/moodle/assessments/ | 从 Moodle 和 syllabus 提取、清洗、合并并验证 Assessment | Assessment domain |
-| infrastructure/documents/analyze_pdfs.py | 提取 PDF 正文、页码、关键词、摘要和阅读时间 | StoredFile、PdfAnalysis |
-| infrastructure/storage/persist_data.py | 原子 JSON、文本和二进制读写 | 所有持久化适配器 |
-| infrastructure/storage/implement_repositories.py | PlanningRepository 的本地 JSON 实现 | application ports、planning models |
-| infrastructure/storage/publish_courses.py | 带锁、staging、journal、backup 和恢复的课程快照事务 | CourseArchive 验证 |
-| infrastructure/runtime/resolve_paths.py | 解析平台标准目录并建立 resources、state、cache 等目录 | CLI、Settings |
-| infrastructure/runtime/migrate_data.py | 复制、校验并报告旧版数据迁移 | runtime paths |
-| infrastructure/updates/update_installation.py | dry-run 后按完整 Git commit 更新，失败时恢复 | Git、runtime paths |
-
-## 运行时目录
-
-CLI 启动时，interfaces/run_cli.py 调用 get_runtime_paths().create()。显式传入 resources
-路径时，ensure_resources_layout() 建立相同的核心业务目录。
-
-~~~text
-HSAS data directory/
-├── config.toml
-├── browser-profile/
-├── resources/
-│   └── courses/
-├── state/
-├── cache/
-└── logs/
-~~~
-
-Profile、Execution Log 和 Integrated Plan 在对应操作首次成功执行时创建。课程目录及
-course.json 由同步事务创建。程序代码与学生数据位于不同目录，软件更新不以仓库路径承载
-个人课程资料。
-
-## 课程同步工作流
-
-~~~mermaid
+```mermaid
 flowchart LR
-    Command[CLI 或 Dashboard] --> Service[CourseSynchronizationService]
-    Service --> Gateway[MoodleCourseGateway]
-    Gateway --> Fetch[发现课程并获取 Moodle state]
-    Fetch --> Stage[复制上一份有效快照到 staging]
-    Stage --> Map[转换 CourseArchive]
-    Map --> Download[下载或复用课件]
-    Download --> PDF[分析 PDF 正文]
-    PDF --> Assessment[构建 AssessmentOverview]
-    Assessment --> Change[比较新旧变化]
-    Change --> Validate[验证 staged course.json]
-    Validate --> Publish[原子发布课程快照]
-    Publish --> Report[更新 sync-report.json]
-~~~
+    Discover[发现课程活动] --> Map[保存 Moodle state]
+    Map --> Download[下载所有可访问文件]
+    Download --> PDF[提取 PDF 文本]
+    PDF --> Office[提取 DOCX PPTX 文本与备注]
+    Office --> Changes[比较文件和活动变化]
+    Changes --> Validate[验证 CourseArchive]
+    Validate --> Publish[原子发布]
+```
 
-每门课程拥有独立写锁。同步过程在 staging 目录构建完整快照，验证成功后通过带 journal
-的目录交换发布。中断或交换异常时，恢复上一份有效课程目录。sync-report.json 保留每门
-课程的最近结果，因此单门课程失败不会覆盖其他课程的成功状态。
+下载器接受 Moodle `pluginfile.php` 附件及非 HTML 文件响应，不以少量扩展名作为唯一
+白名单。文件受最大大小、超时和并发配置约束。原始字节不执行，只写入本地。
 
-## Integrated Plan 生成工作流
+Google Workspace 链接是受控例外：`docs.google.com/document`、`presentation` 和
+`spreadsheets` 链接分别尝试导出 DOCX、PPTX、XLSX。若导出返回登录页或权限页，活动
+标为 external，并记录原因。
 
-~~~mermaid
-flowchart LR
-    Repo[PlanningRepository] --> Inputs[Profile + Execution Log + CourseArchives + 旧 Plan]
-    Inputs --> Planner[PlannerEngine]
-    Planner --> Priority[优先级、工作量、反馈和里程碑]
-    Priority --> Validation[validate_integrated_plan]
-    Validation -->|有效| Save[原子保存 integrated_plan.json]
-    Validation -->|无效| Keep[保留上一份有效 Plan]
-~~~
+条件请求使用 ETag 和 Last-Modified；内容未变时复用原路径。失败同步不覆盖上一份有效
+课程目录。
 
-Planner 把 Assessment 与当前课程 Activity 转换为 PlanItem，结合 Profile 和 Execution Log
-估算剩余投入，继承仍然有效的旧进度，再生成论文、考试、项目和演示对应的阶段里程碑。
+## AI 可读资料
 
-IntegratedPlan.source_snapshot 记录本次规划使用的 Profile、Execution Log 和 CourseArchive
-版本。assess_plan_freshness 将这些版本与当前输入比较，判断计划是否已经落后于课程或学生
-进度。规划失败时，已确认的输入和上一份有效计划继续保留。
+每个 `StoredFile` 保存：
 
-## Profile 与 Execution 工作流
+- 原文件名、本地相对路径与已清理的来源 URL；
+- MIME type、字节数、SHA-256、下载和校验时间；
+- 若可提取，保存 extraction method、状态、文字量、警告和文本副本路径。
 
-~~~text
-用户输入
-    ↓
-接口层解析
-    ↓
-application 验证业务规则
-    ↓
-PlanningRepository 原子保存
-    ↓
-重新生成并验证 Integrated Plan
-~~~
+文本副本位于课程目录的 `analysis/text/`：
 
-Profile 更新经过合并和完整模型验证后保存。Execution 记录引用现有 PlanItem；相同
-record_id 与相同内容形成幂等重试，不同内容形成冲突结果。Execution Log 保存后，
-FeedbackIndex 更新完成进度、实际投入和保守的工作量校准。
+- PDF 使用 `--- Page N ---`；
+- PPTX 使用 `--- Slide N ---` 并附 speaker notes；
+- DOCX 包含正文及可见的页眉、页脚、脚注、尾注和批注文本。
 
-## 本地 RAG 工作流
+`hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
+`hsas materials search` 对已有文本副本作本地检索。没有文本副本不代表文件不存在，
+AI 仍可按格式使用相应文档工具。
 
-~~~text
-问题或 PlanItem
-    ↓
-ArchiveIndex 定位相关课程和课件
-    ↓
-读取 PDF 提取文本与页码标记
-    ↓
-分页、分块、英文词与中文二元词分词
-    ↓
-BM25 风格检索与排序
-    ↓
-组成带正文、课程、文件、相对路径和页码的 RAG context
-~~~
+## Incremental AI Review
 
-检索结果保留课程和文件来源，供 CLI、Dashboard 或 AI Agent 使用。课件文本、检索索引和
-RAG context 位于本地数据目录。
+每次成功同步都会比较上一份快照，并把活动、Moodle 日期和课件的新增、修改或删除写入
+`courses/<course_id>/changes/history/`。课件变化携带原文件、文本副本和来源 URL；历史记录
+随课程快照事务保留。
 
-## Dashboard 边界
+`ai-state/change-checkpoint.json` 为每门课程保存 AI 已处理到的 `collected_at`。如果课程
+没有游标，`changes show` 生成 `full` review；否则只汇总游标之后的 change sets。输出批次
+携带 `acknowledge_through`，因此生成批次后发生的新同步会使旧批次失效。
 
-hsas ui 绑定 127.0.0.1，提供打包的静态资源和本地 JSON API。读取操作使用与 CLI 相同的
-领域模型验证数据；进度记录和课程同步调用既有应用服务。写请求使用 JSON 和本地请求标记，
-服务端不启用跨域访问。
+```text
+changes show → AI 阅读列出的 files → information apply --changes → checkpoint
+```
 
-## 更新边界
+信息写入失败时不推进 checkpoint。若信息已保存但确认游标失败，变化仍保持 pending，允许
+安全重试。只有审查后确认不影响任何课程事实时，才使用带双重确认的独立 acknowledge。
 
-内置更新器同步 Git 跟踪的软件文件，并保留个人数据目录。HTTPS 更新采用两步流程：dry-run
-取得完整 commit，再由用户以该 commit 执行更新。更新事务不处理依赖变化；依赖变化通过
-正常的包管理器升级完成。
+## Information Store
+
+`information.json` 是日历的唯一事实输入：
+
+```text
+InformationStore
+├── schema_version
+├── timezone
+├── updated_at / updated_by
+├── courses[]
+│   ├── course_id / moodle_course_id / code / title / color
+│   ├── semester / overview / objectives
+│   ├── instructors / links
+│   └── policies / notes / sources
+└── items[]
+    ├── item_id / course_id / title / category
+    ├── date_status
+    ├── opens_at / starts_at / ends_at / due_at / due_on / scheduled_on
+    ├── recurrence
+    ├── location / description
+    ├── assessment_format / submission_method
+    ├── weight_percent / word_limit
+    └── requirements / policies / warnings / links / sources
+```
+
+类别覆盖课程、tutorial、lab、office hour、assignment、quiz、exam、presentation、
+project、report、reading、deadline 和 other。
+
+重复规则使用 Monday=0 到 Sunday=6，并带有效起止日期、开始/结束时间、排除日期和补课
+日期。确认状态的事项必须有日期或重复规则；结束时间必须晚于开始时间；占分必须在 0–100。
+
+## Upsert 事务
+
+`InformationUpdate` 是 AI 写入格式。应用服务执行：
+
+1. 要求显式 `--confirmed`；
+2. 验证 update；
+3. 读取并验证当前 store；
+4. 按稳定 `course_id` 和 `item_id` 合并完整记录；
+5. 验证合并结果中所有 item 都指向已存在课程；
+6. fsync 临时文件后用 `os.replace` 原子替换。
+
+省略记录会保留，更新中没有隐式删除。任何失败都发生在替换前。
+
+## Calendar
+
+本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
+store。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按课程和全文筛选，
+并把没有日期的事项单独列出。
+
+课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
+`information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记
+来自最新 Moodle archive 与 pending review。程序综合 activity 类型、标题、section 与
+文件名，在学习材料/课程信息两大区内继续标记 Lecture、Tutorial、Notes、Exercises、
+Reading、Assessment 等类型。页面不解析课件内容，也不会补猜缺失的课程事实。
+
+日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接和
+来源。AI 写入的字符串使用 DOM `textContent`，不插入为 HTML。
+
+## 有限兼容
+
+旧 CLI 名称 `hsas` 和默认数据目录 `HSAS` 保留，以继续访问用户已经下载的资料。
+读取旧 `course.json` 时会忽略历史 `assessments` 字段；Planner、Student Profile、
+Execution Log、Assessment Parser 及其命令均已从代码库移除。

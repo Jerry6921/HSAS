@@ -22,9 +22,10 @@ DownloadProgressCallback = Callable[[str, CourseActivity, int, int], None]
 
 
 DOCUMENT_EXTENSIONS = {
-    ".csv", ".doc", ".docx", ".gif", ".jpeg", ".jpg", ".odp", ".ods",
-    ".odt", ".pdf", ".png", ".ppt", ".pptx", ".txt", ".webp", ".xls",
-    ".xlsx", ".zip",
+    ".7z", ".aac", ".csv", ".doc", ".docx", ".gif", ".html", ".ipynb",
+    ".jpeg", ".jpg", ".json", ".m", ".md", ".mov", ".mp3", ".mp4", ".odp",
+    ".ods", ".odt", ".pdf", ".png", ".ppt", ".pptx", ".py", ".r", ".rar",
+    ".tex", ".txt", ".wav", ".webm", ".webp", ".xls", ".xlsx", ".xml", ".zip",
 }
 DOCUMENT_CONTENT_TYPES = {
     "application/msword",
@@ -108,12 +109,37 @@ def _choose_filename(response: APIResponse, activity: CourseActivity, index: int
 def _is_storable(response: APIResponse, body_prefix: bytes = b"") -> bool:
     content_type = _content_type(response)
     suffix = PurePosixPath(urlsplit(response.url).path).suffix.casefold()
+    disposition = response.headers.get("content-disposition", "").casefold()
     return (
         body_prefix.startswith(b"%PDF-")
+        or "attachment" in disposition
         or content_type in DOCUMENT_CONTENT_TYPES
         or content_type.startswith("image/")
+        or content_type.startswith("audio/")
+        or content_type.startswith("video/")
+        or (
+            bool(content_type)
+            and content_type not in {"text/html", "application/xhtml+xml"}
+        )
         or suffix in DOCUMENT_EXTENSIONS
     )
+
+
+def _google_workspace_export_url(url: str) -> str | None:
+    """Return a direct export URL for a linked Google document when possible."""
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or parts.netloc != "docs.google.com":
+        return None
+    match = re.match(r"^/(document|presentation|spreadsheets)/d/([^/]+)", parts.path)
+    if not match:
+        return None
+    product, document_id = match.groups()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", document_id):
+        return None
+    if product == "presentation":
+        return f"https://docs.google.com/presentation/d/{document_id}/export/pptx"
+    export_format = "docx" if product == "document" else "xlsx"
+    return f"https://docs.google.com/{product}/d/{document_id}/export?format={export_format}"
 
 
 def _conditional_headers(previous: StoredFile | None) -> dict[str, str]:
@@ -197,11 +223,17 @@ def _file_candidates(html: str, page_url: str, base_url: str) -> list[str]:
         if not raw_url:
             continue
         url = urljoin(page_url, raw_url)
+        google_export = _google_workspace_export_url(url)
         path = urlsplit(url).path.casefold()
-        if not _same_origin(url, base_url):
+        if not _same_origin(url, base_url) and google_export is None:
             continue
-        if "pluginfile.php" not in path and PurePosixPath(path).suffix not in DOCUMENT_EXTENSIONS:
+        if (
+            google_export is None
+            and "pluginfile.php" not in path
+            and PurePosixPath(path).suffix not in DOCUMENT_EXTENSIONS
+        ):
             continue
+        url = google_export or url
         clean = sanitize_source_url(url)
         if clean not in seen:
             seen.add(clean)
@@ -218,6 +250,7 @@ async def _save_response(
     storage_root: Path,
     max_download_bytes: int,
     previous_files: dict[str, StoredFile] | None = None,
+    source_url_override: str | None = None,
 ) -> StoredFile | None:
     content_length = response.headers.get("content-length")
     if content_length and int(content_length) > max_download_bytes:
@@ -227,7 +260,7 @@ async def _save_response(
         return None
     digest = hashlib.sha256(body).hexdigest()
     checked_at = datetime.now(timezone.utc)
-    source_url = sanitize_source_url(response.url)
+    source_url = sanitize_source_url(source_url_override or response.url)
     previous = (previous_files or {}).get(source_url)
     if previous is not None:
         previous_path = storage_root / previous.relative_path
@@ -274,7 +307,8 @@ async def download_activity_files(
     if not activity.url or activity.download_status != "pending":
         return
     activity_url = str(activity.url)
-    if not _same_origin(activity_url, base_url):
+    google_export_url = _google_workspace_export_url(activity_url)
+    if not _same_origin(activity_url, base_url) and google_export_url is None:
         activity.download_status = "external"
         return
 
@@ -283,7 +317,11 @@ async def download_activity_files(
         for stored_file in (previous_activity.files if previous_activity else [])
     }
     try:
-        initial_url = _with_redirect(activity_url) if activity.module == "resource" else activity_url
+        initial_url = google_export_url or (
+            _with_redirect(activity_url)
+            if activity.module in {"resource", "url"}
+            else activity_url
+        )
         initial_previous = _previous_for_url(
             initial_url,
             previous_files,
@@ -304,7 +342,33 @@ async def download_activity_files(
         if not response.ok:
             raise RuntimeError(f"HTTP {response.status}")
 
+        redirected_google_export = _google_workspace_export_url(response.url)
+        if google_export_url is None and redirected_google_export is not None:
+            await response.dispose()
+            google_export_url = redirected_google_export
+            response, reused = await _get_with_validation(
+                context,
+                google_export_url,
+                previous=None,
+                storage_root=storage_root,
+                timeout_ms=timeout_ms,
+            )
+            if reused is not None:
+                activity.files.append(reused)
+                activity.download_status = "downloaded"
+                return
+            assert response is not None
+            if not response.ok:
+                raise RuntimeError(f"Google Workspace export HTTP {response.status}")
+
         content_type = _content_type(response)
+        if google_export_url and content_type in {"text/html", "application/xhtml+xml"}:
+            await response.dispose()
+            activity.download_status = "external"
+            activity.download_error = (
+                "Google Workspace export was not downloadable; open the link and grant access first."
+            )
+            return
         if content_type not in {"text/html", "application/xhtml+xml"}:
             stored = await _save_response(
                 response,
@@ -314,6 +378,7 @@ async def download_activity_files(
                 storage_root=storage_root,
                 max_download_bytes=max_download_bytes,
                 previous_files=previous_files,
+                source_url_override=google_export_url,
             )
             await response.dispose()
             if stored:
@@ -346,6 +411,11 @@ async def download_activity_files(
                         storage_root=storage_root,
                         max_download_bytes=max_download_bytes,
                         previous_files=previous_files,
+                        source_url_override=(
+                            candidate
+                            if urlsplit(candidate).netloc == "docs.google.com"
+                            else None
+                        ),
                     )
                     if stored:
                         activity.files.append(stored)

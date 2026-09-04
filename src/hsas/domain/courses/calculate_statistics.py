@@ -21,6 +21,13 @@ def refresh_archive_stats(archive: CourseArchive) -> None:
         failed_download_count=sum(
             activity.download_status == "failed" for activity in activities
         ),
-        analyzed_pdf_count=sum(analysis.status != "failed" for analysis in analyses),
-        pdf_word_count=sum(analysis.word_count for analysis in analyses),
+        analyzed_pdf_count=sum(
+            analysis.status != "failed" and analysis.document_kind == "pdf"
+            for analysis in analyses
+        ),
+        pdf_word_count=sum(
+            analysis.word_count for analysis in analyses if analysis.document_kind == "pdf"
+        ),
+        analyzed_document_count=sum(analysis.status != "failed" for analysis in analyses),
+        extracted_text_word_count=sum(analysis.word_count for analysis in analyses),
     )

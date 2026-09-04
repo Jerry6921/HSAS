@@ -1,49 +1,64 @@
-"""Filesystem implementation of application planning repositories."""
+"""Filesystem implementation of the information repository."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from hsas.domain.information import InformationStore
 from hsas.domain.courses import ArchiveIndex
-from hsas.domain.planning.define_execution import ExecutionLog
-from hsas.domain.planning.define_plan import IntegratedPlan
-from hsas.domain.planning.define_profile import StudentProfile
-from hsas.infrastructure.moodle.record_sync import sync_warnings
+from hsas.domain.courses.define_change_queue import ChangeCheckpoint
+from hsas.domain.courses.detect_changes import CourseChangeSet
 from hsas.infrastructure.storage.persist_data import read_json, write_model
 
 
-class JsonPlanningRepository:
-    """Load validated models and persist them with atomic JSON replacement."""
+class JsonInformationRepository:
+    """Filesystem adapter for the AI-authored information database."""
 
-    def profile_exists(self, path: Path) -> bool:
+    def exists(self, path: Path) -> bool:
         return path.is_file()
 
-    def plan_exists(self, path: Path) -> bool:
-        return path.is_file()
+    def load(self, path: Path) -> InformationStore:
+        return InformationStore.model_validate(read_json(path))
 
-    def load_profile(self, path: Path) -> StudentProfile:
-        return StudentProfile.model_validate(read_json(path))
+    def save(self, path: Path, store: InformationStore) -> None:
+        write_model(path, store)
 
-    def load_plan(self, path: Path) -> IntegratedPlan:
-        return IntegratedPlan.model_validate(read_json(path))
 
-    def load_execution_log(self, path: Path) -> ExecutionLog:
-        if not path.is_file():
-            return ExecutionLog()
-        return ExecutionLog.model_validate(read_json(path))
+class JsonChangeQueueRepository:
+    """Filesystem adapter for pending Moodle changes and AI checkpoints."""
 
     def load_archives(self, resources_dir: Path) -> list[ArchiveIndex]:
-        paths = sorted((resources_dir / "courses").glob("*/course.json"))
-        return [ArchiveIndex.from_json(path) for path in paths]
+        return [
+            ArchiveIndex.from_json(path)
+            for path in sorted((resources_dir / "courses").glob("*/course.json"))
+        ]
 
-    def save_profile(self, path: Path, profile: StudentProfile) -> None:
-        write_model(path, profile)
+    def load_change_sets(
+        self,
+        resources_dir: Path,
+        course_id: str,
+    ) -> list[CourseChangeSet]:
+        root = resources_dir / "courses" / course_id / "changes"
+        paths = sorted((root / "history").glob("*.json"))
+        latest = root / "latest.json"
+        if latest.is_file():
+            paths.append(latest)
+        values: dict[tuple[str, str], CourseChangeSet] = {}
+        for path in paths:
+            change_set = CourseChangeSet.model_validate(read_json(path))
+            if not change_set.changed:
+                continue
+            key = (
+                change_set.change_set_id or "",
+                change_set.current_collected_at.isoformat(),
+            )
+            values[key] = change_set
+        return sorted(values.values(), key=lambda value: value.current_collected_at)
 
-    def save_plan(self, path: Path, plan: IntegratedPlan) -> None:
-        write_model(path, plan)
+    def load_checkpoint(self, path: Path) -> ChangeCheckpoint:
+        if not path.is_file():
+            return ChangeCheckpoint()
+        return ChangeCheckpoint.model_validate(read_json(path))
 
-    def save_execution_log(self, path: Path, log: ExecutionLog) -> None:
-        write_model(path, log)
-
-    def sync_warnings(self, resources_dir: Path, course_ids: set[str]) -> list[str]:
-        return sync_warnings(resources_dir, course_ids)
+    def save_checkpoint(self, path: Path, checkpoint: ChangeCheckpoint) -> None:
+        write_model(path, checkpoint)

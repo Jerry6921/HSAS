@@ -1,35 +1,37 @@
-"""Persistence contracts required by planning use cases."""
+"""Persistence contract for the canonical information database."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol
 
+from hsas.domain.information import InformationStore
 from hsas.domain.courses import ArchiveIndex
-from hsas.domain.planning.define_execution import ExecutionLog
-from hsas.domain.planning.define_plan import IntegratedPlan
-from hsas.domain.planning.define_profile import StudentProfile
+from hsas.domain.courses.define_change_queue import ChangeCheckpoint
+from hsas.domain.courses.detect_changes import CourseChangeSet
 
 
-class PlanningRepository(Protocol):
-    """Read and atomically persist validated planning aggregates."""
+class InformationRepository(Protocol):
+    """Load and atomically persist the canonical information database."""
 
-    def profile_exists(self, path: Path) -> bool: ...
+    def exists(self, path: Path) -> bool: ...
 
-    def plan_exists(self, path: Path) -> bool: ...
+    def load(self, path: Path) -> InformationStore: ...
 
-    def load_profile(self, path: Path) -> StudentProfile: ...
+    def save(self, path: Path, store: InformationStore) -> None: ...
 
-    def load_plan(self, path: Path) -> IntegratedPlan: ...
 
-    def load_execution_log(self, path: Path) -> ExecutionLog: ...
+class ChangeQueueRepository(Protocol):
+    """Read Moodle snapshots and persist the AI review checkpoint."""
 
     def load_archives(self, resources_dir: Path) -> list[ArchiveIndex]: ...
 
-    def save_profile(self, path: Path, profile: StudentProfile) -> None: ...
+    def load_change_sets(
+        self,
+        resources_dir: Path,
+        course_id: str,
+    ) -> list[CourseChangeSet]: ...
 
-    def save_plan(self, path: Path, plan: IntegratedPlan) -> None: ...
+    def load_checkpoint(self, path: Path) -> ChangeCheckpoint: ...
 
-    def save_execution_log(self, path: Path, log: ExecutionLog) -> None: ...
-
-    def sync_warnings(self, resources_dir: Path, course_ids: set[str]) -> list[str]: ...
+    def save_checkpoint(self, path: Path, checkpoint: ChangeCheckpoint) -> None: ...

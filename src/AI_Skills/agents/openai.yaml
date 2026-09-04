@@ -1,6 +1,6 @@
 interface:
-  display_name: "HSAS Study Assistant"
-  short_description: "Deterministic priorities and course-grounded study guidance"
-  default_prompt: "Use $hsas-study-assistant to inspect my priority backlog, retrieve the relevant course materials, and recommend flexible learning actions with approximate effort and self-check outcomes."
+  display_name: "HIQS Course Information"
+  short_description: "Turn scattered course sources into one searchable calendar"
+  default_prompt: "Use $hiqs-course-information to inspect the pending Moodle change batch, read only its listed local sources, prepare a cited information update, validate it, write it to the local database, and acknowledge that exact batch."
 policy:
   allow_implicit_invocation: true

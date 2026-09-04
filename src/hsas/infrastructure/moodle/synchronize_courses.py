@@ -31,15 +31,16 @@ from hsas.infrastructure.storage.persist_data import read_json, write_json, writ
 from hsas.infrastructure.storage.publish_courses import CourseSnapshotTransaction
 from hsas.infrastructure.moodle.display_progress import SyncProgress
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
-from hsas.infrastructure.moodle.assessments.build_assessments import build_assessment_overview
 from hsas.domain.courses.detect_changes import (
     CourseChangeSet,
     compare_course_archives,
 )
-from hsas.domain.courses.index_courses import ArchiveIndex
 from hsas.infrastructure.moodle.map_courses import build_course_archive
 from hsas.domain.courses.define_courses import CourseArchive
 from hsas.infrastructure.documents.analyze_pdfs import analyze_course_pdfs
+from hsas.infrastructure.documents.analyze_office_documents import (
+    analyze_course_office_documents,
+)
 
 
 def _settings() -> Settings:
@@ -104,7 +105,7 @@ async def _persist_course(
     progress: SyncProgress | None = None,
     progress_task: int | None = None,
 ) -> tuple[CourseArchive, CourseChangeSet, Path]:
-    """Download, analyze, structure assessments, and persist one course."""
+    """Download every accessible file, create text sidecars, and persist one course."""
     live_storage_root = settings.output_dir
     live_course_root = live_storage_root / "courses" / course_id
     course_path = live_course_root / "course.json"
@@ -154,19 +155,19 @@ async def _persist_course(
         with _stage(
             progress,
             progress_task,
-            "AssessmentParser",
-            "Structuring assessments",
+            "OfficeAnalyzer",
+            "Extracting DOCX and PPTX text",
         ):
-            index = ArchiveIndex(archive)
-            archive.assessments = build_assessment_overview(
-                index,
+            analyze_course_office_documents(
+                archive,
                 storage_root=storage_root,
+                course_root=course_root,
             )
         with _stage(
             progress,
             progress_task,
             "ChangeDetector",
-            "Comparing deadlines, weights, activities, and materials",
+            "Comparing Moodle dates, activities, and materials",
         ):
             changes = compare_course_archives(previous_archive, archive)
             changes_root = course_root / "changes"

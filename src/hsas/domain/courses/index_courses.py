@@ -6,7 +6,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
-from .define_assessments import AssessmentGroup, AssessmentItem
 from .define_courses import CourseActivity, CourseArchive, CourseSectionV2, StoredFile
 
 
@@ -40,7 +39,7 @@ class ArchiveIndex:
     """Strongly typed CourseArchive plus fast indexes over its nested objects.
 
     The underlying Pydantic models remain mutable. Call ``rebuild()`` after
-    adding/removing sections, activities, files, or assessments through another
+    adding or removing sections, activities, or files through another
     service so every lookup reflects the latest archive state.
     """
 
@@ -72,8 +71,6 @@ class ArchiveIndex:
         activity_section_ids: dict[str, str | None] = {}
         files_by_path: dict[str, FileLocation] = {}
         files_by_sha256: dict[str, list[FileLocation]] = {}
-        assessments: dict[str, AssessmentItem] = {}
-        groups: dict[str, AssessmentGroup] = {}
 
         for section in self.archive.sections:
             self._add_unique(sections, section.section_id, section, "section_id")
@@ -95,16 +92,6 @@ class ArchiveIndex:
                 files_by_path=files_by_path,
                 files_by_sha256=files_by_sha256,
             )
-        for assessment in self.archive.assessments.items:
-            self._add_unique(
-                assessments,
-                assessment.assessment_id,
-                assessment,
-                "assessment_id",
-            )
-        for group in self.archive.assessments.groups:
-            self._add_unique(groups, group.group_id, group, "group_id")
-
         self._sections_by_id = sections
         self._activities_by_id = activities
         self._activity_section_ids = activity_section_ids
@@ -112,8 +99,6 @@ class ArchiveIndex:
         self._files_by_sha256 = {
             digest: tuple(locations) for digest, locations in files_by_sha256.items()
         }
-        self._assessments_by_id = assessments
-        self._groups_by_id = groups
 
     @staticmethod
     def _add_unique(target: dict, key: str, value: object, label: str) -> None:
@@ -166,14 +151,6 @@ class ArchiveIndex:
     def files_by_sha256(self) -> Mapping[str, tuple[FileLocation, ...]]:
         return MappingProxyType(self._files_by_sha256)
 
-    @property
-    def assessments_by_id(self) -> Mapping[str, AssessmentItem]:
-        return MappingProxyType(self._assessments_by_id)
-
-    @property
-    def groups_by_id(self) -> Mapping[str, AssessmentGroup]:
-        return MappingProxyType(self._groups_by_id)
-
     def get_section(self, section_id: str) -> CourseSectionV2 | None:
         return self._sections_by_id.get(section_id)
 
@@ -185,12 +162,6 @@ class ArchiveIndex:
 
     def get_file(self, relative_path: str) -> FileLocation | None:
         return self._files_by_path.get(relative_path)
-
-    def get_assessment(self, assessment_id: str) -> AssessmentItem | None:
-        return self._assessments_by_id.get(assessment_id)
-
-    def get_group(self, group_id: str) -> AssessmentGroup | None:
-        return self._groups_by_id.get(group_id)
 
     def find_document(self, *, role: str) -> FileLocation | None:
         marker = role.casefold().strip()

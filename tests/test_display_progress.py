@@ -11,7 +11,7 @@ def test_sync_progress_renders_stage_and_completion() -> None:
 
     with SyncProgress(console=console) as progress:
         task = progress.add_course("138907", "Demo Course", stages=1)
-        with progress.stage(task, "AssessmentParser", "Structuring assessments"):
+        with progress.stage(task, "OfficeAnalyzer", "Extracting DOCX and PPTX text"):
             pass
         progress.finish_course(task, "Demo Course")
 

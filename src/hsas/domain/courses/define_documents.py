@@ -18,7 +18,9 @@ class PdfMetadata(StrictModel):
 
 class PdfAnalysis(StrictModel):
     status: Literal["complete", "partial", "failed"]
-    extraction_method: Literal["pypdf"] = "pypdf"
+    extraction_method: Literal["pypdf", "docx_xml", "pptx_xml"] = "pypdf"
+    document_kind: Literal["pdf", "docx", "pptx"] = "pdf"
+    unit_label: Literal["page", "document", "slide"] = "page"
     summary_kind: Literal["extractive"] = "extractive"
     analyzed_at: datetime
     page_count: int = Field(ge=0)

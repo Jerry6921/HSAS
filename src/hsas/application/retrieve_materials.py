@@ -10,7 +10,6 @@ import re
 
 from pydantic import Field
 
-from hsas.domain.planning.define_plan import IntegratedPlan, PlanItem
 from hsas.domain.courses import ArchiveIndex, StrictModel, iter_files
 
 
@@ -127,35 +126,6 @@ def search_materials(
         indexed_chunk_count=len(chunks),
         skipped_document_count=skipped,
         hits=hits,
-    )
-
-
-def search_for_plan_item(
-    resources_dir: Path,
-    plan_path: Path,
-    plan_item_id: str,
-    *,
-    limit: int = 6,
-) -> tuple[PlanItem, MaterialSearchResult]:
-    plan = IntegratedPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
-    item = next((value for value in plan.items if value.plan_item_id == plan_item_id), None)
-    if item is None:
-        raise ValueError(f"unknown plan_item_id: {plan_item_id}")
-    # Course title supplies topic context when a plan item is generic (for
-    # example "Final Exam"). The AI can still refine the query when the exam
-    # scope is narrower than the whole course.
-    query_parts = [
-        item.course_title,
-        item.title,
-        item.description or "",
-        *item.completion_criteria,
-    ]
-    query = " ".join(part for part in query_parts if part).strip()
-    return item, search_materials(
-        resources_dir,
-        query,
-        course_ids={item.course_id},
-        limit=limit,
     )
 
 

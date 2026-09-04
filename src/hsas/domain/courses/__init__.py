@@ -1,12 +1,11 @@
-"""Normalized course, assessment, and document domain contracts."""
+"""Normalized course and document domain contracts."""
 
 from .expose_contracts import (
     ArchiveIndex,
-    AssessmentItem,
-    AssessmentType,
+    ChangeCheckpoint,
     CourseActivity,
     CourseArchive,
-    SourceReference,
+    PendingChangeBatch,
     StrictModel,
     iter_activities,
     iter_files,
@@ -14,11 +13,10 @@ from .expose_contracts import (
 
 __all__ = [
     "ArchiveIndex",
-    "AssessmentItem",
-    "AssessmentType",
+    "ChangeCheckpoint",
     "CourseActivity",
     "CourseArchive",
-    "SourceReference",
+    "PendingChangeBatch",
     "StrictModel",
     "iter_activities",
     "iter_files",

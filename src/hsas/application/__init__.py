@@ -1,19 +1,19 @@
-"""UI-independent HSAS application use cases."""
+"""UI-independent HIQS application use cases."""
 
-from .generate_plans import (
-    PlanFreshness,
-    PlanGenerationError,
-    PlanGenerationRequest,
-    PlanGenerationResult,
-    assess_plan_freshness,
-    generate_validated_plan,
+from .update_information import (
+    InformationServiceError,
+    InformationApplyResult,
+    apply_information_update,
+    build_information_template,
+    load_information,
+    validate_information_update,
 )
 
 __all__ = [
-    "PlanFreshness",
-    "PlanGenerationError",
-    "PlanGenerationRequest",
-    "PlanGenerationResult",
-    "assess_plan_freshness",
-    "generate_validated_plan",
+    "InformationServiceError",
+    "InformationApplyResult",
+    "apply_information_update",
+    "build_information_template",
+    "load_information",
+    "validate_information_update",
 ]

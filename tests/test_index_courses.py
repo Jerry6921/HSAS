@@ -66,3 +66,19 @@ def test_archive_index_rejects_duplicate_module_ids() -> None:
 
     with pytest.raises(ArchiveIndexError, match="Duplicate module_id"):
         ArchiveIndex(archive)
+
+
+def test_legacy_assessment_parser_output_is_ignored() -> None:
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state,
+        course_title="Demo Course",
+        raw_state_path="courses/138907/raw/course-state.json",
+    )
+    payload = archive.model_dump(mode="json")
+    payload["assessments"] = {"historical": "parser output"}
+
+    loaded = type(archive).model_validate(payload)
+
+    assert loaded.course.course_id == archive.course.course_id
+    assert "assessments" not in loaded.model_dump(mode="json")

@@ -1,306 +1,75 @@
-import json
 from email.message import Message
+from datetime import datetime, timezone
 from io import BytesIO
-from datetime import datetime
+import json
 from pathlib import Path
-from threading import Lock
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo
 
 import pytest
 
-from hsas.domain.courses.define_courses import (
-    CourseActivity,
-    CourseArchive,
-    CourseInfoV2,
-    CourseSectionV2,
-    StoredFile,
-)
-from hsas.domain.courses.define_documents import PdfAnalysis
-from hsas.domain.planning.define_plan import (
-    AcademicImpact,
-    EffortEstimate,
-    IntegratedPlan,
-    LearningDemand,
-    OfficialTiming,
-    PlanItem,
-    PriorityDecision,
-    WorkloadSummary,
-)
+from hsas.application.update_information import apply_information_update
+from hsas.domain.courses.define_courses import StoredFile
+from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.storage import JsonInformationRepository
 from hsas.infrastructure.storage.persist_data import write_model
 from hsas.interfaces.run_dashboard import (
     ASSET_ROOT,
     DashboardError,
     DashboardRequestHandler,
     DashboardService,
+    _material_type,
     _load_dashboard_assets,
-    _present_dashboard_warnings,
     build_dashboard_server,
 )
 
 
-ZONE = ZoneInfo("Asia/Hong_Kong")
-
-
-def _write_plan(resources: Path) -> PlanItem:
-    stamp = datetime(2026, 9, 1, 8, 0, tzinfo=ZONE)
-    item = PlanItem(
-        plan_item_id="assessment:1:essay",
-        course_id="1",
-        course_title="Demo Course",
-        item_type="assessment",
-        title="Essay",
-        official_timing=OfficialTiming(due_on=stamp.date(), is_confirmed=True),
-        academic_impact=AcademicImpact(
-            importance_level=4,
-            importance_rationale="Major work.",
-        ),
-        learning_demand=LearningDemand(
-            difficulty_level=3,
-            difficulty_rationale="Writing practice.",
-        ),
-        effort=EffortEstimate(
-            estimated_total_minutes=180,
-            completed_minutes=0,
-            remaining_minutes=180,
-            effort_band="m",
-        ),
-        priority=PriorityDecision(
-            level="high",
-            rationale="Due soon.",
-            derived_from=["official_timing.due_on"],
-        ),
-        completion_criteria=["Draft reviewed"],
-        created_at=stamp,
-        updated_at=stamp,
-    )
-    write_model(
-        resources / "integrated_plan.json",
-        IntegratedPlan(
-            items=[item],
-            workload_summary=WorkloadSummary(
-                key_item_count=1,
-                total_remaining_minutes=180,
-                high_priority_minutes=180,
-            ),
-        ),
-    )
-    return item
-
-
-def _write_course_with_material(resources: Path) -> Path:
-    stamp = datetime(2026, 9, 1, 8, 0, tzinfo=ZONE)
-    relative_path = "courses/1/files/demo.pdf"
-    file_path = resources / relative_path
-    file_path.parent.mkdir(parents=True)
-    file_path.write_bytes(b"%PDF-1.4\n% demo\n")
-    stored_file = StoredFile(
-        filename="Lecture 1.pdf",
-        relative_path=relative_path,
-        source_url="https://moodle.example.edu/pluginfile.php/1/demo.pdf",
-        content_type="application/pdf",
-        size_bytes=file_path.stat().st_size,
-        sha256="0" * 64,
-        downloaded_at=stamp,
-        analysis=PdfAnalysis(
-            status="complete",
-            analyzed_at=stamp,
-            page_count=2,
-            pages_with_text=2,
-            word_count=500,
-            character_count=2400,
-            estimated_reading_minutes=3,
-        ),
-    )
-    archive = CourseArchive(
-        collected_at=stamp,
-        course=CourseInfoV2(
-            course_id="1",
-            title="Demo Course",
-            url="https://moodle.example.edu/course/view.php?id=1",
-            declared_section_count=1,
-            returned_section_count=1,
-        ),
-        sections=[
-            CourseSectionV2(
-                section_id="10",
-                number=1,
-                title="Week 1",
-                current=True,
-                activities=[
-                    CourseActivity(
-                        module_id="100",
-                        name="Lecture 1",
-                        category="resource",
-                        module="resource",
-                        url="https://moodle.example.edu/mod/resource/view.php?id=100",
-                        download_status="downloaded",
-                        files=[stored_file],
-                    )
-                ],
-            )
-        ],
-        raw_state_path="courses/1/raw/course-state.json",
-    )
-    write_model(resources / "courses/1/course.json", archive)
-    return file_path
-
-
-def test_dashboard_assets_are_present() -> None:
+def test_dashboard_assets_are_calendar_only() -> None:
     assert (ASSET_ROOT / "index.html").is_file()
     assert (ASSET_ROOT / "styles.css").is_file()
     assert (ASSET_ROOT / "app.js").is_file()
     loaded = _load_dashboard_assets()
-    assert b"HKU Study Assistant" in loaded["/"][0]
-    assert "日期未确认".encode() in loaded["/"][0]
-    assert b'data-info-tab="assessments"' in loaded["/"][0]
-    assert b"/api/moodle/session" in loaded["/assets/app.js"][0]
-    assert b"renderCourseInformationTab" in loaded["/assets/app.js"][0]
-    assert b"courseColorClass" in loaded["/assets/app.js"][0]
+    assert b"HKU Information Query System" in loaded["/"][0]
+    assert b'id="calendar-grid"' in loaded["/"][0]
+    assert b'id="login-moodle"' in loaded["/"][0]
+    assert b'id="sync-courses"' in loaded["/"][0]
+    assert b'id="metric-pending"' in loaded["/"][0]
+    assert b'id="course-overview-view"' in loaded["/"][0]
+    assert b'id="course-navigation"' in loaded["/"][0]
+    assert b"/api/information" in loaded["/assets/app.js"][0]
+    assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
+    assert b'"/api/sync"' in loaded["/assets/app.js"][0]
+    assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
+    assert "由 AI 根据已下载课程资料归纳".encode() in loaded["/assets/app.js"][0]
 
 
-def test_dashboard_warnings_explain_missing_status_and_removed_items() -> None:
-    warnings = _present_dashboard_warnings(
-        [
-            "Course 1 has no synchronization status.",
-            "Course 2 has no synchronization status.",
-            "Items that are no longer key priorities were omitted during refresh: old:item",
-        ]
+def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path) -> None:
+    service = DashboardService(tmp_path)
+    assert service.information_snapshot()["available"] is False
+    apply_information_update(
+        tmp_path / "information.json",
+        {
+            "courses": [{"course_id": "1", "code": "DEMO1001", "title": "Demo"}],
+            "items": [
+                {
+                    "item_id": "demo-deadline",
+                    "course_id": "1",
+                    "title": "Demo deadline",
+                    "category": "deadline",
+                    "date_status": "unknown",
+                }
+            ],
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
     )
-
-    assert len(warnings) == 2
-    assert "2 门课程有本地归档" in warnings[0]
-    assert "1、2" in warnings[0]
-    assert "不代表事项已经完成" in warnings[1]
-
-
-def test_moodle_session_actions_are_reported_and_login_requires_confirmation(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    service = DashboardService(tmp_path, mutation_lock=Lock())
-    session = SimpleNamespace(
-        status="logged_out",
-        checked_at="2026-09-01T15:00:00+00:00",
-        available_course_count=0,
-        error=None,
-    )
-    monkeypatch.setattr("hsas.interfaces.run_dashboard.check_login_status", lambda _: session)
-
-    assert service.check_moodle_session()["status"] == "logged_out"
-    with pytest.raises(DashboardError, match="Confirm before opening"):
-        service.login_moodle({"confirmed": False})
-
-    logged_in = SimpleNamespace(
-        status="logged_in",
-        checked_at="2026-09-01T15:01:00+00:00",
-        available_course_count=5,
-        error=None,
-    )
-    monkeypatch.setattr("hsas.interfaces.run_dashboard.login_until_ready", lambda _: logged_in)
-
-    result = service.login_moodle({"confirmed": True})
-
-    assert result["status"] == "logged_in"
-    assert result["available_course_count"] == 5
-
-
-def test_course_material_catalog_and_file_resolution_are_archive_scoped(
-    tmp_path: Path,
-) -> None:
-    expected_path = _write_course_with_material(tmp_path)
-    service = DashboardService(tmp_path, mutation_lock=Lock())
-
-    catalog = service.course_materials("1")
-    resolved_path, stored_file = service.resolve_material_file("1", "100", 0)
-
-    assert catalog["course_title"] == "Demo Course"
-    assert catalog["sections"][0]["activities"][0]["files"][0]["available"] is True
-    assert catalog["sections"][0]["activities"][0]["files"][0]["analysis"]["page_count"] == 2
-    assert resolved_path == expected_path
-    assert stored_file.filename == "Lecture 1.pdf"
-
-    with pytest.raises(DashboardError, match="Invalid Moodle course ID"):
-        service.course_materials("../1")
-    with pytest.raises(DashboardError, match="Unknown course file"):
-        service.resolve_material_file("1", "100", 1)
-
-
-def test_course_information_returns_complete_validated_archive(tmp_path: Path) -> None:
-    _write_course_with_material(tmp_path)
-    service = DashboardService(tmp_path, mutation_lock=Lock())
-
-    information = service.course_information("1")
-
-    assert information["course_id"] == "1"
-    assert information["course_title"] == "Demo Course"
-    assert information["course_json"]["schema_version"] == "2.2"
-    assert information["course_json"]["sections"][0]["activities"][0]["files"][0][
-        "filename"
-    ] == "Lecture 1.pdf"
-
-
-def test_dashboard_snapshot_presents_plan_without_editing_it(tmp_path: Path) -> None:
-    _write_plan(tmp_path)
-    before = (tmp_path / "integrated_plan.json").read_text(encoding="utf-8")
-    service = DashboardService(tmp_path, mutation_lock=Lock())
-
-    snapshot = service.snapshot()
-
-    assert snapshot["summary"]["key_item_count"] == 1
-    assert snapshot["summary"]["remaining_minutes"] == 180
-    assert snapshot["items"][0]["plan_item_id"] == "assessment:1:essay"
-    assert snapshot["items"][0]["due_confirmed"] is True
-    assert (tmp_path / "integrated_plan.json").read_text(encoding="utf-8") == before
-
-
-def test_execution_requires_confirmation_then_uses_validated_service(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _write_plan(tmp_path)
-    service = DashboardService(tmp_path, mutation_lock=Lock())
-    payload = {
-        "plan_item_id": "assessment:1:essay",
-        "record_id": "execution:web:test",
-        "planned_minutes": 60,
-        "actual_minutes": 75,
-        "progress_minutes": 60,
-        "completed": False,
-        "notes": "Confirmed note",
-        "confirmed": False,
+    snapshot = service.information_snapshot()
+    assert snapshot["available"] is True
+    assert snapshot["summary"] == {
+        "course_count": 1,
+        "item_count": 1,
+        "calendar_item_count": 0,
+        "unknown_date_count": 1,
     }
-
-    with pytest.raises(DashboardError, match="Confirm the execution record"):
-        service.record_execution(payload)
-    assert not (tmp_path / "execution_log.json").exists()
-
-    monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard.generate_validated_plan",
-        lambda _request, _repository: object(),
-    )
-    payload["confirmed"] = True
-    result = service.record_execution(payload)
-    execution = json.loads((tmp_path / "execution_log.json").read_text(encoding="utf-8"))
-
-    assert result["created"] is True
-    assert result["plan_refreshed"] is True
-    assert execution["records"][0]["actual_minutes"] == 75
-    assert execution["records"][0]["progress_minutes"] == 60
-
-
-def test_write_request_parser_requires_local_marker() -> None:
-    handler = object.__new__(DashboardRequestHandler)
-    handler.headers = Message()
-    handler.headers["Content-Type"] = "application/json"
-    handler.headers["Content-Length"] = "2"
-    handler.rfile = BytesIO(b"{}")
-
-    with pytest.raises(DashboardError, match="Missing local request marker"):
-        handler._read_json()
-
-    handler.headers["X-HSAS-Request"] = "1"
-    assert handler._read_json() == {}
 
 
 def test_request_host_must_match_loopback_server() -> None:
@@ -308,13 +77,174 @@ def test_request_host_must_match_loopback_server() -> None:
     handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765))
     handler.headers = Message()
     handler.headers["Host"] = "malicious.example"
-
     assert handler._host_is_local() is False
-
     handler.headers.replace_header("Host", "127.0.0.1:8765")
     assert handler._host_is_local() is True
+
+
+def test_moodle_actions_require_confirmation_and_report_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class Service:
+        def login_until_ready(self):
+            calls.append("login")
+            return SimpleNamespace(
+                status="logged_in",
+                checked_at="2026-09-04T12:00:00+00:00",
+                available_course_count=3,
+                error=None,
+            )
+
+        def sync_all(self):
+            calls.append("sync")
+            return SimpleNamespace(
+                discovered_course_count=3,
+                succeeded_course_ids=("1", "2"),
+                failures=({"course_id": "3", "error": "denied"},),
+                report_path=tmp_path / "sync-report.json",
+            )
+
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._course_service",
+        lambda _resources: Service(),
+    )
+    service = DashboardService(tmp_path)
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.login_moodle({"confirmed": False})
+    with pytest.raises(DashboardError, match="确认"):
+        service.synchronize_courses({"confirmed": False})
+
+    login = service.login_moodle({"confirmed": True})
+    sync = service.synchronize_courses({"confirmed": True})
+
+    assert login["available_course_count"] == 3
+    assert sync["succeeded_course_count"] == 2
+    assert sync["failed_course_count"] == 1
+    assert calls == ["login", "sync"]
+
+
+def test_write_request_requires_local_marker() -> None:
+    handler = object.__new__(DashboardRequestHandler)
+    handler.headers = Message()
+    handler.headers["Content-Type"] = "application/json"
+    body = b'{"confirmed":true}'
+    handler.headers["Content-Length"] = str(len(body))
+    handler.rfile = BytesIO(body)
+
+    with pytest.raises(DashboardError, match="本地请求标记"):
+        handler._read_json()
+
+    handler.headers["X-HIQS-Request"] = "1"
+    assert handler._read_json() == {"confirmed": True}
 
 
 def test_server_rejects_non_loopback_binding(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="loopback"):
         build_dashboard_server(tmp_path, host="0.0.0.0")
+
+
+def test_course_overview_combines_ai_facts_and_local_moodle_materials(
+    tmp_path: Path,
+) -> None:
+    state = json.loads(
+        (Path(__file__).parent / "fixtures/course_state.json").read_text()
+    )
+    archive = build_course_archive(
+        state,
+        course_title="DEMO1001 Demo Course",
+        raw_state_path="courses/138907/raw/course-state.json",
+    )
+    archive.collected_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    activity = archive.sections[0].activities[1]
+    activity.name = "Lecture 1 slides"
+    stored_file = StoredFile(
+        filename="lecture-1.pptx",
+        relative_path="courses/138907/files/lecture-1.pptx",
+        source_url="https://moodle.example.edu/pluginfile.php/lecture-1.pptx",
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        size_bytes=5,
+        sha256="a" * 64,
+        downloaded_at=archive.collected_at,
+    )
+    activity.files = [stored_file]
+    material_path = tmp_path / stored_file.relative_path
+    material_path.parent.mkdir(parents=True)
+    material_path.write_bytes(b"slides")
+    write_model(tmp_path / "courses/138907/course.json", archive)
+    before_ai = DashboardService(tmp_path).information_snapshot()
+    assert before_ai["available"] is False
+    assert before_ai["courses"][0]["moodle_course_id"] == "138907"
+    assert before_ai["courses"][0]["materials"]["learning"]
+    assert (
+        before_ai["courses"][0]["materials"]["learning"][0]["change_action"]
+        == "baseline"
+    )
+    apply_information_update(
+        tmp_path / "information.json",
+        {
+            "courses": [
+                {
+                    "course_id": "DEMO1001-2026-S1",
+                    "moodle_course_id": "138907",
+                    "code": "DEMO1001",
+                    "title": "Demo Course",
+                    "overview": "A concise official overview.",
+                    "objectives": ["Understand the core methods"],
+                }
+            ],
+            "items": [
+                {
+                    "item_id": "demo-assignment",
+                    "course_id": "DEMO1001-2026-S1",
+                    "title": "Assignment",
+                    "category": "assignment",
+                    "weight_percent": 30,
+                }
+            ],
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
+    )
+
+    service = DashboardService(tmp_path)
+    snapshot = service.information_snapshot()
+    course = snapshot["courses"][0]
+
+    assert len(snapshot["courses"]) == 1
+    assert course["course_id"] == "DEMO1001-2026-S1"
+    assert course["moodle_course_id"] == "138907"
+    assert course["overview"] == "A concise official overview."
+    assert course["objectives"] == ["Understand the core methods"]
+    assert course["grade_distribution"][0]["item_id"] == "demo-assignment"
+    assert course["materials"]["learning"][0]["title"] == "lecture-1.pptx"
+    assert course["materials"]["learning"][0]["material_type"] == "lecture"
+    assert course["materials"]["information"]
+    assert service.material_file(stored_file.relative_path)[0] == material_path
+    with pytest.raises(DashboardError, match="当前课程快照"):
+        service.material_file("information.json")
+
+
+@pytest.mark.parametrize(
+    ("activity_name", "filename", "category", "section", "expected"),
+    [
+        ("Lecture 3", "slides.pdf", "resource", "Week 3", "lecture"),
+        ("Tutorial 2", "tutorial.pdf", "resource", "Week 2", "tutorial"),
+        ("Week 4 notes", "notes.docx", "resource", "Week 4", "notes"),
+        ("Problem Set 1", "questions.pdf", "resource", "Practice", "exercises"),
+        ("Course syllabus", "syllabus.pdf", "resource", "General", "course_information"),
+        ("Assignment 1", "brief.pdf", "assignment", "Assessment", "assessment"),
+        ("Research paper", "reading.pdf", "assignment", "Week 5", "assessment"),
+    ],
+)
+def test_material_type_uses_moodle_context(
+    activity_name: str,
+    filename: str,
+    category: str,
+    section: str,
+    expected: str,
+) -> None:
+    assert _material_type(activity_name, filename, category, section) == expected

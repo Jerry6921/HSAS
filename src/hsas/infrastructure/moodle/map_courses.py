@@ -36,12 +36,7 @@ def classify_activity(module: str, name: str) -> str:
 def map_activity(raw: dict[str, Any]) -> CourseActivity:
     module = str(raw.get("module") or "unknown")
     name = str(raw.get("name") or "Untitled")
-    if module == "url":
-        download_status = "external"
-    elif module in {"resource", "folder", "page", "book", "assign"}:
-        download_status = "pending"
-    else:
-        download_status = "not_applicable"
+    download_status = "pending" if raw.get("url") else "not_applicable"
 
     known_keys = {
         "id", "name", "module", "plugin", "modname", "url", "visible",

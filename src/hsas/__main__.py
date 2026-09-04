@@ -1,4 +1,4 @@
-"""Run the unified HSAS command-line interface."""
+"""Run the unified HIQS command-line interface."""
 
 from .interfaces.run_cli import app
 

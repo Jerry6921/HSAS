@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hsas.infrastructure.moodle.download_files import (
+    _file_candidates,
+    _google_workspace_export_url,
+    _is_storable,
     _save_response,
     download_activity_files,
 )
@@ -24,6 +27,11 @@ class FakeResponse:
 
     async def body(self) -> bytes:
         return self._body
+
+
+class GenericFileResponse:
+    url = "https://moodle.example.edu/pluginfile.php/1/example.ipynb"
+    headers = {"content-type": "application/octet-stream"}
 
 
 class NotModifiedResponse:
@@ -143,3 +151,19 @@ def test_conditional_get_reuses_local_file_on_http_304(tmp_path: Path) -> None:
         "If-None-Match": '"slides-v1"',
         "If-Modified-Since": "Sat, 01 Aug 2026 00:00:00 GMT",
     }
+
+
+def test_generic_moodle_files_and_google_workspace_exports_are_supported() -> None:
+    assert _is_storable(GenericFileResponse()) is True
+    assert _google_workspace_export_url(
+        "https://docs.google.com/document/d/doc_123/edit?usp=sharing"
+    ) == "https://docs.google.com/document/d/doc_123/export?format=docx"
+    assert _google_workspace_export_url(
+        "https://docs.google.com/presentation/d/slides-456/edit"
+    ) == "https://docs.google.com/presentation/d/slides-456/export/pptx"
+    assert _google_workspace_export_url("https://example.com/document/d/123") is None
+    assert _file_candidates(
+        '<a href="https://docs.google.com/document/d/doc_123/edit">Brief</a>',
+        "https://moodle.example.edu/mod/url/view.php?id=7",
+        "https://moodle.example.edu",
+    ) == ["https://docs.google.com/document/d/doc_123/export?format=docx"]

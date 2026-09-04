@@ -8,14 +8,15 @@ from .define_gateways import (
     SyncBatchResult,
     SyncCourseResult,
 )
-from .define_repositories import PlanningRepository
+from .define_repositories import ChangeQueueRepository, InformationRepository
 
 __all__ = [
     "CourseCatalogEntry",
     "CourseCatalogResult",
     "CourseGateway",
+    "ChangeQueueRepository",
     "MoodleSessionResult",
-    "PlanningRepository",
+    "InformationRepository",
     "SyncBatchResult",
     "SyncCourseResult",
 ]

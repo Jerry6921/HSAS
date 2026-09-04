@@ -1,15 +1,14 @@
 # HIQS — HKU Information Query System
 
-> 把 Moodle、课件和 syllabus 里的课程资料收进本地，让 AI 整理成一个可查询的课程信息库与日历。
+> 将 Moodle、课件和 syllabus 中的课程资料同步到本地，由 AI 整理为可查询的信息库与日历。
 
-HIQS 的起点很朴素：一门课的时间在 timetable，DDL 在 Moodle，评分方式藏在 syllabus，
-Tutorial 安排又可能出现在公告里。每一条信息都找得到，可真正需要时，总要重新翻一遍。
+课程时间、DDL、评分方式和 Tutorial 安排通常分布在 timetable、Moodle、syllabus 与课程
+公告中。查询一个事项可能需要交叉核对多个页面和文件。
 
-这个项目想做的，就是把这些零散资料收在一起。程序负责下载、数据结构、校验和
-可视化；AI 负责真正阅读资料、归纳课程信息。你得到的是一个知道资料来自哪里、哪些内容
-等待补充、最近哪里有变化的本地课程信息库。
+HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、校验和可视化；AI 负责阅读资料
+并归纳课程信息。系统保留信息来源、待补字段和 Moodle 内容变化记录。
 
-## 能做什么
+## 功能
 
 - 登录 HKU Moodle，并同步当前账号有权访问的课程与附件；
 - 把 PDF、DOCX、PPTX 等文件保存在本地，并生成 AI 可检索的文本副本；
@@ -21,24 +20,24 @@ Tutorial 安排又可能出现在公告里。每一条信息都找得到，可�
 - 标记新增或更新的课件，让 AI 只重新阅读发生变化的内容。
 - 通过本地 RAG 同时检索结构化课程事实和课件原文，让 AI 带出处回答问题。
 
-HIQS 专注于提供课程事实、课件证据和日历查询。学生可以在 AI 对话中比较 DDL、理解要求，
+HIQS 提供课程事实、课件证据和日历查询。学生可以在 AI 对话中比较 DDL、理解要求，
 并据此自主制定学习计划；AI 建议作为独立的对话内容，采纳与记录方式由学生决定。
 
 ## 界面一览
 
 日历把课程、Tutorial、Assessment 和 DDL 放回同一条时间线上。点击事项后，日期、形式、
-占分和证据来源都在右侧直接展开，并准确显示对应的 Moodle 页面或本地资料。
+占分和证据来源都在右侧展开，并显示对应的 Moodle 页面或本地资料。
 
 ![HIQS 课程日历与 Assessment 详情](docs/images/ui/calendar-detail.png)
 
-切换到一门课程后，可以一起查看课程综述、课程目的和已经确认的成绩构成。综述由 AI 根据
-下载到本地的官方资料归纳；资料还没说清楚的地方，会诚实地留空。
+切换到一门课程后，可以同时查看课程综述、课程目的和已经确认的成绩构成。综述由 AI 根据
+下载到本地的官方资料归纳；缺少来源支持的字段保持为空。
 
 ![HIQS 课程概览与成绩构成](docs/images/ui/course-overview.png)
 
-课件会从下载列表整理成清晰的资料库。HIQS 会保留 Moodle 原有上下文，并进一步整理为
+课件会从下载列表整理为分类资料库。HIQS 保留 Moodle 原有上下文，并进一步整理为
 Lecture、Tutorial、Notes、Exercises、Reading 等类别；刚同步、尚待 AI 阅读的文件会有
-清楚的标记。
+“待整理”标记。
 
 ![HIQS 课件分类与增量整理状态](docs/images/ui/material-library.png)
 
@@ -58,8 +57,8 @@ HIQS 校验并增量写入 information.json
 Dashboard 映射为日历、课程概览与课件目录
 ```
 
-Collector 准确记录资料取得、同步异常与内容变化，课件理解由 AI 完成。
-所有可查询事实都必须由 AI 或用户依据来源写入，并通过严格 Schema 校验。
+Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 读取。所有可查询事实由 AI
+或用户依据来源写入，并通过 Schema 校验。
 
 ## 快速开始
 
@@ -114,7 +113,7 @@ hsas information apply information-update.json \
 
 AI 应先读取 `pending-changes.json`。首次同步的课程会列出全部文件；完成首次整理后，后续
 批次只包含新增、修改或删除的活动与课件，以及当前 `course.json`。如果批次生成后 Moodle
-又被同步，旧批次会被拒绝，避免错误跳过新变化。
+再次同步，系统会要求重新生成批次，以覆盖最新变化。
 
 若 AI 阅读后确认课程事实保持一致：
 
@@ -130,14 +129,14 @@ hsas changes acknowledge pending-changes.json \
 hsas ui
 ```
 
-Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
+Dashboard 绑定本机 `127.0.0.1`，提供三个入口。
 
 ### 日历
 
 - 月视图展示一次性日期和每周重复课程；
 - 支持课程筛选和全文搜索；
 - 点击事项查看 DDL、地点、形式、提交方式、字数、占分、要求、警告与证据；
-- 日期待确认的事项集中显示，持续提醒用户核实 DDL。
+- 日期待确认的事项集中显示在独立区域。
 
 ### 课程概览
 
@@ -157,7 +156,7 @@ Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
 首次全量整理时，AI 可根据 syllabus、course introduction、assessment information 等
 官方资料填写：
 
-- `overview`：简洁的课程综述；
+- `overview`：课程综述；
 - `objectives`：资料明确支持的课程目的；
 - `sources`：可供用户复查的文件、页码或链接。
 
@@ -166,7 +165,7 @@ Dashboard 只绑定本机 `127.0.0.1`，提供三个核心入口。
 
 ## 用 RAG 向课程资料提问
 
-HIQS 的 RAG 保持在本地运行，专门为每次提问准备证据：精确日期、课程时间和占分来自经过
+HIQS 的 RAG 在本地运行，并为每次提问组合两类证据：精确日期、课程时间和占分来自经过
 校验的 `information.json`，课程内容与详细
 要求来自 PDF、DOCX、PPTX 的文本副本。
 
@@ -184,12 +183,11 @@ hsas query "MATH1851 Part I test 几时、占几分，范围是什么？" \
 
 课程文件保留在本地，`hsas query` 以模型无关的方式生成检索结果。项目内置的
 [`hiqs-course-information` AI Skill](src/AI_Skills/SKILL.md) 会指导兼容的 AI 先运行
-`hsas query`，再只根据返回证据回答并附上出处。当前检索结合结构化事实匹配与本地
-BM25 风格全文检索；以后即使加入 embeddings，也应继续按文件哈希增量更新并保留同样的
-来源边界。
+`hsas query`，再根据返回证据回答并附上出处。当前检索结合结构化事实匹配与本地
+BM25 风格全文检索，并保留文件哈希与来源信息。
 
-学生当然可以继续问：“根据这些确认过的 DDL，我该怎样安排这一周？”AI 可以帮助比较、
-提出方案和反复修改；计划由学生自己决定，并作为课程事实库之外的独立内容保存与执行。
+在学习计划场景中，学生可以询问“根据这些确认过的 DDL，我该怎样安排这一周？”。AI 可
+用于比较事项和修改方案；计划由学生决定，并作为课程事实库之外的独立内容保存与执行。
 
 ## 支持的课程文件
 
@@ -212,7 +210,7 @@ hsas materials search "assignment requirements" --course COURSE_ID
 
 ## 数据与增量更新
 
-默认数据位于平台应用数据目录。macOS 沿用旧版路径以避免升级时丢失资料：
+默认数据位于平台应用数据目录。macOS 沿用旧版路径，以保持升级前后的资料连续性：
 
 ```text
 ~/Library/Application Support/HSAS/
@@ -278,7 +276,7 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 
 - 从学习辅助系统重构为课程信息查询系统，移除 Planner、优先级、Profile 和执行记录；
 - 建立“程序下载与校验、AI 阅读与写入”的清晰分工，以 AI 资料阅读取代自动 Assessment Parser；
-- 新增统一 `information.json`、严格 Schema、增量 upsert 和来源记录；
+- 新增统一 `information.json`、Schema 校验、增量 upsert 和来源记录；
 - 完整保存 Moodle 课件，并支持 PDF、DOCX、PPTX 和 Google Workspace 导出文件；
 - 新增 change history 与 AI checkpoint，只重新整理发生变化的内容；
 - 新增课程日历、课程概览、AI 课程摘要、Assessment 占分和详细课件分类；

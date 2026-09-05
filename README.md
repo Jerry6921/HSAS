@@ -47,6 +47,11 @@ Lecture、Tutorial、Notes、Exercises、Reading 等类别；刚同步、尚待 
 
 ![HIQS 课件分类与增量整理状态](docs/images/ui/material-library.png)
 
+来源预览器在 Dashboard 内显示 PDF 原页，并保留页码导航、缩放、下载和打印能力。底部入口
+可打开本地原文件或对应的 Moodle 来源；DOCX 与 PPTX 使用同步时生成的文本副本预览。
+
+![HIQS PDF 来源预览器](docs/images/ui/source-preview.png)
+
 ## 工作流
 
 ```text

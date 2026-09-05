@@ -19,6 +19,7 @@ HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、
   Assessment、Course Information、Announcements 等类型；
 - 标记新增或更新的课件，让 AI 只重新阅读发生变化的内容。
 - 通过本地 RAG 同时检索结构化课程事实和课件原文，让 AI 带出处回答问题。
+- 在 Dashboard 中预览来源原文，并用本地搜索快速定位课程事项与课件。
 
 HIQS 提供课程事实、课件证据和日历查询。学生可以在 AI 对话中比较 DDL、理解要求，
 并据此自主制定学习计划；AI 建议作为独立的对话内容，采纳与记录方式由学生决定。
@@ -138,13 +139,23 @@ hsas changes acknowledge pending-changes.json \
 hsas ui
 ```
 
-Dashboard 绑定本机 `127.0.0.1`，提供三个入口。
+Dashboard 绑定本机 `127.0.0.1`，侧栏提供首页、日历和各课程概览。
+请通过 `hsas ui` 启动，并使用终端显示的 `http://127.0.0.1:...` 地址访问；本地 HTTP
+服务为搜索、来源预览、同步和 Moodle 跳转提供数据接口。
+
+### 首页
+
+- 集中提供 Moodle 登录、课程同步与本地数据刷新；
+- 显示信息库摘要和 Moodle 更新记录；
+- 逐项对比新增、修改与删除，修改项展示更新前后的值；
+- 提供本地问答式搜索，在课程事项、课件标题与来源中匹配关键词，全程使用本地数据。
 
 ### 日历
 
 - 月视图展示一次性日期和每周重复课程；
 - 支持课程筛选和全文搜索；
 - 点击事项查看 DDL、地点、形式、提交方式、字数、占分、要求、警告与证据；
+- 点击证据来源，在页面内预览 PDF、图片或由 DOCX/PPTX 生成的文本副本，并可打开原文件；
 - 日期待确认的事项集中显示在独立区域。
 
 ### 课程概览
@@ -158,7 +169,8 @@ Dashboard 绑定本机 `127.0.0.1`，提供三个入口。
 
 课件先分为“课程学习材料”和“课程信息”，再依据 Moodle activity 类型、标题、section 与
 文件名细分为 Lecture、Tutorial、Notes、Exercises、Reading、Assessment 等类别。本轮
-新增或更新的文件会显示待整理标记，本地文件可以从 Dashboard 直接打开。
+新增或更新的文件会显示待整理标记。本地课件会进入来源预览器，并提供打开原文件和 Moodle
+来源的入口；纯 Moodle 资源与对应搜索结果会在当前标签页打开来源页面。
 
 ## AI 如何总结课程
 
@@ -242,6 +254,9 @@ hsas materials search "assignment requirements" --course COURSE_ID
 `course_id` 或 `item_id` 被完整更新，新 ID 被追加，未出现在本次更新中的记录会保留。
 上一份有效数据库会在校验失败时继续保留；删除操作始终需要显式流程。
 
+升级产生的旧 change history 会在读取时经过兼容适配。旧版 `assessment` 与 `weight` 变化
+会作为通用 activity 变化信号参与 checkpoint 筛选，历史 JSON 文件保持原样。
+
 ## 隐私与可靠性
 
 - 课程文件、浏览器 profile、提取文本和 `information.json` 都在代码仓库之外；
@@ -289,4 +304,6 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 - 完整保存 Moodle 课件，并支持 PDF、DOCX、PPTX 和 Google Workspace 导出文件；
 - 新增 change history 与 AI checkpoint，只重新整理发生变化的内容；
 - 新增课程日历、课程概览、AI 课程摘要、Assessment 占分和详细课件分类；
-- Dashboard 新增 Moodle 登录、同步、本地课件打开和待 AI 整理状态。
+- Dashboard 采用首页、日历与课程概览结构，首页集中登录、同步、刷新、本地搜索和更新差异；
+- 新增来源预览器与 Moodle 当前页跳转，支持 PDF、图片及 DOCX/PPTX 文本副本；
+- change history 兼容旧版 `assessment` 与 `weight` 记录，checkpoint 和状态查询可连续使用。

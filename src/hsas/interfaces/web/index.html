@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>HIQS · HKU 课程信息查询</title>
-  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="返回日历">
+      <a class="brand" href="/" aria-label="返回首页">
         <span class="brand-mark">H</span>
         <span><strong>HIQS</strong><small>HKU Information Query System</small></span>
       </a>
@@ -24,12 +24,16 @@
           <h2>课程导航</h2>
         </div>
         <nav class="view-navigation" aria-label="主要视图">
-          <button id="show-calendar" class="view-link active" type="button">
+          <button id="show-home" class="view-link active" type="button">
+            <span>首页</span><small>登录、同步与更新记录</small>
+          </button>
+          <button id="show-calendar" class="view-link" type="button">
             <span>日历</span><small>全部课程事项</small>
           </button>
           <p class="nav-label">课程概览</p>
           <div id="course-navigation" class="course-navigation"></div>
         </nav>
+        <div id="query-controls" class="hidden">
         <label class="search-field">
           <span>搜索</span>
           <input id="search-input" type="search" placeholder="作业、地点、要求…" autocomplete="off">
@@ -41,6 +45,7 @@
           </div>
           <div id="course-filters" class="course-filters"></div>
         </section>
+        </div>
         <div class="sidebar-guide">
           <strong>资料怎么进入这里？</strong>
           <p>让 AI 阅读课程资料，按模板生成更新文件，再通过校验命令写入。程序本身不猜测课程事实。</p>
@@ -55,25 +60,52 @@
 
         <header class="page-heading">
           <div>
-            <p id="page-eyebrow" class="eyebrow">CALENDAR</p>
-            <h1 id="page-title">课程信息，一眼查清</h1>
+            <p id="page-eyebrow" class="eyebrow">APPLICATION</p>
+            <h1 id="page-title">HIQS 首页</h1>
             <p id="data-caption">正在读取本地信息库…</p>
-          </div>
-          <div class="page-actions" aria-label="Moodle 与日历操作">
-            <button id="login-moodle" class="button" type="button">登录 Moodle</button>
-            <button id="sync-courses" class="button primary" type="button">同步课程</button>
-            <button id="reload-data" class="button" type="button">重新载入</button>
           </div>
         </header>
 
-        <div id="calendar-view">
+        <div id="home-view">
+          <section class="application-card">
+            <div>
+              <p class="eyebrow">MOODLE APPLICATION</p>
+              <h2>课程资料同步</h2>
+              <p>登录 Moodle 后同步全部课程；刷新会重新读取本地信息库与更新队列。</p>
+            </div>
+            <div class="page-actions" aria-label="Moodle 与本地数据操作">
+              <button id="login-moodle" class="button" type="button">登录 Moodle</button>
+              <button id="sync-courses" class="button primary" type="button">同步课程</button>
+              <button id="reload-data" class="button" type="button">刷新数据</button>
+            </div>
+          </section>
           <section class="metrics" aria-label="信息库摘要">
             <article><span>课程</span><strong id="metric-courses">—</strong><small>统一课程目录</small></article>
             <article><span>信息事项</span><strong id="metric-items">—</strong><small>课程、tutorial 与 assessment</small></article>
             <article><span>本月日程</span><strong id="metric-month">—</strong><small>含每周重复时间</small></article>
-            <article><span>日期待确认</span><strong id="metric-unknown">—</strong><small>不会被当作“无 DDL”</small></article>
+            <article><span>日期待确认</span><strong id="metric-unknown">—</strong><small>保留并等待来源核实</small></article>
             <article><span>待 AI 整理</span><strong id="metric-pending">—</strong><small>仅处理新增或变化资料</small></article>
           </section>
+          <section class="local-search-card" aria-labelledby="local-search-title">
+            <div>
+              <p class="eyebrow">LOCAL SEARCH</p>
+              <h2 id="local-search-title">本地问答式搜索</h2>
+              <p>输入问题或关键词，在本地课程事项、课件和来源中查找匹配内容。</p>
+            </div>
+            <input id="home-search-input" type="search" aria-label="本地课程资料搜索" placeholder="例如：MATH1851 Part I test 占分多少？" autocomplete="off">
+            <div id="home-search-results" class="home-search-results"></div>
+          </section>
+          <section class="updates-card" aria-labelledby="updates-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">MOODLE CHANGES</p><h2 id="updates-title">更新记录</h2></div>
+              <span id="updates-count">0 项</span>
+            </div>
+            <p class="section-note">逐项显示 Moodle 快照的新增、修改与删除，并标出需要 AI 整理的文件。</p>
+            <div id="updates-list" class="updates-list"></div>
+          </section>
+        </div>
+
+        <div id="calendar-view" class="hidden">
 
           <div class="workspace">
             <section class="calendar-card" aria-labelledby="calendar-title">
@@ -120,6 +152,17 @@
       </main>
     </div>
   </div>
-  <script src="/assets/app.js"></script>
+  <dialog id="source-preview" class="source-preview">
+    <div class="preview-heading">
+      <div><p class="eyebrow">SOURCE PREVIEW</p><h2 id="preview-title">来源预览</h2><p id="preview-path"></p></div>
+      <button id="close-preview" class="icon-button" type="button" aria-label="关闭预览">×</button>
+    </div>
+    <div id="preview-body" class="preview-body"></div>
+    <div class="preview-actions">
+      <a id="open-original" class="button primary" target="_self">打开原文</a>
+      <a id="open-source-url" class="button" target="_self">打开 Moodle 来源</a>
+    </div>
+  </dialog>
+  <script src="assets/app.js"></script>
 </body>
 </html>

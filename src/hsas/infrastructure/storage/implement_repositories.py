@@ -11,6 +11,9 @@ from hsas.domain.courses.detect_changes import CourseChangeSet
 from hsas.infrastructure.storage.persist_data import read_json, write_model
 
 
+LEGACY_CHANGE_KINDS = {"assessment", "weight"}
+
+
 class JsonInformationRepository:
     """Filesystem adapter for the AI-authored information database."""
 
@@ -45,7 +48,9 @@ class JsonChangeQueueRepository:
             paths.append(latest)
         values: dict[tuple[str, str], CourseChangeSet] = {}
         for path in paths:
-            change_set = CourseChangeSet.model_validate(read_json(path))
+            change_set = CourseChangeSet.model_validate(
+                _normalize_legacy_change_kinds(read_json(path))
+            )
             if not change_set.changed:
                 continue
             key = (
@@ -62,3 +67,20 @@ class JsonChangeQueueRepository:
 
     def save_checkpoint(self, path: Path, checkpoint: ChangeCheckpoint) -> None:
         write_model(path, checkpoint)
+
+
+def _normalize_legacy_change_kinds(payload: object) -> object:
+    """Adapt pre-2.0 parser history without rewriting the historical JSON."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("changes"), list):
+        return payload
+    normalized = dict(payload)
+    normalized_changes = []
+    for raw_change in payload["changes"]:
+        if not isinstance(raw_change, dict) or raw_change.get("kind") not in LEGACY_CHANGE_KINDS:
+            normalized_changes.append(raw_change)
+            continue
+        change = dict(raw_change)
+        change["kind"] = "activity"
+        normalized_changes.append(change)
+    normalized["changes"] = normalized_changes
+    return normalized

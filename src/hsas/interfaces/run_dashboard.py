@@ -10,7 +10,7 @@ import mimetypes
 from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 import webbrowser
 
 from pydantic import ValidationError
@@ -67,6 +67,7 @@ class DashboardService:
                     "unknown_date_count": 0,
                 },
                 "pending_review": _pending_summary(pending),
+                "updates": _pending_updates(pending),
                 "warnings": [
                     "information.json 尚未建立。请让 AI 阅读本地课程资料并生成更新。"
                 ],
@@ -102,6 +103,7 @@ class DashboardService:
                 ),
             },
             "pending_review": _pending_summary(pending),
+            "updates": _pending_updates(pending),
             "warnings": [],
         }
 
@@ -185,9 +187,8 @@ class DashboardService:
     def material_file(self, relative_path: str) -> tuple[Path, str]:
         """Resolve only a file referenced by the latest validated course snapshots."""
         allowed = {
-            stored_file.relative_path
-            for index in CHANGE_REPOSITORY.load_archives(self.resources_dir)
-            for _activity, stored_file in iter_files(index.archive)
+            value["original_relative_path"]
+            for value in _source_inventory(self.resources_dir).values()
         }
         if relative_path not in allowed:
             raise DashboardError("该文件不在当前课程快照中。")
@@ -197,6 +198,44 @@ class DashboardService:
             raise DashboardError("本地课件不存在或路径无效。")
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         return path, content_type
+
+    def source_preview(
+        self,
+        relative_path: str,
+        page_numbers: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Return a bounded preview for a source in the current Moodle archive."""
+        source = _source_inventory(self.resources_dir).get(relative_path)
+        if source is None:
+            raise DashboardError("该来源不在当前课程快照中。")
+        text_path = source.get("text_relative_path")
+        preview_text = ""
+        truncated = False
+        if text_path:
+            resolved = _safe_resource_file(self.resources_dir, text_path)
+            raw_text = resolved.read_text(encoding="utf-8", errors="replace")
+            preview_text = _select_source_units(raw_text, page_numbers or [])
+            if len(preview_text) > 30000:
+                preview_text = preview_text[:30000].rstrip() + "\n\n…预览已截断"
+                truncated = True
+        content_type = source.get("content_type") or "application/octet-stream"
+        preview_kind = (
+            "pdf"
+            if content_type == "application/pdf"
+            else "image"
+            if content_type.startswith("image/")
+            else "text"
+        )
+        return {
+            "title": source["title"],
+            "relative_path": relative_path,
+            "original_relative_path": source["original_relative_path"],
+            "content_type": content_type,
+            "preview_kind": preview_kind,
+            "text": preview_text,
+            "truncated": truncated,
+            "page_numbers": page_numbers or [],
+        }
 
     def _pending_review_summary(self, information) -> dict[str, int]:
         return _pending_summary(self._pending_batch(information))
@@ -308,8 +347,6 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, value)
             return
         if path == "/api/material":
-            from urllib.parse import parse_qs
-
             relative_path = parse_qs(urlparse(self.path).query).get("path", [""])[0]
             try:
                 file_path, content_type = self.server.dashboard_service.material_file(
@@ -319,6 +356,17 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
                 return
             self._send_file(file_path, content_type)
+            return
+        if path == "/api/source-preview":
+            query = parse_qs(urlparse(self.path).query)
+            relative_path = query.get("path", [""])[0]
+            try:
+                pages = [int(value) for value in query.get("page", []) if int(value) > 0]
+                value = self.server.dashboard_service.source_preview(relative_path, pages)
+            except (DashboardError, ValueError) as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, value)
             return
         asset = self.server.dashboard_assets.get(path)
         if asset is None:
@@ -407,8 +455,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Cache-Control", "private, no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", "sandbox; default-src 'none'")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header(
+            "Content-Security-Policy",
+            "sandbox; default-src 'none'; frame-ancestors 'self'",
+        )
         self.send_header("Content-Type", content_type)
         self.send_header(
             "Content-Disposition",
@@ -500,6 +551,98 @@ def _pending_summary(batch: PendingChangeBatch) -> dict[str, int]:
     }
 
 
+def _pending_updates(batch: PendingChangeBatch) -> dict[str, Any]:
+    """Shape pending review data for the local update-diff view."""
+    return {
+        "generated_at": batch.generated_at.isoformat(),
+        "courses": [
+            {
+                "course_id": review.course_id,
+                "course_title": review.course_title,
+                "mode": review.mode,
+                "acknowledge_through": review.acknowledge_through.isoformat(),
+                "changes": [change.model_dump(mode="json") for change in review.changes],
+                "files": [
+                    {
+                        "filename": file.filename,
+                        "relative_path": file.relative_path,
+                        "text_path": file.text_path,
+                        "exists": file.exists,
+                        "change_action": file.change_action,
+                    }
+                    for file in review.files
+                ],
+                "affected_information_item_ids": review.affected_information_item_ids,
+            }
+            for review in batch.courses
+        ],
+    }
+
+
+def _safe_resource_file(resources_dir: Path, relative_path: str) -> Path:
+    resources = resources_dir.resolve()
+    path = (resources / relative_path).resolve()
+    if not path.is_relative_to(resources) or not path.is_file():
+        raise DashboardError("本地来源不存在或路径无效。")
+    return path
+
+
+def _source_inventory(resources_dir: Path) -> dict[str, dict[str, Any]]:
+    inventory: dict[str, dict[str, Any]] = {}
+    for index in CHANGE_REPOSITORY.load_archives(resources_dir):
+        course_json = (
+            index.source_path.resolve().relative_to(resources_dir.resolve()).as_posix()
+            if index.source_path
+            else f"courses/{index.archive.course.course_id}/course.json"
+        )
+        if (resources_dir / course_json).is_file():
+            inventory[course_json] = {
+                "title": f"{index.archive.course.title} · course.json",
+                "original_relative_path": course_json,
+                "text_relative_path": course_json,
+                "content_type": "application/json",
+            }
+        for _activity, stored_file in iter_files(index.archive):
+            text_path = stored_file.analysis.extracted_text_path if stored_file.analysis else None
+            value = {
+                "title": stored_file.filename,
+                "original_relative_path": stored_file.relative_path,
+                "text_relative_path": text_path,
+                "content_type": stored_file.content_type
+                or mimetypes.guess_type(stored_file.filename)[0]
+                or "application/octet-stream",
+            }
+            inventory[stored_file.relative_path] = value
+            if text_path:
+                inventory[text_path] = value
+    return inventory
+
+
+def _select_source_units(text: str, page_numbers: list[int]) -> str:
+    if not page_numbers:
+        return text
+    wanted = set(page_numbers)
+    chunks: list[str] = []
+    current: list[str] = []
+    selected = False
+    for line in text.splitlines():
+        if line.startswith("--- ") and line.endswith(" ---"):
+            if selected and current:
+                chunks.append("\n".join(current))
+            current = [line]
+            selected = any(
+                line.startswith(f"--- {label} {number} ")
+                or line == f"--- {label} {number} ---"
+                for label in ("Page", "Slide", "Speaker notes", "Document part")
+                for number in wanted
+            )
+        elif selected:
+            current.append(line)
+    if selected and current:
+        chunks.append("\n".join(current))
+    return "\n\n".join(chunks) or text
+
+
 def _course_color(course_id: str) -> str:
     palette = ("#2563eb", "#0f766e", "#7c3aed", "#c2410c", "#be123c", "#0369a1")
     return palette[sum(course_id.encode("utf-8")) % len(palette)]
@@ -572,6 +715,11 @@ def _course_materials(
                         "text_available": bool(
                             stored_file.analysis
                             and stored_file.analysis.extracted_text_path
+                        ),
+                        "text_path": (
+                            stored_file.analysis.extracted_text_path
+                            if stored_file.analysis
+                            else None
                         ),
                         "exists": path.is_file(),
                         "change_action": changed.get(stored_file.relative_path),

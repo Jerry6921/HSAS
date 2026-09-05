@@ -103,6 +103,109 @@ def test_first_review_is_full_then_only_changed_files_are_pending(tmp_path: Path
     }
 
 
+def test_processed_legacy_assessment_history_does_not_break_change_listing(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    collected_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    _archive(resources, collected_at, "a")
+    batch = collect_pending_changes(resources, REPOSITORY)
+    acknowledge_change_batch(resources, batch, REPOSITORY, confirmed=True)
+    write_json(
+        resources / "courses/138907/changes/history/legacy.json",
+        {
+            "schema_version": "1.0",
+            "course_id": "138907",
+            "detected_at": "2026-08-31T08:30:00Z",
+            "initial_sync": False,
+            "changed": True,
+            "previous_collected_at": "2026-08-31T08:00:00Z",
+            "current_collected_at": "2026-08-31T08:20:00Z",
+            "changes": [
+                {
+                    "kind": "assessment",
+                    "action": "modified",
+                    "entity_id": "quiz-1",
+                    "title": "Quiz 1",
+                    "field": "status",
+                    "before": "tentative",
+                    "after": "confirmed",
+                },
+                {
+                    "kind": "weight",
+                    "action": "modified",
+                    "entity_id": "quiz-1",
+                    "title": "Quiz 1",
+                    "field": "weight_percent",
+                    "before": None,
+                    "after": 15,
+                },
+            ],
+            "summary": {"assessment": 1, "weight": 1},
+        },
+    )
+
+    assert collect_pending_changes(resources, REPOSITORY).courses == []
+
+
+def test_unprocessed_legacy_change_kinds_are_adapted_to_activity(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    first_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    previous = _archive(resources, first_at, "a")
+    first = collect_pending_changes(resources, REPOSITORY)
+    acknowledge_change_batch(resources, first, REPOSITORY, confirmed=True)
+    current_at = first_at + timedelta(days=1)
+    current = previous.model_copy(deep=True)
+    current.collected_at = current_at
+    write_model(resources / "courses/138907/course.json", current)
+    write_json(
+        resources / "courses/138907/changes/history/legacy-new.json",
+        {
+            "schema_version": "1.0",
+            "course_id": "138907",
+            "detected_at": current_at.isoformat(),
+            "initial_sync": False,
+            "changed": True,
+            "previous_collected_at": first_at.isoformat(),
+            "current_collected_at": current_at.isoformat(),
+            "changes": [
+                {
+                    "kind": "assessment",
+                    "action": "modified",
+                    "entity_id": "quiz-1",
+                    "title": "Quiz 1",
+                    "field": "requirements",
+                    "before": [],
+                    "after": ["Chapters 1–3"],
+                },
+                {
+                    "kind": "weight",
+                    "action": "modified",
+                    "entity_id": "quiz-1",
+                    "title": "Quiz 1",
+                    "field": "weight_percent",
+                    "before": None,
+                    "after": 15,
+                },
+            ],
+            "summary": {"assessment": 1, "weight": 1},
+        },
+    )
+
+    pending = collect_pending_changes(resources, REPOSITORY)
+
+    assert [change.kind for change in pending.courses[0].changes] == [
+        "activity",
+        "activity",
+    ]
+    assert [change.field for change in pending.courses[0].changes] == [
+        "requirements",
+        "weight_percent",
+    ]
+
+
 def test_stale_batch_cannot_advance_checkpoint(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
     collected_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)

@@ -9,6 +9,7 @@ import pytest
 
 from hsas.application.update_information import apply_information_update
 from hsas.domain.courses.define_courses import StoredFile
+from hsas.domain.courses.define_documents import PdfAnalysis
 from hsas.infrastructure.moodle.map_courses import build_course_archive
 from hsas.infrastructure.storage import JsonInformationRepository
 from hsas.infrastructure.storage.persist_data import write_model
@@ -23,7 +24,7 @@ from hsas.interfaces.run_dashboard import (
 )
 
 
-def test_dashboard_assets_are_calendar_only() -> None:
+def test_dashboard_assets_include_application_calendar_and_source_preview() -> None:
     assert (ASSET_ROOT / "index.html").is_file()
     assert (ASSET_ROOT / "styles.css").is_file()
     assert (ASSET_ROOT / "app.js").is_file()
@@ -35,7 +36,13 @@ def test_dashboard_assets_are_calendar_only() -> None:
     assert b'id="metric-pending"' in loaded["/"][0]
     assert b'id="course-overview-view"' in loaded["/"][0]
     assert b'id="course-navigation"' in loaded["/"][0]
+    assert b'id="show-home"' in loaded["/"][0]
+    assert b'id="updates-list"' in loaded["/"][0]
+    assert b'id="source-preview"' in loaded["/"][0]
+    assert 'target="_self">打开 Moodle 来源'.encode() in loaded["/"][0]
+    assert b'window.location.protocol === "file:"' in loaded["/assets/app.js"][0]
     assert b"/api/information" in loaded["/assets/app.js"][0]
+    assert b"/api/source-preview" in loaded["/assets/app.js"][0]
     assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
     assert b'"/api/sync"' in loaded["/assets/app.js"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
@@ -169,11 +176,30 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
         size_bytes=5,
         sha256="a" * 64,
         downloaded_at=archive.collected_at,
+        analysis=PdfAnalysis(
+            status="complete",
+            extraction_method="pptx_xml",
+            document_kind="pptx",
+            unit_label="slide",
+            analyzed_at=archive.collected_at,
+            page_count=2,
+            pages_with_text=2,
+            word_count=6,
+            character_count=42,
+            estimated_reading_minutes=1,
+            extracted_text_path="courses/138907/analysis/lecture-1.txt",
+        ),
     )
     activity.files = [stored_file]
     material_path = tmp_path / stored_file.relative_path
     material_path.parent.mkdir(parents=True)
     material_path.write_bytes(b"slides")
+    text_path = tmp_path / "courses/138907/analysis/lecture-1.txt"
+    text_path.parent.mkdir(parents=True)
+    text_path.write_text(
+        "--- Slide 1 ---\nLimits introduction\n\n--- Slide 2 ---\nSandwich theorem",
+        encoding="utf-8",
+    )
     write_model(tmp_path / "courses/138907/course.json", archive)
     before_ai = DashboardService(tmp_path).information_snapshot()
     assert before_ai["available"] is False
@@ -183,6 +209,7 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
         before_ai["courses"][0]["materials"]["learning"][0]["change_action"]
         == "baseline"
     )
+    assert before_ai["updates"]["courses"][0]["mode"] == "full"
     apply_information_update(
         tmp_path / "information.json",
         {
@@ -224,8 +251,14 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
     assert course["materials"]["learning"][0]["material_type"] == "lecture"
     assert course["materials"]["information"]
     assert service.material_file(stored_file.relative_path)[0] == material_path
+    preview = service.source_preview(stored_file.relative_path, [2])
+    assert preview["preview_kind"] == "text"
+    assert "Sandwich theorem" in preview["text"]
+    assert "Limits introduction" not in preview["text"]
     with pytest.raises(DashboardError, match="当前课程快照"):
         service.material_file("information.json")
+    with pytest.raises(DashboardError, match="当前课程快照"):
+        service.source_preview("information.json")
 
 
 @pytest.mark.parametrize(

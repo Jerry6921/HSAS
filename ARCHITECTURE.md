@@ -162,11 +162,12 @@ project、report、reading、deadline 和 other。
 
 省略记录会保留，删除使用显式流程。任何失败都发生在替换前。
 
-## Calendar
+## Dashboard
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
-store。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按课程和全文筛选，
-并把日期待确认的事项单独列出。
+store。首页集中 Moodle 登录、同步、本地刷新、资料搜索和 pending review 差异；日历作为
+独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按课程和全文
+筛选，并把日期待确认的事项单独列出。
 
 课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
 `information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记
@@ -175,7 +176,9 @@ store。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按
 Reading、Assessment 等类型。课件内容由 AI 阅读，页面呈现经过验证的课程事实。
 
 日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接和
-来源。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
+来源。`GET /api/source-preview` 只接受当前课程快照中的白名单路径；PDF 与图片使用同源原文
+预览，DOCX/PPTX 使用已提取文本预览，并保留打开原文件的入口。首页问答式搜索只匹配本地
+结构化事项和课件目录。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
 
 ## 有限兼容
 

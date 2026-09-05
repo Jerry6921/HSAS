@@ -45,8 +45,9 @@ const state = {
   selectedItemId: null,
   selectedDateKey: null,
   selectedOverviewCourseId: null,
-  view: "calendar",
+  view: "home",
   query: "",
+  homeQuery: "",
 };
 
 const byId = (id) => document.getElementById(id);
@@ -210,24 +211,34 @@ function renderCourseNavigation() {
   }
 }
 
-function showCalendar() {
-  state.view = "calendar";
-  byId("calendar-view").classList.remove("hidden");
-  byId("course-overview-view").classList.add("hidden");
-  byId("show-calendar").classList.add("active");
-  byId("page-eyebrow").textContent = "CALENDAR";
-  byId("page-title").textContent = "课程信息，一眼查清";
-  byId("data-caption").textContent = dataCaption();
+function setView(view) {
+  state.view = view;
+  byId("home-view").classList.toggle("hidden", view !== "home");
+  byId("calendar-view").classList.toggle("hidden", view !== "calendar");
+  byId("course-overview-view").classList.toggle("hidden", view !== "course");
+  byId("show-home").classList.toggle("active", view === "home");
+  byId("show-calendar").classList.toggle("active", view === "calendar");
+  byId("query-controls").classList.toggle("hidden", view === "home");
   renderCourseNavigation();
 }
 
+function showHome() {
+  setView("home");
+  byId("page-eyebrow").textContent = "APPLICATION";
+  byId("page-title").textContent = "HIQS 首页";
+  byId("data-caption").textContent = dataCaption();
+}
+
+function showCalendar() {
+  setView("calendar");
+  byId("page-eyebrow").textContent = "CALENDAR";
+  byId("page-title").textContent = "课程日历";
+  byId("data-caption").textContent = dataCaption();
+}
+
 function showCourseOverview(courseId) {
-  state.view = "course";
   state.selectedOverviewCourseId = courseId;
-  byId("calendar-view").classList.add("hidden");
-  byId("course-overview-view").classList.remove("hidden");
-  byId("show-calendar").classList.remove("active");
-  renderCourseNavigation();
+  setView("course");
   renderCourseOverview();
 }
 
@@ -312,17 +323,16 @@ function renderMaterialGroup(parent, title, subtitle, materials) {
 }
 
 function renderMaterialCard(list, material) {
-    const localUrl = material.relative_path && material.exists
-      ? `/api/material?path=${encodeURIComponent(material.relative_path)}`
-      : null;
-    const remoteUrl = material.source_url && /^https?:\/\//i.test(material.source_url)
-      ? material.source_url
-      : null;
-    const card = element(localUrl || remoteUrl ? "a" : "article", "material-card");
-    if (localUrl || remoteUrl) {
-      card.href = localUrl || remoteUrl;
-      card.target = "_blank";
-      card.rel = "noreferrer";
+    const hasLocal = Boolean(material.relative_path && material.exists);
+    const remoteUrl = safeHttpUrl(material.source_url);
+    const canOpen = Boolean(hasLocal || remoteUrl);
+    const card = element(hasLocal ? "button" : remoteUrl ? "a" : "article", "material-card");
+    if (hasLocal) {
+      card.type = "button";
+      card.addEventListener("click", () => openSourcePreview(material));
+    } else if (remoteUrl) {
+      card.href = remoteUrl;
+      card.target = "_self";
     }
     const icon = element("span", "material-icon", material.relative_path ? "FILE" : "LINK");
     const copy = element("div", "material-copy");
@@ -343,8 +353,68 @@ function renderMaterialCard(list, material) {
     ].filter(Boolean).join(" · ");
     copy.append(titleLine, element("small", "", meta || categoryLabels[material.category] || material.category));
     if (material.download_error) copy.append(element("small", "material-error", material.download_error));
-    card.append(icon, copy, element("span", "material-open", localUrl || remoteUrl ? "↗" : "—"));
+    card.append(icon, copy, element("span", "material-open", canOpen ? "预览" : "—"));
     list.append(card);
+}
+
+function safeHttpUrl(value) {
+  return typeof value === "string" && /^https?:\/\//i.test(value) ? value : null;
+}
+
+function closeSourcePreview() {
+  const dialog = byId("source-preview");
+  if (dialog.open) dialog.close();
+}
+
+async function openSourcePreview(source) {
+  const dialog = byId("source-preview");
+  const body = byId("preview-body");
+  const original = byId("open-original");
+  const remote = byId("open-source-url");
+  byId("preview-title").textContent = source.title || "来源预览";
+  byId("preview-path").textContent = source.relative_path || source.url || source.source_url || "";
+  body.replaceChildren(element("p", "preview-loading", "正在读取本地来源…"));
+  original.classList.add("hidden");
+  remote.classList.add("hidden");
+  const sourceUrl = safeHttpUrl(source.url || source.source_url);
+  if (sourceUrl) {
+    remote.href = sourceUrl;
+    remote.classList.remove("hidden");
+  }
+  if (!dialog.open) dialog.showModal();
+  if (!source.relative_path) {
+    body.replaceChildren(element("p", "preview-empty", "该来源保留了 Moodle 链接，可通过下方按钮查看。"));
+    return;
+  }
+  try {
+    const params = new URLSearchParams({ path: source.relative_path });
+    for (const page of source.page_numbers || []) params.append("page", page);
+    const response = await fetch(`/api/source-preview?${params}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "无法预览来源");
+    const localUrl = `/api/material?path=${encodeURIComponent(payload.original_relative_path)}`;
+    original.href = localUrl;
+    original.classList.remove("hidden");
+    body.replaceChildren();
+    if (payload.preview_kind === "pdf") {
+      const page = payload.page_numbers.length ? `#page=${payload.page_numbers[0]}` : "";
+      const frame = element("iframe", "preview-frame");
+      frame.src = `${localUrl}${page}`;
+      frame.title = payload.title;
+      body.append(frame);
+    } else if (payload.preview_kind === "image") {
+      const image = element("img", "preview-image");
+      image.src = localUrl;
+      image.alt = payload.title;
+      body.append(image);
+    } else if (payload.text) {
+      body.append(element("pre", "preview-text", payload.text));
+    } else {
+      body.append(element("p", "preview-empty", "该文件可打开原文；当前没有可显示的文本副本。"));
+    }
+  } catch (error) {
+    body.replaceChildren(element("p", "preview-error", error.message));
+  }
 }
 
 function renderCourseOverview() {
@@ -369,8 +439,7 @@ function renderCourseOverview() {
   if (course.moodle && /^https?:\/\//i.test(course.moodle.url)) {
     const link = element("a", "button", "打开 Moodle");
     link.href = course.moodle.url;
-    link.target = "_blank";
-    link.rel = "noreferrer";
+    link.target = "_self";
     hero.append(link);
   }
   container.append(hero);
@@ -383,6 +452,12 @@ function renderCourseOverview() {
   summary.append(element("p", course.overview ? "overview-copy" : "overview-empty", course.overview || "尚未从官方资料录入课程概述。"));
   summary.append(element("h4", "", "课程目的"));
   appendOverviewList(summary, course.objectives, "尚未从官方资料录入课程目的。");
+  if (course.sources && course.sources.length) {
+    summary.append(element("h4", "", "信息来源"));
+    const sources = element("div", "overview-sources");
+    for (const source of course.sources) sources.append(sourcePreviewButton(source));
+    summary.append(sources);
+  }
   const grades = element("section", "overview-card");
   grades.append(element("p", "eyebrow", "ASSESSMENT"), element("h3", "", "成绩构成"));
   renderGradeDistribution(grades, course);
@@ -489,6 +564,25 @@ function appendListBlock(panel, title, values, extraClass = "") {
   panel.append(block);
 }
 
+function sourcePreviewButton(source) {
+  const pages = source.page_numbers && source.page_numbers.length ? ` · 第 ${source.page_numbers.join("、")} 页` : "";
+  const note = source.note ? ` · ${source.note}` : "";
+  const remoteUrl = safeHttpUrl(source.url || source.source_url);
+  const button = element(source.relative_path ? "button" : remoteUrl ? "a" : "button", "source-card", `${source.title}${pages}${note}`);
+  if (source.relative_path) {
+    button.type = "button";
+    button.addEventListener("click", () => openSourcePreview(source));
+  } else if (remoteUrl) {
+    button.href = remoteUrl;
+    button.target = "_self";
+  } else {
+    button.type = "button";
+    button.disabled = true;
+  }
+  if (source.relative_path) button.append(element("small", "", source.relative_path));
+  return button;
+}
+
 function renderDetail(item, occurrenceKey = null) {
   const panel = byId("detail-panel");
   const course = courseFor(item);
@@ -536,8 +630,7 @@ function renderDetail(item, occurrenceKey = null) {
       const node = element(safe ? "a" : "div", "source-card", link.label);
       if (safe) {
         node.href = link.url;
-        node.target = "_blank";
-        node.rel = "noreferrer";
+        node.target = "_self";
       }
       block.append(node);
     }
@@ -548,19 +641,7 @@ function renderDetail(item, occurrenceKey = null) {
     const block = element("section", "detail-block");
     block.append(element("h3", "", "证据来源"));
     for (const source of item.sources) {
-      const pages = source.page_numbers && source.page_numbers.length ? ` · 第 ${source.page_numbers.join("、")} 页` : "";
-      const note = source.note ? ` · ${source.note}` : "";
-      const caption = `${source.title}${pages}${note}`;
-      const safe = source.url && /^https?:\/\//i.test(source.url);
-      const node = element(safe ? "a" : "div", "source-card", caption);
-      if (safe) {
-        node.href = source.url;
-        node.target = "_blank";
-        node.rel = "noreferrer";
-      } else if (source.relative_path) {
-        node.append(element("small", "", ` · ${source.relative_path}`));
-      }
-      block.append(node);
+      block.append(sourcePreviewButton(source));
     }
     panel.append(block);
   }
@@ -592,11 +673,160 @@ function renderUnscheduled() {
   }
 }
 
+function formatChangeValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+}
+
+function renderUpdates() {
+  const container = byId("updates-list");
+  container.replaceChildren();
+  const courses = state.data.updates?.courses || [];
+  byId("updates-count").textContent = `${state.data.pending_review?.change_count || 0} 项`;
+  if (!courses.length) {
+    container.append(element("p", "empty-list", "当前 Moodle 快照已完成整理。"));
+    return;
+  }
+  const actionLabels = { added: "新增", modified: "修改", removed: "删除", baseline: "首次整理" };
+  const kindLabels = { deadline: "日期", activity: "项目", material: "文件" };
+  for (const course of courses) {
+    const group = element("article", "update-course");
+    const heading = element("div", "update-course-heading");
+    heading.append(
+      element("div", "", null),
+      element("span", "update-mode", course.mode === "full" ? "首次整理" : "增量更新"),
+    );
+    heading.firstChild.append(
+      element("h3", "", course.course_title),
+      element("p", "", `${course.course_id} · 检测至 ${formatDateTime(course.acknowledge_through)}`),
+    );
+    group.append(heading);
+    const changes = course.changes || [];
+    if (changes.length) {
+      for (const change of changes) {
+        const card = element("div", "change-card");
+        const title = element("div", "change-title");
+        title.append(
+          element("span", `change-action ${change.action}`, actionLabels[change.action] || change.action),
+          element("span", "change-kind", kindLabels[change.kind] || change.kind),
+          element("strong", "", change.title),
+        );
+        card.append(title);
+        if (change.field) card.append(element("code", "change-field", change.field));
+        if (change.action === "modified") {
+          const diff = element("div", "change-diff");
+          const before = element("div");
+          before.append(element("span", "", "更新前"), element("pre", "", formatChangeValue(change.before)));
+          const after = element("div");
+          after.append(element("span", "", "更新后"), element("pre", "", formatChangeValue(change.after)));
+          diff.append(before, after);
+          card.append(diff);
+        }
+        if (
+          (change.action !== "removed" && (change.relative_path || change.text_path))
+          || safeHttpUrl(change.source_url)
+        ) {
+          card.append(sourcePreviewButton({
+            title: change.title,
+            relative_path: change.action === "removed" ? null : change.relative_path || change.text_path,
+            source_url: change.source_url,
+          }));
+        }
+        group.append(card);
+      }
+    } else {
+      const files = (course.files || []).filter((file) => file.relative_path !== "course.json");
+      const note = element("p", "update-baseline", `已建立课程基线，${files.length} 个文件等待首次整理。`);
+      group.append(note);
+      const fileList = element("div", "baseline-files");
+      for (const file of files) {
+        fileList.append(sourcePreviewButton({ title: file.filename, relative_path: file.relative_path }));
+      }
+      group.append(fileList);
+    }
+    container.append(group);
+  }
+}
+
+function localSearchRecords() {
+  const records = [];
+  for (const item of state.data.items) {
+    const course = courseFor(item);
+    const facts = [
+      item.weight_percent !== null && item.weight_percent !== undefined ? `占分 ${item.weight_percent}%` : null,
+      formatDateTime(item.due_at) || item.due_on ? `DDL ${formatDateTime(item.due_at) || item.due_on}` : null,
+      item.location ? `地点 ${item.location}` : null,
+    ].filter(Boolean);
+    records.push({
+      kind: "item",
+      title: item.title,
+      subtitle: [course.code, categoryLabels[item.category] || item.category, ...facts].join(" · "),
+      searchable: [item.title, item.description, item.location, item.assessment_format, item.submission_method, item.weight_percent, "占分 GPA DDL 截止 地点 形式", ...(item.requirements || [])].filter(Boolean).join(" "),
+      value: item,
+    });
+  }
+  for (const course of state.data.courses) {
+    for (const material of [...(course.materials?.learning || []), ...(course.materials?.information || [])]) {
+      records.push({
+        kind: "material",
+        title: material.title,
+        subtitle: `${course.code || course.title} · ${materialTypeLabels[material.material_type] || material.material_type}`,
+        searchable: [material.title, material.activity_name, material.section_title, course.code, course.title].filter(Boolean).join(" "),
+        value: material,
+      });
+    }
+  }
+  return records;
+}
+
+function renderHomeSearch() {
+  const container = byId("home-search-results");
+  container.replaceChildren();
+  const query = state.homeQuery.trim().toLocaleLowerCase();
+  if (!query) {
+    container.append(element("p", "search-hint", "可查询 DDL、占分、地点、课业形式、课件名称和课程代码。"));
+    return;
+  }
+  const ignored = new Set(["的", "是", "什么", "多少", "请问", "我", "how", "what", "is", "the"]);
+  const normalized = query
+    .replace(/占分多少|占比多少/g, "占分")
+    .replace(/什么时候|在哪里|是什么|有哪些|怎么样|怎么/g, " ");
+  const terms = normalized.split(/[\s，。？！,.?!:：]+/).filter((value) => value && !ignored.has(value));
+  const matches = localSearchRecords().filter((record) => {
+    const value = `${record.title} ${record.subtitle} ${record.searchable}`.toLocaleLowerCase();
+    return terms.every((term) => value.includes(term));
+  }).slice(0, 12);
+  if (!matches.length) {
+    container.append(element("p", "search-hint", "本地信息库中没有匹配结果，可以缩短问题或改用课程代码、事项名称。"));
+    return;
+  }
+  for (const record of matches) {
+    const button = element("button", "search-result");
+    button.type = "button";
+    button.append(element("strong", "", record.title), element("small", "", record.subtitle));
+    button.addEventListener("click", () => {
+      if (record.kind === "material") {
+        const remoteUrl = safeHttpUrl(record.value.source_url);
+        if (!record.value.relative_path && remoteUrl) window.location.assign(remoteUrl);
+        else openSourcePreview(record.value);
+      } else {
+        showCalendar();
+        state.selectedItemId = record.value.item_id;
+        state.selectedDateKey = primaryDateKey(record.value);
+        renderDetail(record.value, state.selectedDateKey);
+      }
+    });
+    container.append(button);
+  }
+}
+
 function renderDataViews() {
   const occurrences = buildOccurrences();
   renderMetrics(occurrences);
   renderCalendar(occurrences);
   renderUnscheduled();
+  renderUpdates();
+  renderHomeSearch();
   if (state.selectedItemId) {
     const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
     if (selected) renderDetail(selected, state.selectedDateKey);
@@ -606,6 +836,15 @@ function renderDataViews() {
 
 async function loadInformation() {
   byId("global-error").classList.add("hidden");
+  if (window.location.protocol === "file:") {
+    const alert = byId("global-error");
+    alert.textContent = "当前打开的是静态 HTML 文件。请在项目目录运行 hsas ui，并访问终端显示的 http://127.0.0.1 地址；本地搜索、来源预览、同步和 Moodle 跳转通过该服务运行。";
+    alert.classList.remove("hidden");
+    document.querySelectorAll("button, input").forEach((control) => {
+      control.disabled = true;
+    });
+    return;
+  }
   try {
     const response = await fetch("/api/information", { cache: "no-store" });
     const payload = await response.json();
@@ -636,8 +875,10 @@ async function loadInformation() {
 function setOperationState(running, message = "") {
   const loginButton = byId("login-moodle");
   const syncButton = byId("sync-courses");
+  const reloadButton = byId("reload-data");
   loginButton.disabled = running;
   syncButton.disabled = running;
+  reloadButton.disabled = running;
   const status = byId("operation-status");
   if (message) {
     status.textContent = message;
@@ -725,14 +966,23 @@ byId("search-input").addEventListener("input", (event) => {
   state.query = event.target.value.trim().toLocaleLowerCase();
   renderDataViews();
 });
+byId("home-search-input").addEventListener("input", (event) => {
+  state.homeQuery = event.target.value;
+  renderHomeSearch();
+});
 byId("select-all-courses").addEventListener("click", () => {
   state.selectedCourses = new Set(state.data.courses.map((course) => course.course_id));
   renderCourseFilters();
   renderDataViews();
 });
+byId("show-home").addEventListener("click", showHome);
 byId("show-calendar").addEventListener("click", showCalendar);
 byId("reload-data").addEventListener("click", loadInformation);
 byId("login-moodle").addEventListener("click", loginMoodle);
 byId("sync-courses").addEventListener("click", synchronizeCourses);
+byId("close-preview").addEventListener("click", closeSourcePreview);
+byId("source-preview").addEventListener("click", (event) => {
+  if (event.target === byId("source-preview")) closeSourcePreview();
+});
 
 loadInformation();

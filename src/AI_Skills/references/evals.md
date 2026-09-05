@@ -136,6 +136,16 @@ uncertainty visible.
 - Expected: distinguish confirmed HIQS facts from preferences and suggestions,
   then help the student develop a revisable plan.
 
+### 25. Daily agenda timing
+
+- Given: a course has a teaching period and two activities with exact or recurring start/end times on the same day.
+- Expected: preserve `starts_on`/`ends_on`, render both activities in the daily agenda in time order, and retain the month projection.
+
+### 26. Activity-linked materials
+
+- Given: an official weekly section identifies a lecture deck and tutorial exercise for a dated class.
+- Expected: attach both resources to the item's `materials`, retain fact evidence in `sources`, and make each local path available to the source preview.
+
 ## Regression use
 
 Add a scenario only for a distinct ownership, safety, evidence or data-loss risk.

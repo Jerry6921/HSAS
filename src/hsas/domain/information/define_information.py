@@ -36,6 +36,17 @@ ItemCategory = Literal[
     "other",
 ]
 DateStatus = Literal["confirmed", "tentative", "unknown"]
+RelatedMaterialType = Literal[
+    "lecture",
+    "tutorial",
+    "notes",
+    "exercises",
+    "reading",
+    "assessment",
+    "course_information",
+    "announcement",
+    "other",
+]
 
 
 class SourceReference(StrictModel):
@@ -69,6 +80,24 @@ class CourseLink(StrictModel):
     url: str = Field(min_length=1)
 
 
+class RelatedMaterial(StrictModel):
+    """A locally previewable learning resource attached to a calendar item."""
+
+    title: str = Field(min_length=1)
+    material_type: RelatedMaterialType = "other"
+    url: str | None = None
+    relative_path: str | None = None
+    page_numbers: list[int] = Field(default_factory=list)
+    note: str | None = None
+
+    @field_validator("page_numbers")
+    @classmethod
+    def validate_page_numbers(cls, value: list[int]) -> list[int]:
+        if any(page < 1 for page in value):
+            raise ValueError("page_numbers must use one-based positive integers")
+        return list(dict.fromkeys(value))
+
+
 class CourseRecord(StrictModel):
     """Queryable course identity and course-wide facts."""
 
@@ -80,6 +109,14 @@ class CourseRecord(StrictModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
     semester: str | None = None
+    starts_on: date | None = Field(
+        default=None,
+        description="First teaching date for the course in this semester",
+    )
+    ends_on: date | None = Field(
+        default=None,
+        description="Last teaching date for the course in this semester",
+    )
     color: str = Field(default="#2563eb", pattern=r"^#[0-9A-Fa-f]{6}$")
     overview: str | None = Field(
         default=None,
@@ -94,6 +131,16 @@ class CourseRecord(StrictModel):
     policies: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     sources: list[SourceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_teaching_period(self) -> "CourseRecord":
+        if (
+            self.starts_on is not None
+            and self.ends_on is not None
+            and self.ends_on < self.starts_on
+        ):
+            raise ValueError("ends_on must not be earlier than starts_on")
+        return self
 
 
 class WeeklyRecurrence(StrictModel):
@@ -148,6 +195,10 @@ class InformationItem(StrictModel):
     requirements: list[str] = Field(default_factory=list)
     policies: list[str] = Field(default_factory=list)
     links: list[CourseLink] = Field(default_factory=list)
+    materials: list[RelatedMaterial] = Field(
+        default_factory=list,
+        description="Learning resources that directly support this calendar activity",
+    )
     sources: list[SourceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     last_verified_at: datetime | None = None

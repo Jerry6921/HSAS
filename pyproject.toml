@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hku-information-query-system"
-version = "2.0.0"
+version = "2.1.0"
 description = "Local, AI-authored HKU course information database and calendar"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"

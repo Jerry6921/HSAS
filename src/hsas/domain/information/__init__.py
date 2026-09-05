@@ -5,6 +5,7 @@ from .define_information import (
     InformationItem,
     InformationStore,
     InformationUpdate,
+    RelatedMaterial,
     SourceReference,
     WeeklyRecurrence,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "InformationItem",
     "InformationStore",
     "InformationUpdate",
+    "RelatedMaterial",
     "SourceReference",
     "WeeklyRecurrence",
 ]

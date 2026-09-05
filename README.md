@@ -8,49 +8,52 @@
 HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、校验和可视化；AI 负责阅读资料
 并归纳课程信息。系统保留信息来源、待补字段和 Moodle 内容变化记录。
 
-## 功能
+## 页面功能与使用方式
 
-- 登录 HKU Moodle，并同步当前账号有权访问的课程与附件；
-- 把 PDF、DOCX、PPTX 等文件保存在本地，并生成 AI 可检索的文本副本；
-- 让 AI 整理课程、Tutorial、Assessment、DDL、形式、要求、占分和证据来源；
-- 用月历展示课程时间、Tutorial、Lab、Office hour 和截止日期；
-- 从左侧选择课程，查看 AI 总结的课程概述、课程目的和已确认成绩构成；
-- 浏览全部 Moodle 项目，并区分 Lecture、Tutorial、Notes、Exercises、Reading、
-  Assessment、Course Information、Announcements 等类型；
-- 标记新增或更新的课件，让 AI 只重新阅读发生变化的内容。
-- 通过本地 RAG 同时检索结构化课程事实和课件原文，让 AI 带出处回答问题。
-- 在 Dashboard 中预览来源原文，并用本地搜索快速定位课程事项与课件。
+HIQS 的侧栏由首页、日历和课程概览组成。课程资料、结构化事实与来源预览均从这些页面进入。
+学生也可以把本地检索结果交给 AI，在对话中比较 DDL、理解要求并制定自己的学习安排。
 
-HIQS 提供课程事实、课件证据和日历查询。学生可以在 AI 对话中比较 DDL、理解要求，
-并据此自主制定学习计划；AI 建议作为独立的对话内容，采纳与记录方式由学生决定。
+### 首页：同步、搜索与查看更新
 
-## 界面一览
+首页承担应用入口的功能：
 
-首页集中显示 Moodle 登录与同步、本地信息库摘要、问答式搜索和增量更新记录。搜索直接匹配
-课程事项与课件目录，更新记录呈现本轮 Moodle 快照变化及待整理范围。
+1. 点击“登录 Moodle”，由学生本人完成 HKU SSO 与 MFA；
+2. 点击“同步课程”，下载当前账号可访问的课程页面和附件；
+3. 查看课程数、信息事项、本月日程、待确认日期与待 AI 整理数量；
+4. 在“本地问答式搜索”中输入课程代码、事项名称、DDL、地点或课件关键词；
+5. 在“更新记录”中查看 Moodle 项目的新增、修改与删除，以及等待 AI 审阅的资料。
 
-![HIQS 首页、本地搜索与 Moodle 更新记录](docs/images/ui/home.png)
+![HIQS 首页：同步、搜索与 Moodle 更新记录](docs/images/ui/home.png)
 
-日历把课程、Tutorial、Assessment 和 DDL 放回同一条时间线上。点击事项后，日期、形式、
-占分和证据来源都在右侧展开，并显示对应的 Moodle 页面或本地资料。
+### 日历页：从月份进入当天安排
 
-![HIQS 课程日历与 Assessment 详情](docs/images/ui/calendar-detail.png)
+月视图统一呈现课程、Tutorial、Lab、Office hour、Assessment 与 DDL。课程筛选器可以控制
+日历中显示的课程，侧栏搜索可以进一步筛选事项。点击月历中的事项会在右侧显示日期状态、
+地点、课业形式、提交方式、字数、占分、要求、警告和证据来源。
 
-切换到一门课程后，可以同时查看课程综述、课程目的和已经确认的成绩构成。综述由 AI 根据
-下载到本地的官方资料归纳；缺少来源支持的字段保持为空。
+点击日期数字或“日”按钮可进入每日议程。日视图采用纵向时间轴，按照开始与结束时间放置
+活动；日期型事项显示在全天区域。活动卡片会标出关联材料数量，点击后可在右侧打开 AI 配对
+的 Lecture、Notes、Tutorial、Exercises 与 Reading。顶部箭头在月视图切换月份，在日视图
+切换前后一天，“今天”返回当前日期。
 
-![HIQS 课程概览与成绩构成](docs/images/ui/course-overview.png)
+### 课程概览页：理解一门课程的整体结构
 
-课件会从下载列表整理为分类资料库。HIQS 保留 Moodle 原有上下文，并进一步整理为
-Lecture、Tutorial、Notes、Exercises、Reading 等类别；刚同步、尚待 AI 阅读的文件会有
-“待整理”标记。
+从左侧“课程概览”选择课程后，页面显示课程名称、学期、教学起止日期、教师、AI 归纳的
+课程综述与课程目的。成绩构成区域列出已确认的 Assessment 及占分，并按照资料中的父级与
+子级结构展示。页面下方汇总该课程的 Moodle 资料，可直接进入具体课件。
 
-![HIQS 课件分类与增量整理状态](docs/images/ui/material-library.png)
+### 课件目录：按用途浏览下载资料
 
-来源预览器在 Dashboard 内显示 PDF 原页，并保留页码导航、缩放、下载和打印能力。底部入口
-可打开本地原文件或对应的 Moodle 来源；DOCX 与 PPTX 使用同步时生成的文本副本预览。
+课程资料先分为“课程学习材料”和“课程信息”，再细分为 Lecture、Tutorial、Notes、
+Exercises、Reading、Assessment、Course Information 与 Announcements。每张资料卡保留
+Moodle section、activity、文件大小、文本副本状态和本轮变化标记。点击本地资料卡即可进入
+来源预览器。
 
-![HIQS PDF 来源预览器](docs/images/ui/source-preview.png)
+### 来源预览器：核对课程事实与打开原文
+
+来源预览器在 Dashboard 内显示 PDF、图片以及 DOCX/PPTX 的文本副本。事项中的“相关学习
+材料”和“证据来源”共用这一入口。预览底部提供本地原文件与 Moodle 来源链接，方便从
+结构化事实回到具体页面、页码或 slide 进行核对。
 
 ## 工作流
 
@@ -143,7 +146,7 @@ hsas changes acknowledge pending-changes.json \
   --reviewed-no-information-change
 ```
 
-## Dashboard
+## 启动 Dashboard
 
 ```bash
 hsas ui
@@ -153,35 +156,6 @@ Dashboard 绑定本机 `127.0.0.1`，侧栏提供首页、日历和各课程概�
 请通过 `hsas ui` 启动，并使用终端显示的 `http://127.0.0.1:...` 地址访问；本地 HTTP
 服务为搜索、来源预览、同步和 Moodle 跳转提供数据接口。
 
-### 首页
-
-- 集中提供 Moodle 登录、课程同步与本地数据刷新；
-- 显示信息库摘要和 Moodle 更新记录；
-- 逐项对比新增、修改与删除，修改项展示更新前后的值；
-- 提供本地问答式搜索，在课程事项、课件标题与来源中匹配关键词，全程使用本地数据。
-
-### 日历
-
-- 月视图展示一次性日期和每周重复课程；
-- 支持课程筛选和全文搜索；
-- 点击事项查看 DDL、地点、形式、提交方式、字数、占分、要求、警告与证据；
-- 点击证据来源，在页面内预览 PDF、图片或由 DOCX/PPTX 生成的文本副本，并可打开原文件；
-- 日期待确认的事项集中显示在独立区域。
-
-### 课程概览
-
-- 左侧选择课程；
-- 查看 AI 基于官方资料归纳的课程概述与课程目的；
-- 查看已确认 Assessment 占分，父级与子级按照官方评分结构分别呈现；
-- 即使 AI 尚未首次整理，已经下载的 Moodle 课件仍然可以浏览。
-
-### 课件目录
-
-课件先分为“课程学习材料”和“课程信息”，再依据 Moodle activity 类型、标题、section 与
-文件名细分为 Lecture、Tutorial、Notes、Exercises、Reading、Assessment 等类别。本轮
-新增或更新的文件会显示待整理标记。本地课件会进入来源预览器，并提供打开原文件和 Moodle
-来源的入口；纯 Moodle 资源与对应搜索结果会在当前标签页打开来源页面。
-
 ## AI 如何总结课程
 
 首次全量整理时，AI 可根据 syllabus、course introduction、assessment information 等
@@ -189,7 +163,11 @@ Dashboard 绑定本机 `127.0.0.1`，侧栏提供首页、日历和各课程概�
 
 - `overview`：课程综述；
 - `objectives`：资料明确支持的课程目的；
+- `starts_on` / `ends_on`：课程在该学期的教学起止日期；
 - `sources`：可供用户复查的文件、页码或链接。
+
+AI 还可在日历事项的 `materials` 中关联相应 Lecture、Notes、Tutorial、Exercises 与
+Reading。用户从月历或每日议程打开事项后，可直接预览相关课件原文或文本副本。
 
 这些内容依据课程资料归纳。来源有限时字段保持为空；
 后续只有相关课件发生变化时才重新总结。
@@ -306,7 +284,21 @@ hsas ui                    打开本地 Dashboard
 HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle 下载的课程
 资料继续适用其原有版权与使用条件，并由相应权利人的授权范围管理。
 
-## 2.0 主要变化
+## 更新日志
+
+后续版本更新继续记录在本节顶部。
+
+### 2.1.0 · 2026-09-06
+
+- `information.json` 的课程记录新增教学开始与结束日期；
+- 日历新增月视图与每日议程切换，每日议程采用纵向时间轴、全天区域与当前时间线；
+- 日历活动可关联 Lecture、Tutorial、Notes、Exercises、Reading 等学习材料；
+- 活动详情可直接预览相关课件原文或文本副本；
+- 本地搜索覆盖活动关联的材料标题、备注与文件路径；
+- README 改为按照首页、日历、课程概览、课件目录和来源预览器介绍功能与使用方式；
+- UI 演示集中展示首页。
+
+### 2.0.0 · 2026-09-05
 
 - 从学习辅助系统重构为课程信息查询系统，移除 Planner、优先级、Profile 和执行记录；
 - 建立“程序下载与校验、AI 阅读与写入”的清晰分工，以 AI 资料阅读取代自动 Assessment Parser；

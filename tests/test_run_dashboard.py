@@ -31,6 +31,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     loaded = _load_dashboard_assets()
     assert b"HKU Information Query System" in loaded["/"][0]
     assert b'id="calendar-grid"' in loaded["/"][0]
+    assert b'id="daily-agenda"' in loaded["/"][0]
+    assert b'id="day-view-button"' in loaded["/"][0]
     assert b'id="login-moodle"' in loaded["/"][0]
     assert b'id="sync-courses"' in loaded["/"][0]
     assert b'id="metric-pending"' in loaded["/"][0]
@@ -46,6 +48,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
     assert b'"/api/sync"' in loaded["/assets/app.js"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
+    assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
+    assert "相关学习材料".encode() in loaded["/assets/app.js"][0]
     assert "由 AI 根据已下载课程资料归纳".encode() in loaded["/assets/app.js"][0]
 
 

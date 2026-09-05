@@ -27,6 +27,8 @@ def _update_payload() -> dict:
                 "code": "COMP1117",
                 "title": "Computer Programming",
                 "color": "#2563eb",
+                "starts_on": "2026-09-01",
+                "ends_on": "2026-11-30",
                 "overview": "An introduction to programming.",
                 "objectives": ["Write small Python programs"],
             }
@@ -46,6 +48,14 @@ def _update_payload() -> dict:
                     "end_time": "11:20:00",
                 },
                 "location": "CPD-LG.07",
+                "materials": [
+                    {
+                        "title": "Tutorial 1 exercises",
+                        "material_type": "exercises",
+                        "relative_path": "courses/100/files/tutorial-1.pdf",
+                        "page_numbers": [1, 1, 3],
+                    }
+                ],
             },
             {
                 "item_id": "COMP1117-assignment-1",
@@ -89,6 +99,21 @@ def test_information_apply_requires_confirmation_and_writes_atomically(
     assert REPOSITORY.load(path).courses[0].objectives == [
         "Write small Python programs"
     ]
+    assert REPOSITORY.load(path).courses[0].starts_on.isoformat() == "2026-09-01"
+    assert REPOSITORY.load(path).items[0].materials[0].page_numbers == [1, 3]
+
+
+def test_information_rejects_reversed_course_teaching_period(tmp_path: Path) -> None:
+    payload = _update_payload()
+    payload["courses"][0]["starts_on"] = "2026-12-01"
+
+    with pytest.raises(InformationServiceError, match="ends_on must not be earlier"):
+        apply_information_update(
+            tmp_path / "information.json",
+            payload,
+            confirmed=True,
+            repository=REPOSITORY,
+        )
 
 
 def test_information_upsert_preserves_unmentioned_records(tmp_path: Path) -> None:
@@ -149,6 +174,8 @@ def test_information_rejects_unknown_course_references(tmp_path: Path) -> None:
 
 def test_information_template_is_schema_valid_and_cli_can_apply_it(tmp_path: Path) -> None:
     assert build_information_template().items[0].recurrence is not None
+    assert build_information_template().courses[0].starts_on is not None
+    assert build_information_template().items[0].materials[0].material_type == "exercises"
     update_path = tmp_path / "update.json"
     resources = tmp_path / "resources"
 

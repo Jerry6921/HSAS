@@ -129,7 +129,7 @@ InformationStore
 ├── updated_at / updated_by
 ├── courses[]
 │   ├── course_id / moodle_course_id / code / title / color
-│   ├── semester / overview / objectives
+│   ├── semester / starts_on / ends_on / overview / objectives
 │   ├── instructors / links
 │   └── policies / notes / sources
 └── items[]
@@ -140,7 +140,7 @@ InformationStore
     ├── location / description
     ├── assessment_format / submission_method
     ├── weight_percent / word_limit
-    └── requirements / policies / warnings / links / sources
+    └── requirements / policies / warnings / links / materials / sources
 ```
 
 类别覆盖课程、tutorial、lab、office hour、assignment、quiz、exam、presentation、
@@ -166,8 +166,8 @@ project、report、reading、deadline 和 other。
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
 store。首页集中 Moodle 登录、同步、本地刷新、资料搜索和 pending review 差异；日历作为
-独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，按课程和全文
-筛选，并把日期待确认的事项单独列出。
+独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，并提供按日排列
+开始与结束时间的议程视图。两种视图共享课程与全文筛选，日期待确认事项单独列出。
 
 课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
 `information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记
@@ -175,8 +175,8 @@ store。首页集中 Moodle 登录、同步、本地刷新、资料搜索和 pen
 文件名，在学习材料/课程信息两大区内继续标记 Lecture、Tutorial、Notes、Exercises、
 Reading、Assessment 等类型。课件内容由 AI 阅读，页面呈现经过验证的课程事实。
 
-日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接和
-来源。`GET /api/source-preview` 只接受当前课程快照中的白名单路径；PDF 与图片使用同源原文
+日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接、
+AI 关联的学习材料和来源。`GET /api/source-preview` 只接受当前课程快照中的白名单路径；PDF 与图片使用同源原文
 预览，DOCX/PPTX 使用已提取文本预览，并保留打开原文件的入口。首页问答式搜索只匹配本地
 结构化事项和课件目录。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
 

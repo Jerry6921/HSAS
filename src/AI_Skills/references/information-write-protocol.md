@@ -12,7 +12,7 @@ facts. `information.json` is the canonical database consumed by the calendar.
 5. Use stable IDs. Reuse the same `course_id` and `item_id` when correcting an existing fact.
    Set `moodle_course_id` from the matching local archive when it differs from the information ID.
 6. Preserve pending dates, weights, locations, or requirements as `null`, empty, or `date_status: unknown`. Fill fields from cited evidence.
-7. Attach a human-checkable `sources` entry to every important deadline, weight, requirement, policy, or timetable rule when evidence is available.
+7. Attach a human-checkable `sources` entry to every important deadline, weight, requirement, policy, or timetable rule when evidence is available. Attach directly related courseware in the item's `materials` array.
 8. Run `hsas information validate <UPDATE.json>` and fix every validation error.
 9. Review conflicts and tentative values. Apply only when authorized: `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
 10. When review confirms zero data changes, acknowledge with both `--confirmed` and `--reviewed-no-information-change`.
@@ -39,6 +39,7 @@ An upsert record contains the complete reviewed state of that record.
 
 ## Timing rules
 
+- Use `courses[].starts_on` and `courses[].ends_on` for the semester teaching period stated by an official timetable, syllabus, or course page.
 - Use `starts_at` and `ends_at` for one-off meetings or events.
 - Use `due_at` for an exact deadline, or `due_on` when only the date is known.
 - Use `recurrence` for weekly classes, tutorials, labs, and office hours.
@@ -46,6 +47,14 @@ An upsert record contains the complete reviewed state of that record.
 - Put reading weeks and public holidays in `excluded_dates`; use `additional_dates` for make-up meetings.
 - `date_status: confirmed` requires an actual date or recurrence.
 - When two sources conflict, retain the best-supported operational value only if justified, set the status to `tentative`, and describe both sources in `warnings` and `sources`.
+
+## Related learning materials
+
+- Store fact provenance in `sources`; store student-facing courseware in `materials`.
+- A material relation includes `title`, `material_type`, and a local `relative_path` or source `url`. Add page or slide numbers and a short note when they help the student reach the relevant section.
+- Link a material when an official week number, topic, title, Moodle activity, or course section supports the relationship.
+- Reuse the downloaded archive path so the dashboard source preview can open the original file or its text sidecar.
+- Review material relations when a linked Moodle file is modified or removed.
 
 ## Evidence and privacy
 

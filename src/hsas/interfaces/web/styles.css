@@ -160,6 +160,9 @@ main { min-width: 0; padding: 30px clamp(20px, 3vw, 42px) 48px; }
 .calendar-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 18px; border-bottom: 1px solid var(--line); }
 .calendar-toolbar h2 { margin: 4px 0 0; font-size: 16px; }
 .calendar-controls { display: flex; align-items: center; gap: 6px; }
+.calendar-mode-switch { display: flex; margin-right: 4px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+.calendar-mode { min-width: 30px; min-height: 27px; padding: 0 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 9px; font-weight: 800; }
+.calendar-mode.active { color: white; background: var(--green); }
 .calendar-controls strong { min-width: 94px; margin-left: 6px; color: #3b4941; font-size: 12px; text-align: right; }
 .weekday-row, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .weekday-row { border-bottom: 1px solid var(--line); background: var(--surface-soft); }
@@ -168,7 +171,8 @@ main { min-width: 0; padding: 30px clamp(20px, 3vw, 42px) 48px; }
 .calendar-day:nth-child(7n) { border-right: 0; }
 .calendar-day:nth-last-child(-n + 7) { border-bottom: 0; }
 .calendar-day.outside { background: #fafbfa; }
-.day-number { display: grid; width: 24px; height: 24px; place-items: center; margin-bottom: 5px; border-radius: 50%; color: #56625b; font-size: 10px; font-weight: 700; }
+.day-number { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; margin-bottom: 5px; border: 0; border-radius: 50%; color: #56625b; background: transparent; font-size: 10px; font-weight: 700; }
+.day-number:hover { color: var(--green); background: var(--green-soft); }
 .outside .day-number { color: #a9b1ac; }
 .calendar-day.today .day-number { color: white; background: var(--green); }
 .day-events { display: grid; gap: 4px; }
@@ -192,6 +196,35 @@ main { min-width: 0; padding: 30px clamp(20px, 3vw, 42px) 48px; }
 .event-chip.tentative { border-left-style: dashed; }
 .event-chip time { margin-right: 3px; color: #66736b; font-variant-numeric: tabular-nums; }
 .more-count { padding-left: 5px; color: var(--muted); font-size: 9px; }
+
+.daily-agenda { min-height: 520px; padding: 18px 18px 0; }
+.agenda-heading { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 3px 12px; padding: 0 4px 16px; border-bottom: 1px solid var(--line); }
+.agenda-heading .eyebrow { grid-column: 1 / -1; }
+.agenda-heading h3 { margin: 0; font-size: 18px; }
+.agenda-heading > span { color: var(--muted); font-size: 10px; }
+.agenda-all-day { display: grid; grid-template-columns: 58px minmax(0, 1fr); border-bottom: 1px solid var(--line); }
+.agenda-all-day-label { padding: 12px 10px 12px 0; color: var(--muted); font-size: 9px; text-align: right; }
+.agenda-all-day-events { display: grid; gap: 5px; padding: 8px 8px 8px 10px; border-left: 1px solid var(--line); }
+.agenda-scroll { height: 540px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.agenda-timeline { position: relative; min-height: 1392px; }
+.agenda-hour { height: 58px; margin-left: 58px; border-top: 1px solid var(--line); }
+.agenda-hour:first-child { border-top-color: transparent; }
+.agenda-hour-label { position: relative; top: -7px; left: -58px; display: block; width: 48px; color: var(--muted); font-size: 8px; font-variant-numeric: tabular-nums; text-align: right; }
+.agenda-events-layer { position: absolute; inset: 0 8px 0 68px; }
+.agenda-item { position: absolute; top: var(--event-top); left: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: start; gap: 3px 10px; width: 100%; height: var(--event-height); min-height: 36px; padding: 6px 9px; overflow: hidden; border: 0; border-left: 4px solid var(--course-color); border-radius: 6px; color: inherit; background: color-mix(in srgb, var(--course-color) 15%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--course-color) 24%, var(--line)); text-align: left; }
+.agenda-item.compact { position: static; grid-template-columns: 70px minmax(0, 1fr) auto; width: 100%; height: auto; padding: 7px 9px; }
+.agenda-item:hover, .agenda-item.selected { z-index: 2; background: color-mix(in srgb, var(--course-color) 24%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--course-color) 60%, var(--line)); }
+.agenda-time { grid-column: 1 / -1; color: color-mix(in srgb, var(--course-color) 72%, var(--ink)); font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.agenda-item.compact .agenda-time { grid-column: 1; }
+.agenda-copy { display: grid; gap: 4px; min-width: 0; }
+.agenda-copy strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.agenda-copy small, .agenda-materials { color: var(--muted); font-size: 9px; }
+.agenda-materials { white-space: nowrap; }
+.agenda-empty { margin: 80px 0; color: var(--muted); font-size: 11px; text-align: center; }
+.agenda-now-line { position: absolute; z-index: 3; top: var(--now-top); right: 0; left: 58px; height: 1px; background: #ff453a; pointer-events: none; }
+.agenda-now-line::before { position: absolute; top: -4px; left: -4px; width: 8px; height: 8px; border-radius: 50%; background: #ff453a; content: ""; }
+.related-materials .source-card { border-left: 3px solid var(--green); }
+.related-materials .material-type-badge { display: inline-block; margin-right: 6px; }
 
 .detail-panel { position: sticky; top: 82px; min-height: 390px; padding: 19px; }
 .empty-detail { display: grid; min-height: 350px; place-items: center; align-content: center; color: var(--muted); text-align: center; }
@@ -362,6 +395,8 @@ main { min-width: 0; padding: 30px clamp(20px, 3vw, 42px) 48px; }
   .home-search-results, .baseline-files, .change-diff { grid-template-columns: 1fr; }
   .workspace { display: block; overflow-x: auto; }
   .calendar-card { min-width: 690px; }
+  .agenda-item.compact { grid-template-columns: 62px minmax(0, 1fr); }
+  .agenda-item.compact .agenda-materials { grid-column: 2; }
   .detail-panel { min-width: 0; margin-top: 12px; }
   .calendar-day { min-height: 100px; }
   .unscheduled-list { grid-template-columns: 1fr; }

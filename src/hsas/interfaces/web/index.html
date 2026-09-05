@@ -111,20 +111,25 @@
             <section class="calendar-card" aria-labelledby="calendar-title">
               <div class="calendar-toolbar">
                 <div>
-                  <p class="eyebrow">MONTH VIEW</p>
+                  <p class="eyebrow">CALENDAR</p>
                   <h2 id="calendar-title">课程日历</h2>
                 </div>
                 <div class="calendar-controls">
+                  <div class="calendar-mode-switch" aria-label="日历视图">
+                    <button id="month-view-button" class="calendar-mode active" type="button">月</button>
+                    <button id="day-view-button" class="calendar-mode" type="button">日</button>
+                  </div>
                   <button id="previous-month" class="icon-button" type="button" aria-label="上个月">←</button>
                   <button id="today-button" class="button compact" type="button">今天</button>
                   <button id="next-month" class="icon-button" type="button" aria-label="下个月">→</button>
                   <strong id="calendar-label"></strong>
                 </div>
               </div>
-              <div class="weekday-row" aria-hidden="true">
+              <div id="weekday-row" class="weekday-row" aria-hidden="true">
                 <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
               </div>
               <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
+              <div id="daily-agenda" class="daily-agenda hidden" aria-live="polite"></div>
             </section>
 
             <aside id="detail-panel" class="detail-panel" aria-live="polite">

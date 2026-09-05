@@ -41,6 +41,8 @@ const materialTypeOrder = [
 const state = {
   data: null,
   currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  selectedDay: new Date(),
+  calendarMode: "month",
   selectedCourses: new Set(),
   selectedItemId: null,
   selectedDateKey: null,
@@ -114,6 +116,7 @@ function itemMatches(item) {
     ...(item.requirements || []),
     ...(item.policies || []),
     ...(item.warnings || []),
+    ...(item.materials || []).flatMap((material) => [material.title, material.note, material.relative_path]),
   ].filter(Boolean).join(" ").toLocaleLowerCase();
   return haystack.includes(state.query);
 }
@@ -125,6 +128,12 @@ function primaryDateKey(item) {
 function occurrenceTime(item) {
   if (item.recurrence) return item.recurrence.start_time.slice(0, 5);
   const value = item.due_at || item.starts_at || item.opens_at;
+  return value && value.includes("T") ? value.slice(11, 16) : "";
+}
+
+function occurrenceEndTime(item) {
+  if (item.recurrence) return item.recurrence.end_time.slice(0, 5);
+  const value = item.ends_at;
   return value && value.includes("T") ? value.slice(11, 16) : "";
 }
 
@@ -433,7 +442,10 @@ function renderCourseOverview() {
   hero.style.setProperty("--course-color", course.color);
   const heroCopy = element("div");
   heroCopy.append(element("p", "eyebrow", "COURSE"), element("h2", "", course.title));
-  const facts = [course.semester, ...(course.instructors || [])].filter(Boolean).join(" · ");
+  const teachingPeriod = course.starts_on || course.ends_on
+    ? `${course.starts_on || "起始日期待确认"} 至 ${course.ends_on || "结束日期待确认"}`
+    : null;
+  const facts = [course.semester, teachingPeriod, ...(course.instructors || [])].filter(Boolean).join(" · ");
   heroCopy.append(element("p", "", facts || "课程身份已建立，其他资料待 AI 整理。"));
   hero.append(heroCopy);
   if (course.moodle && /^https?:\/\//i.test(course.moodle.url)) {
@@ -491,8 +503,21 @@ function renderMetrics(occurrences) {
 function renderCalendar(occurrences) {
   const grid = byId("calendar-grid");
   grid.replaceChildren();
+  const isMonth = state.calendarMode === "month";
+  byId("weekday-row").classList.toggle("hidden", !isMonth);
+  grid.classList.toggle("hidden", !isMonth);
+  byId("daily-agenda").classList.toggle("hidden", isMonth);
+  byId("month-view-button").classList.toggle("active", isMonth);
+  byId("day-view-button").classList.toggle("active", !isMonth);
+  byId("calendar-title").textContent = isMonth ? "课程日历" : "每日议程";
   const label = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long" }).format(state.currentMonth);
-  byId("calendar-label").textContent = label;
+  byId("calendar-label").textContent = isMonth
+    ? label
+    : new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(state.selectedDay);
+  if (!isMonth) {
+    renderDailyAgenda(occurrences);
+    return;
+  }
   const grouped = new Map();
   for (const occurrence of occurrences) {
     if (!grouped.has(occurrence.key)) grouped.set(occurrence.key, []);
@@ -506,7 +531,16 @@ function renderCalendar(occurrences) {
     const cell = element("div", "calendar-day");
     if (day.getMonth() !== state.currentMonth.getMonth()) cell.classList.add("outside");
     if (key === today) cell.classList.add("today");
-    cell.append(element("span", "day-number", day.getDate()));
+    const dayButton = element("button", "day-number", day.getDate());
+    dayButton.type = "button";
+    dayButton.setAttribute("aria-label", `查看 ${key} 的每日议程`);
+    dayButton.addEventListener("click", () => {
+      state.selectedDay = day;
+      state.currentMonth = new Date(day.getFullYear(), day.getMonth(), 1);
+      state.calendarMode = "day";
+      renderDataViews();
+    });
+    cell.append(dayButton);
     const list = element("div", "day-events");
     const values = grouped.get(key) || [];
     for (const occurrence of values.slice(0, 4)) {
@@ -531,6 +565,102 @@ function renderCalendar(occurrences) {
     cell.append(list);
     grid.append(cell);
   }
+}
+
+function renderDailyAgenda(occurrences) {
+  const container = byId("daily-agenda");
+  container.replaceChildren();
+  const key = dateKey(state.selectedDay);
+  const values = occurrences.filter((occurrence) => occurrence.key === key);
+  const heading = element("div", "agenda-heading");
+  heading.append(
+    element("p", "eyebrow", "DAY VIEW"),
+    element("h3", "", new Intl.DateTimeFormat("zh-HK", { month: "long", day: "numeric", weekday: "long" }).format(state.selectedDay)),
+    element("span", "", `${values.length} 项活动`),
+  );
+  container.append(heading);
+  if (!values.length) {
+    container.append(element("p", "agenda-empty", "这一天没有已记录的课程活动。"));
+    return;
+  }
+
+  const allDay = values.filter((occurrence) => !occurrence.time || occurrence.item.all_day);
+  const timed = values.filter((occurrence) => occurrence.time && !occurrence.item.all_day);
+  if (allDay.length) {
+    const allDayRow = element("section", "agenda-all-day");
+    allDayRow.append(element("span", "agenda-all-day-label", "全天"));
+    const allDayEvents = element("div", "agenda-all-day-events");
+    for (const occurrence of allDay) {
+      allDayEvents.append(buildAgendaEvent(occurrence, key, values, true));
+    }
+    allDayRow.append(allDayEvents);
+    container.append(allDayRow);
+  }
+
+  const scroll = element("div", "agenda-scroll");
+  const timeline = element("div", "agenda-timeline");
+  for (let hour = 0; hour < 24; hour += 1) {
+    const row = element("div", "agenda-hour");
+    row.append(element("time", "agenda-hour-label", `${String(hour).padStart(2, "0")}:00`));
+    timeline.append(row);
+  }
+  const eventLayer = element("div", "agenda-events-layer");
+  for (const occurrence of timed) {
+    const startMinutes = timeMinutes(occurrence.time);
+    const endValue = occurrenceEndTime(occurrence.item);
+    const endMinutes = endValue ? timeMinutes(endValue) : startMinutes + 50;
+    const duration = Math.max(30, endMinutes > startMinutes ? endMinutes - startMinutes : 50);
+    const event = buildAgendaEvent(occurrence, key, values, false);
+    event.style.setProperty("--event-top", `${startMinutes / 60 * 58}px`);
+    event.style.setProperty("--event-height", `${Math.max(36, duration / 60 * 58)}px`);
+    eventLayer.append(event);
+  }
+  timeline.append(eventLayer);
+
+  const now = new Date();
+  if (dateKey(now) === key) {
+    const marker = element("div", "agenda-now-line");
+    marker.style.setProperty("--now-top", `${(now.getHours() * 60 + now.getMinutes()) / 60 * 58}px`);
+    timeline.append(marker);
+  }
+  scroll.append(timeline);
+  container.append(scroll);
+  const earliest = timed.length ? Math.min(...timed.map((occurrence) => timeMinutes(occurrence.time))) : 8 * 60;
+  scroll.scrollTop = Math.max(0, earliest / 60 * 58 - 58);
+}
+
+function timeMinutes(value) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function buildAgendaEvent(occurrence, key, allOccurrences, compact) {
+    const item = occurrence.item;
+    const course = courseFor(item);
+    const button = element("button", compact ? "agenda-item compact" : "agenda-item");
+    button.type = "button";
+    button.style.setProperty("--course-color", course.color);
+    if (state.selectedItemId === item.item_id && state.selectedDateKey === key) button.classList.add("selected");
+    const start = occurrence.time || (item.all_day ? "全天" : "待定");
+    const end = occurrenceEndTime(item);
+    const copy = element("span", "agenda-copy");
+    copy.append(
+      element("strong", "", item.title),
+      element("small", "", [course.code, categoryLabels[item.category] || item.category, item.location].filter(Boolean).join(" · ")),
+    );
+    const materialCount = (item.materials || []).length;
+    button.append(
+      element("time", "agenda-time", end ? `${start}–${end}` : start),
+      copy,
+      element("span", "agenda-materials", materialCount ? `${materialCount} 份材料` : "查看详情"),
+    );
+    button.addEventListener("click", () => {
+      state.selectedItemId = item.item_id;
+      state.selectedDateKey = key;
+      renderDetail(item, key);
+      renderCalendar(allOccurrences);
+    });
+    return button;
 }
 
 function appendFact(list, label, value) {
@@ -621,6 +751,17 @@ function renderDetail(item, occurrenceKey = null) {
   appendListBlock(panel, "课业要求", item.requirements);
   appendListBlock(panel, "相关政策", item.policies);
   appendListBlock(panel, "提醒与冲突", item.warnings, "warning-list");
+
+  if (item.materials && item.materials.length) {
+    const block = element("section", "detail-block related-materials");
+    block.append(element("h3", "", "相关学习材料"));
+    for (const material of item.materials) {
+      const card = sourcePreviewButton(material);
+      card.prepend(element("span", "material-type-badge", materialTypeLabels[material.material_type] || "Other"));
+      block.append(card);
+    }
+    panel.append(block);
+  }
 
   if (item.links && item.links.length) {
     const block = element("section", "detail-block");
@@ -761,7 +902,7 @@ function localSearchRecords() {
       kind: "item",
       title: item.title,
       subtitle: [course.code, categoryLabels[item.category] || item.category, ...facts].join(" · "),
-      searchable: [item.title, item.description, item.location, item.assessment_format, item.submission_method, item.weight_percent, "占分 GPA DDL 截止 地点 形式", ...(item.requirements || [])].filter(Boolean).join(" "),
+      searchable: [item.title, item.description, item.location, item.assessment_format, item.submission_method, item.weight_percent, "占分 GPA DDL 截止 地点 形式", ...(item.requirements || []), ...(item.materials || []).flatMap((material) => [material.title, material.note, material.relative_path])].filter(Boolean).join(" "),
       value: item,
     });
   }
@@ -950,16 +1091,36 @@ async function synchronizeCourses() {
 }
 
 byId("previous-month").addEventListener("click", () => {
-  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
+  if (state.calendarMode === "day") {
+    state.selectedDay = addDays(state.selectedDay, -1);
+    state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
+  } else {
+    state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
+  }
   renderDataViews();
 });
 byId("next-month").addEventListener("click", () => {
-  state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
+  if (state.calendarMode === "day") {
+    state.selectedDay = addDays(state.selectedDay, 1);
+    state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
+  } else {
+    state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
+  }
   renderDataViews();
 });
 byId("today-button").addEventListener("click", () => {
   const now = new Date();
+  state.selectedDay = now;
   state.currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  renderDataViews();
+});
+byId("month-view-button").addEventListener("click", () => {
+  state.calendarMode = "month";
+  renderDataViews();
+});
+byId("day-view-button").addEventListener("click", () => {
+  state.calendarMode = "day";
+  state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
   renderDataViews();
 });
 byId("search-input").addEventListener("input", (event) => {

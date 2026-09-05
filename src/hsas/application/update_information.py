@@ -115,6 +115,8 @@ def build_information_template() -> InformationUpdate:
                     "title": "Calculus and ordinary differential equations",
                     "moodle_course_id": None,
                     "semester": "2026-27 Semester 1",
+                    "starts_on": "2026-09-01",
+                    "ends_on": "2026-11-30",
                     "color": "#2563eb",
                     "overview": "To be replaced from an official course source",
                     "objectives": [],
@@ -145,6 +147,15 @@ def build_information_template() -> InformationUpdate:
                     "requirements": [],
                     "policies": [],
                     "links": [],
+                    "materials": [
+                        {
+                            "title": "Tutorial 1 exercises",
+                            "material_type": "exercises",
+                            "relative_path": "courses/replace-with-downloaded-file.pdf",
+                            "page_numbers": [1],
+                            "note": "Replace only when the source explicitly supports this activity link",
+                        }
+                    ],
                     "sources": [],
                     "warnings": [],
                 },
@@ -158,6 +169,7 @@ def build_information_template() -> InformationUpdate:
                     "requirements": [],
                     "policies": [],
                     "links": [],
+                    "materials": [],
                     "sources": [],
                     "warnings": ["Replace this example and verify the official deadline."],
                 },

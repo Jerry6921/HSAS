@@ -68,6 +68,7 @@ When sources conflict:
 
 ## 6. Calendar timing
 
+- Course teaching period: `courses[].starts_on` and `courses[].ends_on`.
 - Exact event: `starts_at` with optional `ends_at`.
 - Exact deadline: `due_at`.
 - Date-only deadline: `due_on`.
@@ -75,6 +76,12 @@ When sources conflict:
 - Monday is weekday 0 and Sunday is weekday 6.
 - Put holidays and reading weeks in `excluded_dates`.
 - Put one-off make-up sessions in `additional_dates`.
+
+Use each item's `materials` array to connect the activity with the downloaded
+slides, notes, tutorial sheets, exercises, readings, or assessment brief that
+directly belongs to its week, topic, Moodle activity, or documented section.
+Keep `sources` for evidence supporting the structured fact and `materials` for
+resources the student can open while viewing the activity.
 
 If a tutorial time applies only to one group, identify the group in the title or
 description. Add the student's selected group to their personal calendar; use a
@@ -90,6 +97,7 @@ When an item is clicked, the database should support:
 - format and submission method;
 - weight and word limit;
 - requirements and policies;
+- directly related learning materials;
 - source documents/pages or live links;
 - warnings, conflicts and last verification time.
 

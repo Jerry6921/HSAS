@@ -61,3 +61,36 @@ class CourseGateway(Protocol):
     def sync_course(self, course: str) -> SyncCourseResult: ...
 
     def sync_all(self) -> SyncBatchResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ClassPlannerSessionResult:
+    status: str
+    checked_at: str
+    course_count: int
+    term_ids: tuple[str, ...]
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClassPlannerSyncResult:
+    status: str
+    synced_at: str
+    course_count: int
+    meeting_count: int
+    term_ids: tuple[str, ...]
+    changed: bool
+    added_course_ids: tuple[str, ...]
+    modified_course_ids: tuple[str, ...]
+    removed_course_ids: tuple[str, ...]
+    output_path: Path
+
+
+class ClassPlannerGateway(Protocol):
+    """Authenticated HKU Class Planner operations required by HIQS."""
+
+    def login_until_ready(
+        self, *, timeout_seconds: int = 300
+    ) -> ClassPlannerSessionResult: ...
+
+    def sync(self, *, timeout_seconds: int = 90) -> ClassPlannerSyncResult: ...

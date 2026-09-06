@@ -64,6 +64,9 @@
             <h1 id="page-title">HIQS 首页</h1>
             <p id="data-caption">正在读取本地信息库…</p>
           </div>
+          <div class="page-actions">
+            <button id="reload-data" class="button" type="button">刷新数据</button>
+          </div>
         </header>
 
         <div id="home-view">
@@ -74,9 +77,22 @@
               <p>登录 Moodle 后同步全部课程；刷新会重新读取本地信息库与更新队列。</p>
             </div>
             <div class="page-actions" aria-label="Moodle 与本地数据操作">
+              <span id="moodle-login-state" class="login-state login-required"><span aria-hidden="true"></span>未登录</span>
               <button id="login-moodle" class="button" type="button">登录 Moodle</button>
               <button id="sync-courses" class="button primary" type="button">同步课程</button>
-              <button id="reload-data" class="button" type="button">刷新数据</button>
+            </div>
+          </section>
+          <section class="application-card">
+            <div>
+              <p class="eyebrow">HKU CLASS PLANNER</p>
+              <h2>官方课表同步</h2>
+              <p id="class-planner-status">通过 HKU Portal 登录，读取 Class Planner 的课程、班别、时间与地点。</p>
+              <div id="class-planner-diff" class="planner-diff"></div>
+            </div>
+            <div class="page-actions" aria-label="HKU Class Planner 操作">
+              <span id="class-planner-login-state" class="login-state login-required"><span aria-hidden="true"></span>未登录</span>
+              <button id="login-class-planner" class="button" type="button">登录 HKU Portal</button>
+              <button id="sync-class-planner" class="button primary" type="button">同步课表</button>
             </div>
           </section>
           <section class="metrics" aria-label="信息库摘要">
@@ -154,7 +170,6 @@
                     <button id="day-view-button" class="calendar-mode" type="button">日</button>
                   </div>
                   <button id="previous-month" class="icon-button" type="button" aria-label="上个月">←</button>
-                  <button id="today-button" class="button compact" type="button">今天</button>
                   <button id="next-month" class="icon-button" type="button" aria-label="下个月">→</button>
                   <strong id="calendar-label"></strong>
                 </div>

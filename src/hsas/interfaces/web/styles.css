@@ -315,6 +315,20 @@ main { min-width: 0; padding: 30px clamp(20px, 3vw, 42px) 48px; }
 .application-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px; }
 .application-card h2, .local-search-card h2 { margin: 5px 0 0; font-size: 18px; }
 .application-card p:not(.eyebrow), .local-search-card p:not(.eyebrow) { margin: 7px 0 0; color: var(--muted); font-size: 10px; }
+.planner-diff { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.planner-change { padding: 3px 6px; border-radius: 99px; font-size: 8px; font-weight: 750; }
+.planner-change.added { color: var(--green); background: var(--green-soft); }
+.planner-change.modified { color: var(--amber); background: var(--amber-soft); }
+.planner-change.removed { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.login-state { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 750; white-space: nowrap; }
+.login-state > span { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+.login-state.logged-in { color: var(--green); }
+.login-state.logged-in > span { background: var(--green); box-shadow: 0 0 0 4px var(--green-soft); }
+.login-state.logging-in { color: var(--amber); }
+.login-state.logging-in > span { background: var(--amber); animation: status-pulse 1.2s ease-in-out infinite; }
+.login-state.expired { color: var(--red); }
+.login-state.expired > span { background: var(--red); }
+@keyframes status-pulse { 50% { opacity: .35; } }
 .local-search-card { display: grid; grid-template-columns: minmax(220px, .65fr) minmax(280px, 1fr); gap: 18px 28px; padding: 21px 22px; }
 .status-card, .inbox-card { padding: 20px 22px; }
 .status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
@@ -388,6 +402,9 @@ button.compact-status:hover { background: var(--green-soft); }
 .preview-actions a { text-decoration: none; }
 
 @media (max-width: 1120px) {
+  .application-card { align-items: flex-start; flex-direction: column; }
+  .application-card .page-actions { width: 100%; }
+  .metrics, .status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .workspace { grid-template-columns: 1fr; }
   .detail-panel { position: static; min-height: 0; }
   .empty-detail { min-height: 150px; }

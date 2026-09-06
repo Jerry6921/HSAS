@@ -25,8 +25,9 @@ HIQS 的侧栏由首页、日历和课程概览组成。课程资料、结构化
 6. 在“个人补充信息”中逐字段预览 AI 准备的 Tutorial group、临时教室与个人提醒草稿，确认后写入；
 7. 在“本地问答式搜索”中输入课程代码、事项名称、DDL、地点或课件关键词；
 8. 在“更新记录”中查看 Moodle 项目的新增、修改与删除，以及等待 AI 审阅的资料。
+9. 通过 HKU Portal 登录 Class Planner，同步官方课程、班别、上课时间和地点，并查看课程级差异。
 
-![HIQS 首页：同步、搜索与 Moodle 更新记录](docs/images/ui/home.png)
+![HIQS 首页：Moodle、Class Planner 同步与资料状态](docs/images/ui/home.png)
 
 ### 日历页：从月份进入当天安排
 
@@ -121,10 +122,18 @@ CLI 为兼容旧版继续使用 `hsas`，产品名称已经改为 HIQS。
 hsas login
 hsas sync-courses
 hsas list-status
+hsas class-planner login
+hsas class-planner sync
+hsas class-planner status
 ```
 
 `hsas login` 会打开浏览器。密码与 MFA 始终由用户在 HKU 页面中输入；AI 仅接触同步后的
 课程资料与经过清理的来源信息。
+
+`hsas class-planner login` 会打开官方 Class Planner，并沿用 HKU Portal 与 Microsoft 登录
+流程。浏览器会话负责携带临时令牌；HIQS 保存经过隐私过滤的课表响应、同步时间与课程级
+差异。该快照位于私有 resources 目录，可供 AI 核对班别、时间和地点后生成经过校验的
+`information.json` 更新。
 
 同步单门课程时可传入 Moodle course ID 或同源课程 URL：
 
@@ -298,6 +307,9 @@ hsas materials search "assignment requirements" --course COURSE_ID
 hsas login                 登录 Moodle
 hsas sync-courses          同步全部课程
 hsas sync-courses COURSE   同步指定课程
+hsas class-planner login   登录 HKU Portal / Class Planner
+hsas class-planner sync    同步官方课表并生成差异快照
+hsas class-planner status  查看课表快照状态
 hsas list-status           查看资料与待整理状态
 hsas changes list          查看增量整理摘要
 hsas changes show          导出 AI 应阅读的范围
@@ -341,6 +353,19 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 后续版本更新继续记录在本节顶部。
+
+### 2.2.0 后续更新 · 2026-09-06
+
+- 首页新增 HKU Class Planner 登录、课表同步与课程级差异预览；
+- 登录按钮旁显示未登录、登录中、已登录与会话失效状态；
+- Moodle 登录按钮旁同步显示本地保存的登录状态；
+- HKU Portal 完成认证后自动返回 Class Planner 获取课表并关闭认证窗口；
+- 日历工具栏保留月/日视图与前后导航，移除“今天”按钮；
+- “刷新数据”移动到页面标题右上角，作为全局本地数据刷新入口；
+- 新增 `hsas class-planner login|sync|status` 命令；
+- HKU Portal、Microsoft 登录和临时令牌保留在独立浏览器 profile 中；
+- 本地保存隐私过滤后的课程、班别、上课时间、地点、学期和同步历史；
+- Class Planner 快照作为官方课表来源，供 AI 核对后通过现有校验流程合并至信息库。
 
 ### 2.2.0 发布调整 · 2026-09-06
 

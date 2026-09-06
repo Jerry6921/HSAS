@@ -14,12 +14,14 @@ from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.domain.information import InformationStore
 from hsas.infrastructure.documents.run_ocr import collect_ocr_queue
+from hsas.infrastructure.class_planner import class_planner_status
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
 from hsas.infrastructure.runtime import ensure_resources_layout, get_runtime_paths
 from hsas.infrastructure.storage import JsonPersonalInboxRepository
 
 from .manage_information import INFORMATION_REPOSITORY, information_app
+from .manage_class_planner import class_planner_app
 from .manage_changes import CHANGE_REPOSITORY, changes_app
 from .manage_inbox import inbox_app
 from .manage_ocr import ocr_app
@@ -33,6 +35,7 @@ app.add_typer(materials_app, name="materials")
 app.add_typer(changes_app, name="changes")
 app.add_typer(inbox_app, name="inbox")
 app.add_typer(ocr_app, name="ocr")
+app.add_typer(class_planner_app, name="class-planner")
 
 
 @app.callback()
@@ -110,6 +113,12 @@ def list_status(ctx: typer.Context) -> None:
     )
     typer.echo(
         f"Personal inbox: {inbox.get('pending_count', 0)} draft(s)"
+    )
+    planner = class_planner_status(resources)
+    typer.echo(
+        f"Class Planner: {planner['course_count']} course(s), "
+        f"{planner['meeting_count']} meeting(s); "
+        f"synced={planner['synced_at'] or 'never'}"
     )
 
 

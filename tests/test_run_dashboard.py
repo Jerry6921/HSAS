@@ -33,8 +33,15 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="calendar-grid"' in loaded["/"][0]
     assert b'id="daily-agenda"' in loaded["/"][0]
     assert b'id="day-view-button"' in loaded["/"][0]
+    assert b'id="today-button"' not in loaded["/"][0]
     assert b'id="login-moodle"' in loaded["/"][0]
+    assert b'id="moodle-login-state"' in loaded["/"][0]
+    assert loaded["/"][0].count(b'id="reload-data"') == 1
     assert b'id="sync-courses"' in loaded["/"][0]
+    assert b'id="login-class-planner"' in loaded["/"][0]
+    assert b'id="sync-class-planner"' in loaded["/"][0]
+    assert b'id="class-planner-diff"' in loaded["/"][0]
+    assert b'id="class-planner-login-state"' in loaded["/"][0]
     assert b'id="metric-pending"' in loaded["/"][0]
     assert b'id="status-title"' in loaded["/"][0]
     assert b'id="run-ocr"' in loaded["/"][0]
@@ -50,6 +57,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"/api/source-preview" in loaded["/assets/app.js"][0]
     assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
     assert b'"/api/sync"' in loaded["/assets/app.js"][0]
+    assert b'"/api/class-planner/login"' in loaded["/assets/app.js"][0]
+    assert b'"/api/class-planner/sync"' in loaded["/assets/app.js"][0]
     assert b'"/api/ocr/run"' in loaded["/assets/app.js"][0]
     assert b'"/api/inbox/apply"' in loaded["/assets/app.js"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
@@ -88,6 +97,8 @@ def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path)
     }
     assert snapshot["material_status"]["counts"]["date_unknown"] == 1
     assert snapshot["personal_inbox"]["pending_count"] == 0
+    assert snapshot["class_planner"]["available"] is False
+    assert snapshot["moodle_session"]["login_status"] == "login_required"
 
 
 def test_ocr_action_requires_confirmation_and_reports_results(
@@ -170,6 +181,58 @@ def test_moodle_actions_require_confirmation_and_report_results(
     assert login["available_course_count"] == 3
     assert sync["succeeded_course_count"] == 2
     assert sync["failed_course_count"] == 1
+    assert calls == ["login", "sync"]
+
+
+def test_class_planner_actions_require_confirmation_and_report_differences(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class Service:
+        def login_until_ready(self):
+            calls.append("login")
+            return SimpleNamespace(
+                status="logged_in",
+                checked_at="2026-09-06T12:00:00+00:00",
+                course_count=5,
+                term_ids=("4261",),
+                error=None,
+            )
+
+        def sync(self):
+            calls.append("sync")
+            return SimpleNamespace(
+                status="synced",
+                synced_at="2026-09-06T12:01:00+00:00",
+                course_count=5,
+                meeting_count=8,
+                term_ids=("4261",),
+                changed=True,
+                added_course_ids=("new",),
+                modified_course_ids=("changed",),
+                removed_course_ids=(),
+            )
+
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._class_planner_service",
+        lambda _resources: Service(),
+    )
+    service = DashboardService(tmp_path)
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.login_class_planner({"confirmed": False})
+    with pytest.raises(DashboardError, match="确认"):
+        service.synchronize_class_planner({"confirmed": False})
+
+    login = service.login_class_planner({"confirmed": True})
+    sync = service.synchronize_class_planner({"confirmed": True})
+
+    assert login["course_count"] == 5
+    assert sync["meeting_count"] == 8
+    assert sync["added_course_count"] == 1
+    assert sync["modified_course_count"] == 1
     assert calls == ["login", "sync"]
 
 

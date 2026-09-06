@@ -1090,11 +1090,67 @@ function renderDataViews() {
   renderUnscheduled();
   renderUpdates();
   renderHomeSearch();
+  renderClassPlannerStatus();
+  renderMoodleSessionStatus();
   if (state.selectedItemId) {
     const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
     if (selected) renderDetail(selected, state.selectedDateKey);
   }
   if (state.view === "course") renderCourseOverview();
+}
+
+function renderLoginState(elementId, loginStatus) {
+  const labels = {
+    logged_in: "已登录",
+    expired: "会话失效",
+    login_required: "未登录",
+    unknown: "状态未知",
+  };
+  const node = byId(elementId);
+  const normalized = loginStatus || "login_required";
+  node.className = `login-state ${normalized.replace("_", "-")}`;
+  node.replaceChildren(
+    element("span"),
+    document.createTextNode(labels[normalized] || "状态未知"),
+  );
+}
+
+function renderMoodleSessionStatus() {
+  renderLoginState(
+    "moodle-login-state",
+    state.data.moodle_session?.login_status,
+  );
+}
+
+function renderClassPlannerStatus() {
+  const planner = state.data.class_planner || {};
+  const status = byId("class-planner-status");
+  const diff = byId("class-planner-diff");
+  diff.replaceChildren();
+  const loginStatus = planner.login_status || "login_required";
+  renderLoginState("class-planner-login-state", loginStatus);
+  if (planner.error) {
+    status.textContent = `本地课表快照读取失败：${planner.error}`;
+    return;
+  }
+  if (!planner.available) {
+    status.textContent = "通过 HKU Portal 登录，读取 Class Planner 的课程、班别、时间与地点。";
+    return;
+  }
+  const terms = (planner.term_ids || []).join("、") || "当前学期";
+  const changes = planner.changes || {};
+  const changeCount = (changes.added || []).length + (changes.modified || []).length + (changes.removed || []).length;
+  status.textContent = `${terms} · ${planner.course_count} 门课程 · ${planner.meeting_count} 个上课时段 · 本轮 ${changeCount} 项差异`;
+  const groups = [
+    ["新增", changes.added || [], "added"],
+    ["修改", changes.modified || [], "modified"],
+    ["移除", changes.removed || [], "removed"],
+  ];
+  for (const [label, values, className] of groups) {
+    for (const value of values) {
+      diff.append(element("span", `planner-change ${className}`, `${label} · ${value}`));
+    }
+  }
 }
 
 async function loadInformation() {
@@ -1140,9 +1196,13 @@ function setOperationState(running, message = "") {
   const syncButton = byId("sync-courses");
   const reloadButton = byId("reload-data");
   const ocrButton = byId("run-ocr");
+  const plannerLoginButton = byId("login-class-planner");
+  const plannerSyncButton = byId("sync-class-planner");
   loginButton.disabled = running;
   syncButton.disabled = running;
   reloadButton.disabled = running;
+  plannerLoginButton.disabled = running;
+  plannerSyncButton.disabled = running;
   const ocr = state.data?.material_status?.ocr;
   ocrButton.disabled = running || !(ocr?.capabilities?.available && ocr?.queue?.length);
   const status = byId("operation-status");
@@ -1214,11 +1274,18 @@ async function loginMoodle() {
     "将打开一个 Moodle 登录窗口。请只在该窗口中输入账号并亲自完成 SSO/MFA。继续吗？",
   );
   if (!confirmed) return;
+  const loginState = byId("moodle-login-state");
+  loginState.className = "login-state logging-in";
+  loginState.replaceChildren(element("span"), document.createTextNode("登录中"));
   const result = await runMoodleOperation(
     "/api/moodle/login",
     "等待你在新窗口完成 Moodle 登录…",
   );
-  if (!result) return;
+  if (!result) {
+    await loadInformation();
+    return;
+  }
+  await loadInformation();
   setOperationState(
     false,
     `Moodle 登录成功，可访问 ${result.available_course_count} 门课程。`,
@@ -1246,6 +1313,43 @@ async function synchronizeCourses() {
   );
 }
 
+async function loginClassPlanner() {
+  const confirmed = window.confirm(
+    "将打开 HKU Class Planner。请在该窗口中亲自完成 HKU Portal 登录与 MFA。继续吗？",
+  );
+  if (!confirmed) return;
+  const loginState = byId("class-planner-login-state");
+  loginState.className = "login-state logging-in";
+  loginState.replaceChildren(element("span"), document.createTextNode("登录中"));
+  const result = await runLocalMutation(
+    "/api/class-planner/login",
+    { confirmed: true },
+    "等待你在新窗口完成 HKU Portal 登录…",
+  );
+  if (!result) {
+    await loadInformation();
+    return;
+  }
+  await loadInformation();
+  const terms = (result.term_ids || []).join("、") || "当前学期";
+  setOperationState(false, `Class Planner 登录成功：${terms}，${result.course_count} 门课程。`);
+}
+
+async function synchronizeClassPlanner() {
+  const result = await runLocalMutation(
+    "/api/class-planner/sync",
+    { confirmed: true },
+    "正在从 HKU Class Planner 读取课表…",
+  );
+  if (!result) {
+    await loadInformation();
+    return;
+  }
+  await loadInformation();
+  const changes = result.added_course_count + result.modified_course_count + result.removed_course_count;
+  setOperationState(false, `课表同步完成：${result.course_count} 门课程、${result.meeting_count} 个上课时段、${changes} 项差异。`);
+}
+
 byId("previous-month").addEventListener("click", () => {
   if (state.calendarMode === "day") {
     state.selectedDay = addDays(state.selectedDay, -1);
@@ -1262,12 +1366,6 @@ byId("next-month").addEventListener("click", () => {
   } else {
     state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
   }
-  renderDataViews();
-});
-byId("today-button").addEventListener("click", () => {
-  const now = new Date();
-  state.selectedDay = now;
-  state.currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   renderDataViews();
 });
 byId("month-view-button").addEventListener("click", () => {
@@ -1297,6 +1395,8 @@ byId("show-calendar").addEventListener("click", showCalendar);
 byId("reload-data").addEventListener("click", loadInformation);
 byId("login-moodle").addEventListener("click", loginMoodle);
 byId("sync-courses").addEventListener("click", synchronizeCourses);
+byId("login-class-planner").addEventListener("click", loginClassPlanner);
+byId("sync-class-planner").addEventListener("click", synchronizeClassPlanner);
 byId("run-ocr").addEventListener("click", processOcrQueue);
 byId("close-preview").addEventListener("click", closeSourcePreview);
 byId("source-preview").addEventListener("click", (event) => {

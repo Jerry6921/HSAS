@@ -14,7 +14,14 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
     group_names = {group.name for group in app.registered_groups}
     assert result.exit_code == 0
     assert command_names == {"list-status", "login", "query", "sync-courses", "ui"}
-    assert group_names == {"changes", "inbox", "information", "materials", "ocr"}
+    assert group_names == {
+        "changes",
+        "class-planner",
+        "inbox",
+        "information",
+        "materials",
+        "ocr",
+    }
 
 
 def test_sync_command_dispatches_single_or_all(tmp_path: Path, monkeypatch) -> None:
@@ -54,4 +61,5 @@ def test_status_initializes_resources_and_reports_empty_state(tmp_path: Path) ->
     assert result.exit_code == 0
     assert "Information: unavailable" in result.stdout
     assert "0 course archive(s)" in result.stdout
+    assert "Class Planner: 0 course(s)" in result.stdout
     assert (resources / "courses").is_dir()

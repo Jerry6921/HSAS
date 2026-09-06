@@ -31,6 +31,7 @@ from hsas.infrastructure.storage.persist_data import read_json, write_json, writ
 from hsas.infrastructure.storage.publish_courses import CourseSnapshotTransaction
 from hsas.infrastructure.moodle.display_progress import SyncProgress
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
+from hsas.infrastructure.moodle.record_session import record_moodle_session_status
 from hsas.domain.courses.detect_changes import (
     CourseChangeSet,
     compare_course_archives,
@@ -222,6 +223,7 @@ def login(
             notify(f"Session saved in {active_settings.profile_dir}")
 
     asyncio.run(run())
+    record_moodle_session_status(active_settings.output_dir, "logged_in")
 
 
 def check_login_status(settings: Settings | None = None) -> MoodleSessionResult:
@@ -265,7 +267,17 @@ def check_login_status(settings: Settings | None = None) -> MoodleSessionResult:
             error=error,
         )
 
-    return asyncio.run(run())
+    result = asyncio.run(run())
+    persisted_status = {
+        "logged_in": "logged_in",
+        "logged_out": "login_required",
+    }.get(result.status, "unknown")
+    record_moodle_session_status(
+        active_settings.output_dir,
+        persisted_status,
+        available_course_count=result.available_course_count,
+    )
+    return result
 
 
 def login_until_ready(
@@ -314,7 +326,17 @@ def login_until_ready(
                 await asyncio.sleep(1)
         raise RuntimeError("Moodle login timed out before the dashboard became available.")
 
-    return asyncio.run(run())
+    try:
+        result = asyncio.run(run())
+    except Exception:
+        record_moodle_session_status(active_settings.output_dir, "login_required")
+        raise
+    record_moodle_session_status(
+        active_settings.output_dir,
+        "logged_in",
+        available_course_count=result.available_course_count,
+    )
+    return result
 
 
 def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
@@ -445,6 +467,8 @@ def sync_course(
                 }
             ],
         )
+        if "Session expired or SSO redirected" in str(exc):
+            record_moodle_session_status(active_settings.output_dir, "expired")
         raise
     record_sync_operation(
         active_settings.output_dir,
@@ -459,6 +483,7 @@ def sync_course(
             }
         ],
     )
+    record_moodle_session_status(active_settings.output_dir, "logged_in")
     return result
 
 
@@ -579,7 +604,13 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
             report_path=report_path,
         )
 
-    return asyncio.run(run())
+    result = asyncio.run(run())
+    record_moodle_session_status(
+        active_settings.output_dir,
+        "logged_in",
+        available_course_count=result.discovered_course_count,
+    )
+    return result
 
 
 class MoodleCourseGateway:

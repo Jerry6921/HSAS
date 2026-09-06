@@ -38,17 +38,18 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 ## Default operating loop
 
 1. Resolve the exact course and source scope from stable identifiers.
-2. Collect or refresh authorized Moodle materials when requested, then run `hsas changes list`.
-3. Run `hsas ocr status`; when queued files are relevant, run `hsas ocr run --confirmed` before reading them.
-4. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
-5. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`.
-6. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
-7. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
-8. Preserve pending fields as `unknown`. Record conflicts as tentative with warnings.
-9. Run `hsas information validate <UPDATE.json>`.
-10. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
-11. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
-12. Verify with `hsas list-status` and answer from the resulting database.
+2. Collect or refresh authorized Moodle materials when requested, then run `hsas changes list`. For official class sections, times and locations, run `hsas class-planner status` and synchronize through HKU Portal when needed.
+3. When the Class Planner snapshot reports differences, read `<RESOURCES_DIR>/class-planner/latest.json`, compare its `mainTable` and `patterns` with the current information items, and preserve conflicts for review.
+4. Run `hsas ocr status`; when queued files are relevant, run `hsas ocr run --confirmed` before reading them.
+5. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
+6. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`.
+7. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
+8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
+9. Preserve pending fields as `unknown`. Record conflicts as tentative with warnings.
+10. Run `hsas information validate <UPDATE.json>`.
+11. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
+12. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
+13. Verify with `hsas list-status` and answer from the resulting database.
 
 ## Personal information inbox
 
@@ -85,6 +86,12 @@ confirms that preview.
 - assessment format, submission method, weight, word limit, requirements,
   policies, warnings, links, related `materials`, and evidence.
 
+`<RESOURCES_DIR>/class-planner/latest.json` contains the privacy-filtered official
+Class Planner response, sync metadata and course-level differences. Use it as a
+source for class sections, meeting times, locations, instructors and course
+descriptions, then merge supported facts through the validated information
+update workflow.
+
 The calendar is a read-only projection of this file. AI updates pass through the
 CLI, where schema and cross-course validation preserve the last valid database.
 
@@ -117,6 +124,9 @@ hsas list-status
 hsas ui
 hsas login
 hsas sync-courses [COURSE]
+hsas class-planner login
+hsas class-planner sync
+hsas class-planner status
 hsas materials list [--course COURSE]
 hsas materials search QUERY [--course COURSE]
 hsas query QUESTION [--course COURSE]

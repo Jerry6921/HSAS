@@ -16,6 +16,9 @@ import webbrowser
 from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.application.synchronize_class_planner import (
+    ClassPlannerSynchronizationService,
+)
 from hsas.application.manage_changes import collect_pending_changes
 from hsas.application.manage_inbox import (
     PersonalInboxError,
@@ -27,10 +30,15 @@ from hsas.infrastructure.documents.run_ocr import (
     ocr_capabilities,
     run_ocr_queue,
 )
+from hsas.infrastructure.class_planner import (
+    ClassPlannerBrowserGateway,
+    class_planner_status,
+)
 from hsas.domain.courses import ArchiveIndex, PendingChangeBatch, iter_activities, iter_files
 from hsas.domain.courses.define_change_queue import CourseReview
 from hsas.domain.information import CourseRecord, InformationStore
 from hsas.infrastructure.moodle.load_settings import Settings
+from hsas.infrastructure.moodle.record_session import load_moodle_session_status
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
@@ -93,6 +101,8 @@ class DashboardService:
                 "pending_review": _pending_summary(pending),
                 "material_status": self._material_status(store, pending),
                 "personal_inbox": inbox,
+                "class_planner": self._class_planner_status(),
+                "moodle_session": load_moodle_session_status(self.resources_dir),
                 "updates": _pending_updates(pending),
                 "warnings": [
                     "information.json 尚未建立。请让 AI 阅读本地课程资料并生成更新。"
@@ -140,9 +150,25 @@ class DashboardService:
             "pending_review": _pending_summary(pending),
             "material_status": self._material_status(store, pending),
             "personal_inbox": inbox,
+            "class_planner": self._class_planner_status(),
+            "moodle_session": load_moodle_session_status(self.resources_dir),
             "updates": _pending_updates(pending),
             "warnings": [],
         }
+
+    def _class_planner_status(self) -> dict[str, Any]:
+        try:
+            return class_planner_status(self.resources_dir)
+        except (OSError, ValueError) as exc:
+            return {
+                "available": False,
+                "synced_at": None,
+                "course_count": 0,
+                "meeting_count": 0,
+                "term_ids": [],
+                "changes": {},
+                "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            }
 
     def _dashboard_courses(
         self,
@@ -452,6 +478,49 @@ class DashboardService:
             ),
         }
 
+    def login_class_planner(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Open Class Planner and wait for user-completed HKU Portal sign-in."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认打开 HKU Portal 登录窗口。")
+        with self.mutation_lock:
+            try:
+                result = _class_planner_service(self.resources_dir).login_until_ready()
+            except Exception as exc:
+                raise DashboardError(
+                    f"Class Planner 登录未完成：{type(exc).__name__}: {str(exc)[:300]}"
+                ) from exc
+        return {
+            "status": result.status,
+            "checked_at": result.checked_at,
+            "course_count": result.course_count,
+            "term_ids": list(result.term_ids),
+            "error": result.error,
+        }
+
+    def synchronize_class_planner(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Collect the current authenticated HKU timetable snapshot."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认同步 HKU Class Planner 课表。")
+        with self.mutation_lock:
+            try:
+                result = _class_planner_service(self.resources_dir).sync()
+            except Exception as exc:
+                raise DashboardError(
+                    f"Class Planner 同步失败，上一份快照已保留："
+                    f"{type(exc).__name__}: {str(exc)[:300]}"
+                ) from exc
+        return {
+            "status": result.status,
+            "synced_at": result.synced_at,
+            "course_count": result.course_count,
+            "meeting_count": result.meeting_count,
+            "term_ids": list(result.term_ids),
+            "changed": result.changed,
+            "added_course_count": len(result.added_course_ids),
+            "modified_course_count": len(result.modified_course_ids),
+            "removed_course_count": len(result.removed_course_ids),
+        }
+
 
 class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -525,6 +594,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path not in {
             "/api/moodle/login",
             "/api/sync",
+            "/api/class-planner/login",
+            "/api/class-planner/sync",
             "/api/ocr/run",
             "/api/inbox/apply",
         }:
@@ -536,6 +607,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.login_moodle(payload)
             elif path == "/api/sync":
                 result = self.server.dashboard_service.synchronize_courses(payload)
+            elif path == "/api/class-planner/login":
+                result = self.server.dashboard_service.login_class_planner(payload)
+            elif path == "/api/class-planner/sync":
+                result = self.server.dashboard_service.synchronize_class_planner(payload)
             elif path == "/api/ocr/run":
                 result = self.server.dashboard_service.process_ocr_queue(payload)
             else:
@@ -652,6 +727,10 @@ def build_dashboard_server(
 def _course_service(resources_dir: Path) -> CourseSynchronizationService:
     settings = Settings.load(output_dir=resources_dir)
     return CourseSynchronizationService(MoodleCourseGateway(settings))
+
+
+def _class_planner_service(resources_dir: Path) -> ClassPlannerSynchronizationService:
+    return ClassPlannerSynchronizationService(ClassPlannerBrowserGateway(resources_dir))
 
 
 def _load_information_if_available(resources_dir: Path):

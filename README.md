@@ -81,15 +81,10 @@ Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 
 
 ## 快速开始
 
-### 安装 macOS App
+### macOS App 状态
 
-从 GitHub Releases 下载 `HIQS-2.2.0-macOS-arm64.dmg`，打开后把 `HIQS.app` 拖入
-Applications。App 使用独立原生窗口承载 Dashboard，并在内部自动启动随机端口的本地服务；
-日常使用不再需要终端或手动输入 `127.0.0.1` 地址。安装包自带 Python 运行时与 Playwright
-Chromium，可直接使用 Moodle 登录和同步。
-
-当前 DMG 使用 ad-hoc 签名并面向 Apple Silicon，尚未经过 Apple Developer ID 公证。
-macOS 首次打开时可在 Finder 中按住 Control 点击 HIQS，再选择“打开”。
+仓库包含独立 HIQS 窗口及完整打包源码。公开 Release 暂时提供源码版本；完成 Apple
+Developer ID 签名与公证后再提供可直接安装的 macOS DMG。
 
 ### 要求
 
@@ -347,6 +342,11 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 
 后续版本更新继续记录在本节顶部。
 
+### 2.2.0 发布调整 · 2026-09-06
+
+- 从 GitHub Release 移除 ad-hoc 签名的 macOS DMG；
+- Release 暂时保留源码包，待完成 Apple Developer ID 签名与公证后重新发布安装包。
+
 ### 2.2.0 · 2026-09-06
 
 - 首页新增统一资料状态面板，汇总 AI 审阅、OCR、Google 授权、待确认日期和来源冲突；
@@ -356,7 +356,7 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 - `hsas list-status`、Dashboard 与 CLI 增加 OCR 和 Inbox 状态及操作。
 - 新增 Swift/WKWebView 原生 macOS 应用窗口，自动管理内置本地服务与外部链接；
 - 新增可重复执行的 DMG 构建程序，安装包包含 Python 后端与 Playwright Chromium；
-- GitHub Release 提供 Apple Silicon DMG 与 SHA-256 校验值。
+- 仓库提供 Apple Silicon App/DMG 构建源码与 SHA-256 输出流程。
 
 ### 2.1.0 · 2026-09-06
 

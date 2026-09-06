@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from hsas.domain.information import InformationStore
+from hsas.domain.information import InformationStore, PersonalInbox
 from hsas.domain.courses import ArchiveIndex
 from hsas.domain.courses.define_change_queue import ChangeCheckpoint
 from hsas.domain.courses.detect_changes import CourseChangeSet
@@ -35,3 +35,13 @@ class ChangeQueueRepository(Protocol):
     def load_checkpoint(self, path: Path) -> ChangeCheckpoint: ...
 
     def save_checkpoint(self, path: Path, checkpoint: ChangeCheckpoint) -> None: ...
+
+
+class PersonalInboxRepository(Protocol):
+    """Atomically persist staged user-provided information updates."""
+
+    def exists(self, path: Path) -> bool: ...
+
+    def load(self, path: Path) -> PersonalInbox: ...
+
+    def save(self, path: Path, inbox: PersonalInbox) -> None: ...

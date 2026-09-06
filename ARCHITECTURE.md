@@ -10,11 +10,15 @@ flowchart LR
     Moodle[HKU Moodle 与授权外部文件] --> Collector[Collector]
     Collector --> Files[本地原文件]
     Collector --> Text[PDF DOCX PPTX 文本副本]
+    Collector --> OCR[OCR Queue]
+    OCR --> Text
     Collector --> Queue[待处理变化队列]
     Files --> AI[AI 阅读]
     Text --> AI
     Queue --> AI
     User[用户在 AI 对话中补充] --> AI
+    AI --> Inbox[Personal Inbox 草稿与差异预览]
+    Inbox --> Validator
     AI --> Update[information update JSON]
     Update --> Validator[Schema 校验与原子 upsert]
     Validator --> Store[information.json]
@@ -28,6 +32,8 @@ flowchart LR
 - AI：阅读原文件或文本副本，识别课程、tutorial、DDL、课业要求、形式和占分；
 - Information Service：检查类型、范围、唯一 ID、课程引用与时间关系，原子写入；
 - Change Queue：区分首次全量与后续增量，提供精确文件路径并记录处理游标；
+- OCR Queue：识别扫描 PDF 与图片型 PPT，调用本地 OCR 并更新可搜索 sidecar；
+- Personal Inbox：暂存用户通过 AI 补充的课程信息，并在逐字段预览与确认后进入统一校验；
 - Calendar：只读投影，展开重复时间并显示具体项目；
 - 用户：授权资料范围，并可通过 AI 对话确认额外事实或更正。
 
@@ -42,7 +48,7 @@ src/hsas/
 │   └── courses/      Moodle 归档、文件与文本分析模型
 └── infrastructure/
     ├── moodle/       登录、发现、下载和快照事务
-    ├── documents/    PDF、DOCX、PPTX 文本提取
+    ├── documents/    PDF、DOCX、PPTX 文本提取与本地 OCR
     ├── storage/      原子 JSON/文件持久化
     └── runtime/      本地数据目录
 ```
@@ -100,6 +106,11 @@ Google Workspace 链接是受控例外：`docs.google.com/document`、`presentat
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
+
+提取器会把文字覆盖不足的扫描 PDF 和图片型 PPT 标为 `ocr_required`。`hsas ocr status`
+读取这些分析记录生成队列，`hsas ocr run --confirmed` 使用本地 Apple Vision 或
+Tesseract/Poppler 批量识别。识别结果追加到文本副本并重新计算哈希、摘要、关键词和阅读
+时间，随后原子更新对应 `course.json`。
 
 ## Incremental AI Review
 
@@ -162,10 +173,18 @@ project、report、reading、deadline 和 other。
 
 省略记录会保留，删除使用显式流程。任何失败都发生在替换前。
 
+## Personal Inbox
+
+`ai-state/personal-inbox.json` 保存 AI 根据用户明确陈述准备的 `InformationUpdate` 草稿。
+每条草稿拥有稳定 ID、创建时间、备注和 pending/applied 状态。Dashboard 与
+`hsas inbox list` 将草稿同当前 `information.json` 比较，呈现 create/update 动作以及
+逐字段 before/after。用户确认单条草稿后，应用服务调用现有 Information upsert，再把
+Inbox 条目标为 applied。
+
 ## Dashboard
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
-store。首页集中 Moodle 登录、同步、本地刷新、资料搜索和 pending review 差异；日历作为
+store。首页集中 Moodle 登录、同步、本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异；日历作为
 独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，并提供按日排列
 开始与结束时间的议程视图。两种视图共享课程与全文筛选，日期待确认事项单独列出。
 
@@ -179,6 +198,19 @@ Reading、Assessment 等类型。课件内容由 AI 阅读，页面呈现经过�
 AI 关联的学习材料和来源。`GET /api/source-preview` 只接受当前课程快照中的白名单路径；PDF 与图片使用同源原文
 预览，DOCX/PPTX 使用已提取文本预览，并保留打开原文件的入口。首页问答式搜索只匹配本地
 结构化事项和课件目录。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
+
+## macOS App 与发布包
+
+`HIQS.app` 使用 Swift/AppKit 创建原生窗口，并以 WKWebView 承载 Dashboard。App 启动时从
+Bundle Resources 运行 PyInstaller 冻结的 `hiqs-backend`，令其绑定随机回环端口；从后端
+启动输出取得地址后加载页面。窗口不提供地址栏，HTTP 服务继续限制在 `127.0.0.1`。
+
+WKNavigationDelegate 允许回环页面导航，并把 Moodle 等外部 HTTP(S) 链接交给系统浏览器。
+App 退出时终止后端子进程。DMG 构建脚本同时打包匹配的 Playwright Chromium，并通过
+`PLAYWRIGHT_BROWSERS_PATH` 指向 Bundle 内浏览器，因此登录和同步不依赖额外安装步骤。
+
+`scripts/build_macos_dmg.sh` 固定执行 Python 冻结、Swift 编译、Bundle 组装、ad-hoc 签名、
+DMG 压缩与 SHA-256 输出。版本来自 `src/hsas/__init__.py`，并同步写入 Info.plist。
 
 ## 有限兼容
 

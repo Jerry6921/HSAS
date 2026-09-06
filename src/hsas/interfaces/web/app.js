@@ -500,6 +500,126 @@ function renderMetrics(occurrences) {
   byId("metric-pending").textContent = state.data.pending_review?.change_count || 0;
 }
 
+function appendCompactStatus(container, title, meta, note = null, action = null) {
+  const card = element(action ? "button" : "article", "compact-status");
+  if (action) {
+    card.type = "button";
+    card.addEventListener("click", action);
+  }
+  card.append(element("strong", "", title), element("span", "", meta));
+  if (note) card.append(element("small", "", note));
+  container.append(card);
+}
+
+function renderMaterialStatus() {
+  const status = state.data.material_status || {};
+  const counts = status.counts || {};
+  byId("status-ai").textContent = counts.ai_review || 0;
+  byId("status-ocr").textContent = counts.ocr || 0;
+  byId("status-google").textContent = counts.google_authorization || 0;
+  byId("status-date").textContent = counts.date_unknown || 0;
+  byId("status-conflict").textContent = counts.source_conflicts || 0;
+  const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  byId("status-total").textContent = `${total} 项待处理`;
+
+  const ocr = status.ocr || { capabilities: {}, queue: [] };
+  const engine = ocr.capabilities?.engine;
+  byId("ocr-capability").textContent = engine
+    ? `${engine} · 全程本地处理`
+    : "本机需要 Apple Vision 或 Tesseract";
+  const runButton = byId("run-ocr");
+  runButton.disabled = !(ocr.capabilities?.available && ocr.queue?.length);
+  const queue = byId("ocr-queue-list");
+  queue.replaceChildren();
+  if (!ocr.queue?.length) {
+    queue.append(element("p", "search-hint", "OCR 队列已清空。"));
+  } else {
+    for (const item of ocr.queue.slice(0, 8)) {
+      appendCompactStatus(
+        queue,
+        item.title,
+        `${item.course_id} · ${item.document_kind.toUpperCase()}`,
+        item.activity_name,
+        () => openSourcePreview(item),
+      );
+    }
+  }
+
+  const attention = byId("attention-list");
+  attention.replaceChildren();
+  const entries = [
+    ...(status.google_authorization || []).map((item) => ({ ...item, kind: "Google 授权" })),
+    ...(status.source_conflicts || []).map((item) => ({ ...item, kind: "来源冲突" })),
+    ...(status.date_unknown || []).map((item) => ({ ...item, kind: "日期待确认" })),
+  ];
+  if (!entries.length) {
+    attention.append(element("p", "search-hint", "当前没有需要人工处理的资料状态。"));
+  } else {
+    for (const item of entries.slice(0, 10)) {
+      const informationItem = item.item_id
+        ? state.data.items.find((value) => value.item_id === item.item_id)
+        : null;
+      appendCompactStatus(
+        attention,
+        item.title,
+        `${item.course_id} · ${item.kind}`,
+        item.message || (item.warnings || []).join("；") || null,
+        informationItem ? () => {
+          showCalendar();
+          state.selectedItemId = informationItem.item_id;
+          state.selectedDateKey = primaryDateKey(informationItem);
+          renderDetail(informationItem, state.selectedDateKey);
+        } : item.url ? () => window.location.assign(item.url) : null,
+      );
+    }
+  }
+}
+
+function formatPreviewValue(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+  return text.length > 90 ? `${text.slice(0, 87)}…` : text;
+}
+
+function renderPersonalInbox() {
+  const inbox = state.data.personal_inbox || { pending_count: 0, entries: [] };
+  byId("inbox-count").textContent = `${inbox.pending_count || 0} 条草稿`;
+  const container = byId("inbox-list");
+  container.replaceChildren();
+  if (!inbox.entries?.length) {
+    container.append(element("p", "search-hint", "个人补充信息 Inbox 当前为空。"));
+    return;
+  }
+  for (const entry of inbox.entries) {
+    const card = element("article", "inbox-entry");
+    const heading = element("div", "inbox-entry-heading");
+    const copy = element("div");
+    copy.append(element("h3", "", entry.title));
+    copy.append(element("p", "", [entry.note, formatDateTime(entry.created_at)].filter(Boolean).join(" · ")));
+    const apply = element("button", "button compact", "确认写入");
+    apply.type = "button";
+    apply.addEventListener("click", () => applyInboxEntry(entry));
+    heading.append(copy, apply);
+    card.append(heading);
+    for (const change of entry.changes || []) {
+      const section = element("section", "inbox-change");
+      section.append(element("strong", "", `${change.action === "create" ? "新增" : "更新"} ${change.title}`));
+      const fields = element("div", "inbox-fields");
+      for (const field of (change.fields || []).slice(0, 12)) {
+        const row = element("div", "inbox-field");
+        row.append(
+          element("code", "", field.field),
+          element("span", "", `${formatPreviewValue(field.before)} → ${formatPreviewValue(field.after)}`),
+        );
+        fields.append(row);
+      }
+      section.append(fields);
+      card.append(section);
+    }
+    container.append(card);
+  }
+}
+
 function renderCalendar(occurrences) {
   const grid = byId("calendar-grid");
   grid.replaceChildren();
@@ -964,6 +1084,8 @@ function renderHomeSearch() {
 function renderDataViews() {
   const occurrences = buildOccurrences();
   renderMetrics(occurrences);
+  renderMaterialStatus();
+  renderPersonalInbox();
   renderCalendar(occurrences);
   renderUnscheduled();
   renderUpdates();
@@ -1017,9 +1139,12 @@ function setOperationState(running, message = "") {
   const loginButton = byId("login-moodle");
   const syncButton = byId("sync-courses");
   const reloadButton = byId("reload-data");
+  const ocrButton = byId("run-ocr");
   loginButton.disabled = running;
   syncButton.disabled = running;
   reloadButton.disabled = running;
+  const ocr = state.data?.material_status?.ocr;
+  ocrButton.disabled = running || !(ocr?.capabilities?.available && ocr?.queue?.length);
   const status = byId("operation-status");
   if (message) {
     status.textContent = message;
@@ -1029,7 +1154,7 @@ function setOperationState(running, message = "") {
   }
 }
 
-async function runMoodleOperation(path, pendingMessage) {
+async function runLocalMutation(path, payload, pendingMessage) {
   byId("global-error").classList.add("hidden");
   setOperationState(true, pendingMessage);
   try {
@@ -1039,11 +1164,11 @@ async function runMoodleOperation(path, pendingMessage) {
         "Content-Type": "application/json",
         "X-HIQS-Request": "1",
       },
-      body: JSON.stringify({ confirmed: true }),
+      body: JSON.stringify(payload),
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "操作失败");
-    return payload;
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "操作失败");
+    return result;
   } catch (error) {
     setOperationState(false);
     const alert = byId("global-error");
@@ -1051,6 +1176,37 @@ async function runMoodleOperation(path, pendingMessage) {
     alert.classList.remove("hidden");
     return null;
   }
+}
+
+async function runMoodleOperation(path, pendingMessage) {
+  return runLocalMutation(path, { confirmed: true }, pendingMessage);
+}
+
+async function processOcrQueue() {
+  const confirmed = window.confirm("将使用本机 OCR 处理队列中的 PDF 与图片型 PPT，并更新文本副本。继续吗？");
+  if (!confirmed) return;
+  const result = await runLocalMutation(
+    "/api/ocr/run",
+    { confirmed: true },
+    "正在本机执行批量 OCR；较长的课件可能需要几分钟…",
+  );
+  if (!result) return;
+  await loadInformation();
+  setOperationState(false, `OCR 完成：${result.processed_count} 个成功，${result.failed_count} 个待处理。`);
+}
+
+async function applyInboxEntry(entry) {
+  const changeCount = (entry.changes || []).length;
+  const confirmed = window.confirm(`将把“${entry.title}”的 ${changeCount} 项预览变更写入 information.json。继续吗？`);
+  if (!confirmed) return;
+  const result = await runLocalMutation(
+    "/api/inbox/apply",
+    { confirmed: true, entry_id: entry.entry_id },
+    "正在校验并写入个人补充信息…",
+  );
+  if (!result) return;
+  await loadInformation();
+  setOperationState(false, `个人补充信息已写入：新增 ${result.created_items} 项，更新 ${result.updated_items} 项。`);
 }
 
 async function loginMoodle() {
@@ -1141,6 +1297,7 @@ byId("show-calendar").addEventListener("click", showCalendar);
 byId("reload-data").addEventListener("click", loadInformation);
 byId("login-moodle").addEventListener("click", loginMoodle);
 byId("sync-courses").addEventListener("click", synchronizeCourses);
+byId("run-ocr").addEventListener("click", processOcrQueue);
 byId("close-preview").addEventListener("click", closeSourcePreview);
 byId("source-preview").addEventListener("click", (event) => {
   if (event.target === byId("source-preview")) closeSourcePreview();

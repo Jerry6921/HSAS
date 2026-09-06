@@ -9,12 +9,15 @@ from .define_information import (
     SourceReference,
     WeeklyRecurrence,
 )
+from .define_inbox import PersonalInbox, PersonalInboxEntry
 
 __all__ = [
     "CourseRecord",
     "InformationItem",
     "InformationStore",
     "InformationUpdate",
+    "PersonalInbox",
+    "PersonalInboxEntry",
     "RelatedMaterial",
     "SourceReference",
     "WeeklyRecurrence",

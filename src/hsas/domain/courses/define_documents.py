@@ -18,7 +18,13 @@ class PdfMetadata(StrictModel):
 
 class PdfAnalysis(StrictModel):
     status: Literal["complete", "partial", "failed"]
-    extraction_method: Literal["pypdf", "docx_xml", "pptx_xml"] = "pypdf"
+    extraction_method: Literal[
+        "pypdf",
+        "docx_xml",
+        "pptx_xml",
+        "pypdf_ocr",
+        "pptx_xml_ocr",
+    ] = "pypdf"
     document_kind: Literal["pdf", "docx", "pptx"] = "pdf"
     unit_label: Literal["page", "document", "slide"] = "page"
     summary_kind: Literal["extractive"] = "extractive"
@@ -37,5 +43,7 @@ class PdfAnalysis(StrictModel):
     extractive_summary: str | None = None
     keywords: list[str] = Field(default_factory=list)
     ocr_required: bool = False
+    ocr_completed_at: datetime | None = None
+    ocr_engine: str | None = None
     metadata: PdfMetadata = Field(default_factory=PdfMetadata)
     warnings: list[str] = Field(default_factory=list)

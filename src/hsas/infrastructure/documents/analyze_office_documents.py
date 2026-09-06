@@ -103,9 +103,20 @@ def analyze_office_document(
             units = _docx_units(archive) if kind == "docx" else _pptx_units(archive)
         rendered: list[str] = []
         text_units = 0
+        slide_units = 0
+        slides_with_text = 0
+        slide_character_count = 0
+        note_character_count = 0
         for index, (name, value) in enumerate(units, start=1):
             if value:
                 text_units += 1
+            if kind == "pptx" and "ppt/slides/" in name:
+                slide_units += 1
+                slide_character_count += len(value)
+                if value:
+                    slides_with_text += 1
+            elif kind == "pptx" and "notesSlides" in name:
+                note_character_count += len(value)
             label = "Document part" if kind == "docx" else (
                 "Speaker notes" if "notesSlides" in name else "Slide"
             )
@@ -119,7 +130,18 @@ def analyze_office_document(
         write_text(text_path, full_text)
         words = len(_tokens(full_text))
         warnings: list[str] = []
-        ocr_required = len(full_text) < 20
+        image_based_slides = (
+            kind == "pptx"
+            and slide_units > 0
+            and (
+                slides_with_text * 2 < slide_units
+                or (
+                    slide_character_count < slide_units * 20
+                    and note_character_count == 0
+                )
+            )
+        )
+        ocr_required = len(full_text) < 20 or image_based_slides
         if ocr_required:
             warnings.append("little_or_no_extractable_text; embedded images may require OCR")
         status = "partial" if warnings else "complete"
@@ -130,8 +152,8 @@ def analyze_office_document(
             document_kind=kind,
             unit_label=unit_label,
             analyzed_at=datetime.now(timezone.utc),
-            page_count=len(units),
-            pages_with_text=text_units,
+            page_count=slide_units if kind == "pptx" else len(units),
+            pages_with_text=slides_with_text if kind == "pptx" else text_units,
             word_count=words,
             character_count=len(full_text),
             estimated_reading_minutes=math.ceil(words / reading_speed_wpm),

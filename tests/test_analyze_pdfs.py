@@ -72,3 +72,24 @@ def test_pptx_slides_and_speaker_notes_are_extracted(tmp_path: Path) -> None:
     assert "--- Speaker notes 1 ---" in text
     assert "Lecture topic" in text
     assert "Explain this example" in text
+
+
+def test_image_only_pptx_is_marked_for_ocr(tmp_path: Path) -> None:
+    presentation = tmp_path / "scanned-slides.pptx"
+    with ZipFile(presentation, "w") as archive:
+        archive.writestr(
+            "ppt/slides/slide1.xml",
+            """<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" />""",
+        )
+        archive.writestr("ppt/media/image1.png", b"not-a-real-image")
+
+    analysis = analyze_office_document(
+        presentation,
+        text_path=tmp_path / "analysis/scanned-slides.txt",
+        storage_root=tmp_path,
+    )
+
+    assert analysis.status == "partial"
+    assert analysis.ocr_required is True
+    assert analysis.page_count == 1
+    assert analysis.pages_with_text == 0

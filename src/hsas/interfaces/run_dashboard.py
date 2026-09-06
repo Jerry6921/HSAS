@@ -17,12 +17,26 @@ from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.application.manage_changes import collect_pending_changes
+from hsas.application.manage_inbox import (
+    PersonalInboxError,
+    apply_personal_inbox_entry,
+    personal_inbox_snapshot,
+)
+from hsas.infrastructure.documents.run_ocr import (
+    collect_ocr_queue,
+    ocr_capabilities,
+    run_ocr_queue,
+)
 from hsas.domain.courses import ArchiveIndex, PendingChangeBatch, iter_activities, iter_files
 from hsas.domain.courses.define_change_queue import CourseReview
 from hsas.domain.information import CourseRecord, InformationStore
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
-from hsas.infrastructure.storage import JsonChangeQueueRepository, JsonInformationRepository
+from hsas.infrastructure.storage import (
+    JsonChangeQueueRepository,
+    JsonInformationRepository,
+    JsonPersonalInboxRepository,
+)
 
 
 ASSET_ROOT = Path(__file__).with_name("web")
@@ -33,6 +47,7 @@ ALLOWED_ASSETS = {
 }
 INFORMATION_REPOSITORY = JsonInformationRepository()
 CHANGE_REPOSITORY = JsonChangeQueueRepository()
+INBOX_REPOSITORY = JsonPersonalInboxRepository()
 MAX_REQUEST_BYTES = 16 * 1024
 
 
@@ -52,6 +67,15 @@ class DashboardService:
             store = InformationStore()
             pending = self._pending_batch(None)
             courses = self._dashboard_courses(store, pending)
+            try:
+                inbox = personal_inbox_snapshot(
+                    self.resources_dir,
+                    information=store,
+                    inbox_repository=INBOX_REPOSITORY,
+                    information_repository=INFORMATION_REPOSITORY,
+                )
+            except PersonalInboxError as exc:
+                raise DashboardError(str(exc)) from exc
             return {
                 "available": False,
                 "schema_version": "1.0",
@@ -67,6 +91,8 @@ class DashboardService:
                     "unknown_date_count": 0,
                 },
                 "pending_review": _pending_summary(pending),
+                "material_status": self._material_status(store, pending),
+                "personal_inbox": inbox,
                 "updates": _pending_updates(pending),
                 "warnings": [
                     "information.json 尚未建立。请让 AI 阅读本地课程资料并生成更新。"
@@ -90,6 +116,15 @@ class DashboardService:
         payload = store.model_dump(mode="json")
         pending = self._pending_batch(store)
         courses = self._dashboard_courses(store, pending)
+        try:
+            inbox = personal_inbox_snapshot(
+                self.resources_dir,
+                information=store,
+                inbox_repository=INBOX_REPOSITORY,
+                information_repository=INFORMATION_REPOSITORY,
+            )
+        except PersonalInboxError as exc:
+            raise DashboardError(str(exc)) from exc
         return {
             "available": True,
             **payload,
@@ -103,6 +138,8 @@ class DashboardService:
                 ),
             },
             "pending_review": _pending_summary(pending),
+            "material_status": self._material_status(store, pending),
+            "personal_inbox": inbox,
             "updates": _pending_updates(pending),
             "warnings": [],
         }
@@ -183,6 +220,106 @@ class DashboardService:
             )
             result.append(value)
         return result
+
+    def _material_status(
+        self,
+        store: InformationStore,
+        pending: PendingChangeBatch,
+    ) -> dict[str, Any]:
+        ocr_queue = collect_ocr_queue(self.resources_dir)
+        google_authorization = []
+        for index in CHANGE_REPOSITORY.load_archives(self.resources_dir):
+            for activity in iter_activities(index.archive):
+                source_url = str(activity.url) if activity.url else ""
+                error = activity.download_error or ""
+                if activity.download_status != "external":
+                    continue
+                if "docs.google.com" not in source_url and "google workspace" not in error.casefold():
+                    continue
+                google_authorization.append(
+                    {
+                        "course_id": index.archive.course.course_id,
+                        "course_title": index.archive.course.title,
+                        "activity_id": activity.module_id,
+                        "title": activity.name,
+                        "url": source_url or None,
+                        "message": error or "Google Workspace access is required",
+                    }
+                )
+        date_unknown = [
+            {
+                "item_id": item.item_id,
+                "course_id": item.course_id,
+                "title": item.title,
+            }
+            for item in store.items
+            if item.date_status == "unknown"
+        ]
+        conflict_markers = ("conflict", "disagree", "inconsistent", "冲突", "不一致")
+        source_conflicts = [
+            {
+                "item_id": item.item_id,
+                "course_id": item.course_id,
+                "title": item.title,
+                "warnings": item.warnings,
+            }
+            for item in store.items
+            if any(
+                marker in warning.casefold()
+                for warning in item.warnings
+                for marker in conflict_markers
+            )
+        ]
+        counts = {
+            "ai_review": pending.pending_change_count,
+            "ocr": len(ocr_queue),
+            "google_authorization": len(google_authorization),
+            "date_unknown": len(date_unknown),
+            "source_conflicts": len(source_conflicts),
+        }
+        return {
+            "counts": counts,
+            "ocr": {"capabilities": ocr_capabilities(), "queue": ocr_queue},
+            "google_authorization": google_authorization,
+            "date_unknown": date_unknown,
+            "source_conflicts": source_conflicts,
+        }
+
+    def process_ocr_queue(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run OCR locally for all currently queued local documents."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认开始本地批量 OCR。")
+        with self.mutation_lock:
+            try:
+                return run_ocr_queue(self.resources_dir)
+            except (OSError, ValueError) as exc:
+                raise DashboardError(f"OCR 处理失败：{type(exc).__name__}: {str(exc)[:300]}") from exc
+
+    def apply_personal_inbox(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply one explicitly confirmed personal-information draft."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认写入个人补充信息。")
+        entry_id = payload.get("entry_id")
+        if not isinstance(entry_id, str) or not entry_id.strip():
+            raise DashboardError("entry_id 必须是有效的 Inbox 条目 ID。")
+        with self.mutation_lock:
+            try:
+                result = apply_personal_inbox_entry(
+                    self.resources_dir,
+                    entry_id.strip(),
+                    confirmed=True,
+                    inbox_repository=INBOX_REPOSITORY,
+                    information_repository=INFORMATION_REPOSITORY,
+                )
+            except (OSError, ValueError, PersonalInboxError) as exc:
+                raise DashboardError(str(exc)) from exc
+        return {
+            "entry_id": entry_id.strip(),
+            "created_courses": result.created_courses,
+            "updated_courses": result.updated_courses,
+            "created_items": result.created_items,
+            "updated_items": result.updated_items,
+        }
 
     def material_file(self, relative_path: str) -> tuple[Path, str]:
         """Resolve only a file referenced by the latest validated course snapshots."""
@@ -385,15 +522,24 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "Invalid local host."})
             return
         path = urlparse(self.path).path
-        if path not in {"/api/moodle/login", "/api/sync"}:
+        if path not in {
+            "/api/moodle/login",
+            "/api/sync",
+            "/api/ocr/run",
+            "/api/inbox/apply",
+        }:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
             return
         try:
             payload = self._read_json()
             if path == "/api/moodle/login":
                 result = self.server.dashboard_service.login_moodle(payload)
-            else:
+            elif path == "/api/sync":
                 result = self.server.dashboard_service.synchronize_courses(payload)
+            elif path == "/api/ocr/run":
+                result = self.server.dashboard_service.process_ocr_queue(payload)
+            else:
+                result = self.server.dashboard_service.apply_personal_inbox(payload)
         except DashboardError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -524,8 +670,8 @@ def serve_dashboard(
     server = build_dashboard_server(resources_dir, host=host, port=port)
     actual_port = server.server_address[1]
     url = f"http://{host}:{actual_port}/"
-    print(f"HKU Information Query System: {url}")
-    print("Local-only calendar and Moodle controls. Press Ctrl-C to stop.")
+    print(f"HKU Information Query System: {url}", flush=True)
+    print("Local-only calendar and Moodle controls. Press Ctrl-C to stop.", flush=True)
     if open_browser:
         browser_opener(url)
     try:

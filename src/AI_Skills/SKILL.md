@@ -39,15 +39,25 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 
 1. Resolve the exact course and source scope from stable identifiers.
 2. Collect or refresh authorized Moodle materials when requested, then run `hsas changes list`.
-3. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
-4. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`.
-5. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
-6. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
-7. Preserve pending fields as `unknown`. Record conflicts as tentative with warnings.
-8. Run `hsas information validate <UPDATE.json>`.
-9. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
-10. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
-11. Verify with `hsas list-status` and answer from the resulting database.
+3. Run `hsas ocr status`; when queued files are relevant, run `hsas ocr run --confirmed` before reading them.
+4. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
+5. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`.
+6. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
+7. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
+8. Preserve pending fields as `unknown`. Record conflicts as tentative with warnings.
+9. Run `hsas information validate <UPDATE.json>`.
+10. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
+11. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
+12. Verify with `hsas list-status` and answer from the resulting database.
+
+## Personal information inbox
+
+When the user supplies a tutorial group, temporary room, personal reminder, or
+similar course-relevant fact, prepare a minimal complete `InformationUpdate` and
+run `hsas inbox add <UPDATE.json> --title <TITLE>`. Show the user the output of
+`hsas inbox list`, including create/update actions and field-level differences.
+Apply one draft with `hsas inbox apply <ENTRY_ID> --confirmed` only after the user
+confirms that preview.
 
 ## RAG question workflow
 
@@ -110,6 +120,12 @@ hsas sync-courses [COURSE]
 hsas materials list [--course COURSE]
 hsas materials search QUERY [--course COURSE]
 hsas query QUESTION [--course COURSE]
+hsas ocr status
+hsas ocr run [--course COURSE] --confirmed
+hsas inbox add UPDATE.json --title TITLE [--note NOTE]
+hsas inbox list
+hsas inbox show ENTRY_ID
+hsas inbox apply ENTRY_ID --confirmed
 hsas changes list
 hsas changes show [--output CHANGES.json]
 hsas changes acknowledge CHANGES.json --confirmed --reviewed-no-information-change

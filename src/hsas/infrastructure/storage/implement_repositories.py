@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hsas.domain.information import InformationStore
+from hsas.domain.information import InformationStore, PersonalInbox
 from hsas.domain.courses import ArchiveIndex
 from hsas.domain.courses.define_change_queue import ChangeCheckpoint
 from hsas.domain.courses.detect_changes import CourseChangeSet
@@ -25,6 +25,19 @@ class JsonInformationRepository:
 
     def save(self, path: Path, store: InformationStore) -> None:
         write_model(path, store)
+
+
+class JsonPersonalInboxRepository:
+    """Filesystem adapter for personal-information drafts."""
+
+    def exists(self, path: Path) -> bool:
+        return path.is_file()
+
+    def load(self, path: Path) -> PersonalInbox:
+        return PersonalInbox.model_validate(read_json(path))
+
+    def save(self, path: Path, inbox: PersonalInbox) -> None:
+        write_model(path, inbox)
 
 
 class JsonChangeQueueRepository:

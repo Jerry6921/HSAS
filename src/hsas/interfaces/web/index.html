@@ -86,6 +86,40 @@
             <article><span>日期待确认</span><strong id="metric-unknown">—</strong><small>保留并等待来源核实</small></article>
             <article><span>待 AI 整理</span><strong id="metric-pending">—</strong><small>仅处理新增或变化资料</small></article>
           </section>
+          <section class="status-card" aria-labelledby="status-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">MATERIAL STATUS</p><h2 id="status-title">资料状态</h2></div>
+              <span id="status-total">0 项待处理</span>
+            </div>
+            <div class="status-grid">
+              <article><span>等待 AI 整理</span><strong id="status-ai">0</strong></article>
+              <article><span>等待 OCR</span><strong id="status-ocr">0</strong></article>
+              <article><span>等待 Google 授权</span><strong id="status-google">0</strong></article>
+              <article><span>日期待确认</span><strong id="status-date">0</strong></article>
+              <article><span>来源冲突</span><strong id="status-conflict">0</strong></article>
+            </div>
+            <div class="status-details">
+              <section>
+                <div class="status-detail-heading">
+                  <div><h3>OCR 队列</h3><p id="ocr-capability">正在检查本地 OCR…</p></div>
+                  <button id="run-ocr" class="button compact" type="button">批量 OCR</button>
+                </div>
+                <div id="ocr-queue-list" class="compact-list"></div>
+              </section>
+              <section>
+                <div class="status-detail-heading"><div><h3>需要处理</h3><p>授权、待确认日期与来源冲突</p></div></div>
+                <div id="attention-list" class="compact-list"></div>
+              </section>
+            </div>
+          </section>
+          <section class="inbox-card" aria-labelledby="inbox-title">
+            <div class="section-heading">
+              <div><p class="eyebrow">PERSONAL INBOX</p><h2 id="inbox-title">个人补充信息</h2></div>
+              <span id="inbox-count">0 条草稿</span>
+            </div>
+            <p class="section-note">AI 将 Tutorial group、临时教室和个人提醒放入这里；逐字段预览后再确认写入。</p>
+            <div id="inbox-list" class="inbox-list"></div>
+          </section>
           <section class="local-search-card" aria-labelledby="local-search-title">
             <div>
               <p class="eyebrow">LOCAL SEARCH</p>

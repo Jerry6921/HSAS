@@ -7,16 +7,22 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.application.manage_changes import collect_pending_changes
+from hsas.application.manage_inbox import personal_inbox_snapshot
 from hsas.application.retrieve_course_context import build_course_question_context
+from hsas.application.synchronize_courses import CourseSynchronizationService
 from hsas.domain.courses import ArchiveIndex, iter_files
+from hsas.domain.information import InformationStore
+from hsas.infrastructure.documents.run_ocr import collect_ocr_queue
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
 from hsas.infrastructure.runtime import ensure_resources_layout, get_runtime_paths
+from hsas.infrastructure.storage import JsonPersonalInboxRepository
 
 from .manage_information import INFORMATION_REPOSITORY, information_app
 from .manage_changes import CHANGE_REPOSITORY, changes_app
+from .manage_inbox import inbox_app
+from .manage_ocr import ocr_app
 from .query_materials import materials_app
 from .run_dashboard import serve_dashboard
 
@@ -25,6 +31,8 @@ app = typer.Typer(no_args_is_help=True, help="HKU Information Query System")
 app.add_typer(information_app, name="information")
 app.add_typer(materials_app, name="materials")
 app.add_typer(changes_app, name="changes")
+app.add_typer(inbox_app, name="inbox")
+app.add_typer(ocr_app, name="ocr")
 
 
 @app.callback()
@@ -50,6 +58,7 @@ def list_status(ctx: typer.Context) -> None:
     resources = _resources(ctx)
     typer.echo(f"Resources: {resources}")
     information_path = resources / "information.json"
+    store: InformationStore | None = None
     if not INFORMATION_REPOSITORY.exists(information_path):
         typer.echo("Information: unavailable (ask AI to prepare an update)")
     else:
@@ -91,6 +100,16 @@ def list_status(ctx: typer.Context) -> None:
     typer.echo(
         f"AI review: {len(pending.courses)} course(s), "
         f"{pending.pending_change_count} pending review item(s)"
+    )
+    typer.echo(f"OCR queue: {len(collect_ocr_queue(resources))} document(s)")
+    inbox = personal_inbox_snapshot(
+        resources,
+        information=store,
+        inbox_repository=JsonPersonalInboxRepository(),
+        information_repository=INFORMATION_REPOSITORY,
+    )
+    typer.echo(
+        f"Personal inbox: {inbox.get('pending_count', 0)} draft(s)"
     )
 
 

@@ -146,6 +146,27 @@ uncertainty visible.
 - Given: an official weekly section identifies a lecture deck and tutorial exercise for a dated class.
 - Expected: attach both resources to the item's `materials`, retain fact evidence in `sources`, and make each local path available to the source preview.
 
+### 27. Material status aggregation
+
+- Given: pending Moodle changes, an OCR-required PDF, an external Google file,
+  an unknown date and a source-conflict warning exist.
+- Expected: the Dashboard reports each condition in its separate status count
+  and exposes the affected records without merging their meanings.
+
+### 28. Batch OCR
+
+- Given: a scanned PDF and an image-based PPTX have `ocr_required=true`.
+- Expected: a confirmed OCR run processes both with an available local engine,
+  updates their text sidecars and analysis metadata, and removes successful
+  files from the queue while retaining failures with errors.
+
+### 29. Personal information inbox
+
+- Given: AI prepares a tutorial-room update from a user's explicit statement.
+- Expected: stage the validated update, show create/update and field-level
+  before/after values, require confirmation, atomically upsert the canonical
+  information store, and mark the Inbox entry applied.
+
 ## Regression use
 
 Add a scenario only for a distinct ownership, safety, evidence or data-loss risk.

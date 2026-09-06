@@ -13,15 +13,18 @@ HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、
 HIQS 的侧栏由首页、日历和课程概览组成。课程资料、结构化事实与来源预览均从这些页面进入。
 学生也可以把本地检索结果交给 AI，在对话中比较 DDL、理解要求并制定自己的学习安排。
 
-### 首页：同步、搜索与查看更新
+### 首页：同步、处理资料与查看更新
 
 首页承担应用入口的功能：
 
 1. 点击“登录 Moodle”，由学生本人完成 HKU SSO 与 MFA；
 2. 点击“同步课程”，下载当前账号可访问的课程页面和附件；
 3. 查看课程数、信息事项、本月日程、待确认日期与待 AI 整理数量；
-4. 在“本地问答式搜索”中输入课程代码、事项名称、DDL、地点或课件关键词；
-5. 在“更新记录”中查看 Moodle 项目的新增、修改与删除，以及等待 AI 审阅的资料。
+4. 在“资料状态”中集中查看等待 AI 整理、等待 OCR、等待 Google 授权、日期待确认和来源冲突；
+5. 通过“OCR 队列”批量识别扫描 PDF 与图片型 PPT，并把识别结果写回可搜索文本副本；
+6. 在“个人补充信息”中逐字段预览 AI 准备的 Tutorial group、临时教室与个人提醒草稿，确认后写入；
+7. 在“本地问答式搜索”中输入课程代码、事项名称、DDL、地点或课件关键词；
+8. 在“更新记录”中查看 Moodle 项目的新增、修改与删除，以及等待 AI 审阅的资料。
 
 ![HIQS 首页：同步、搜索与 Moodle 更新记录](docs/images/ui/home.png)
 
@@ -64,6 +67,8 @@ Collector 下载文件、保存来源并生成文本副本
   ↓
 Change Queue 标出首次全量或后续增量变化
   ↓
+OCR Queue 识别扫描 PDF 与图片型 PPT
+  ↓
 AI 阅读待处理文件，归纳课程事实与课程综述
   ↓
 HIQS 校验并增量写入 information.json
@@ -75,6 +80,16 @@ Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 
 或用户依据来源写入，并通过 Schema 校验。
 
 ## 快速开始
+
+### 安装 macOS App
+
+从 GitHub Releases 下载 `HIQS-2.2.0-macOS-arm64.dmg`，打开后把 `HIQS.app` 拖入
+Applications。App 使用独立原生窗口承载 Dashboard，并在内部自动启动随机端口的本地服务；
+日常使用不再需要终端或手动输入 `127.0.0.1` 地址。安装包自带 Python 运行时与 Playwright
+Chromium，可直接使用 Moodle 登录和同步。
+
+当前 DMG 使用 ad-hoc 签名并面向 Apple Silicon，尚未经过 Apple Developer ID 公证。
+macOS 首次打开时可在 Finder 中按住 Control 点击 HIQS，再选择“打开”。
 
 ### 要求
 
@@ -134,6 +149,29 @@ hsas information apply information-update.json \
   --confirmed
 ```
 
+扫描 PDF 与图片型 PPT 会自动进入 OCR 队列。macOS 使用本机 Apple Vision；安装了
+Tesseract 与 Poppler 的 Linux 环境可使用对应本地引擎：
+
+```bash
+hsas ocr status
+hsas ocr run --confirmed
+```
+
+### 通过 AI 添加个人补充信息
+
+AI 把用户确认的 Tutorial group、临时教室或个人提醒整理成普通
+`InformationUpdate`，再放入 Inbox：
+
+```bash
+hsas inbox add personal-update.json \
+  --title "MATH1851 Tutorial group 与临时教室"
+hsas inbox list
+hsas inbox apply PERSONAL_ENTRY_ID --confirmed
+```
+
+Dashboard 会在写入前展示记录动作与逐字段差异。确认后仍由同一套 Schema、课程引用和
+时间规则完成校验，再原子更新 `information.json`。
+
 AI 应先读取 `pending-changes.json`。首次同步的课程会列出全部文件；完成首次整理后，后续
 批次只包含新增、修改或删除的活动与课件，以及当前 `course.json`。如果批次生成后 Moodle
 再次同步，系统会要求重新生成批次，以覆盖最新变化。
@@ -155,6 +193,9 @@ hsas ui
 Dashboard 绑定本机 `127.0.0.1`，侧栏提供首页、日历和各课程概览。
 请通过 `hsas ui` 启动，并使用终端显示的 `http://127.0.0.1:...` 地址访问；本地 HTTP
 服务为搜索、来源预览、同步和 Moodle 跳转提供数据接口。
+
+macOS App 会自动完成上述启动过程，并在 WKWebView 窗口中加载同一套界面。HTTP 服务仍然
+只存在于本机回环接口，窗口不显示地址栏；外部 Moodle 链接交给系统默认浏览器打开。
 
 ## AI 如何总结课程
 
@@ -200,9 +241,9 @@ BM25 风格全文检索，并保留文件哈希与来源信息。
 
 ## 支持的课程文件
 
-- PDF：提取文字并保留页码标记；扫描件会提示可能需要 OCR；
+- PDF：提取文字并保留页码标记；扫描件自动进入本地 OCR 队列；
 - DOCX：提取正文、页眉、页脚、脚注、尾注和批注；
-- PPTX：提取每张 slide 的文字和 speaker notes；
+- PPTX：提取每张 slide 的文字和 speaker notes，图片型课件自动进入本地 OCR 队列；
 - Google Docs、Slides、Sheets：在当前登录会话有权限时尝试导出为 DOCX、PPTX、XLSX；
 - 其他文档、图片、音视频、代码、Notebook 和压缩包：保留原文件与来源信息。
 
@@ -227,6 +268,7 @@ hsas materials search "assignment requirements" --course COURSE_ID
 ├── resources/
 │   ├── information.json
 │   ├── ai-state/change-checkpoint.json
+│   ├── ai-state/personal-inbox.json
 │   └── courses/COURSE_ID/
 │       ├── course.json
 │       ├── files/
@@ -268,8 +310,25 @@ hsas information show      查看结构化信息库
 hsas materials list        查看全部本地文件
 hsas materials search      搜索文本副本
 hsas query                 为 AI 检索课程事实与课件证据
+hsas ocr status            查看本地 OCR 能力与等待队列
+hsas ocr run --confirmed   批量 OCR 并更新可搜索文本副本
+hsas inbox add             将 AI 准备的个人补充更新放入 Inbox
+hsas inbox list            预览个人补充信息的逐字段差异
+hsas inbox apply           确认并写入一条个人补充信息
 hsas ui                    打开本地 Dashboard
 ```
+
+## 构建 macOS DMG
+
+仓库提供固定打包程序：
+
+```bash
+./scripts/build_macos_dmg.sh
+```
+
+脚本会安装锁定版本的 PyInstaller、确认匹配的 Playwright Chromium、冻结 Python 后端、
+编译 Swift/WKWebView 原生外壳、执行 ad-hoc 签名，并在 `dist/` 生成 `.app` 与压缩 DMG。
+构建文件名包含 HIQS 版本与当前 CPU 架构。
 
 ## 文档
 
@@ -287,6 +346,17 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 后续版本更新继续记录在本节顶部。
+
+### 2.2.0 · 2026-09-06
+
+- 首页新增统一资料状态面板，汇总 AI 审阅、OCR、Google 授权、待确认日期和来源冲突；
+- 新增扫描 PDF 与图片型 PPT 自动识别、本地 OCR 队列和批量处理入口；
+- OCR 完成后更新文本 sidecar、分析摘要、关键词与课程快照，可直接进入本地搜索和 AI 阅读流程；
+- 新增个人补充信息 Inbox，支持 AI 创建草稿、逐字段预览和用户确认后原子写入；
+- `hsas list-status`、Dashboard 与 CLI 增加 OCR 和 Inbox 状态及操作。
+- 新增 Swift/WKWebView 原生 macOS 应用窗口，自动管理内置本地服务与外部链接；
+- 新增可重复执行的 DMG 构建程序，安装包包含 Python 后端与 Playwright Chromium；
+- GitHub Release 提供 Apple Silicon DMG 与 SHA-256 校验值。
 
 ### 2.1.0 · 2026-09-06
 

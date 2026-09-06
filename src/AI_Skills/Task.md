@@ -113,11 +113,13 @@ visible total reflects confirmed entries.
 
 A direct, unambiguous statement in the AI conversation confirms only the facts
 it contains. The AI may prepare an incremental update for a selected tutorial,
-temporary room change, teacher announcement, or reminder.
+temporary room change, teacher announcement, or reminder. Add that update with
+`hsas inbox add UPDATE.json --title TITLE`, then use `hsas inbox list` to show
+the create/update action and every changed field. After the user confirms the
+preview, apply the selected draft with `hsas inbox apply ENTRY_ID --confirmed`.
 
 Limit interpretation to the facts stated by the user and the cited course sources.
-Before applying, show any interpretation that could materially change the
-calendar and use the normal validation plus `--confirmed` write path.
+Keep unconfirmed drafts in the Inbox until the user has reviewed them.
 
 ## 9. Pending and format-limited sources
 
@@ -125,8 +127,9 @@ calendar and use the normal validation plus `--confirmed` write path.
 |---|---|
 | Download failed | Keep the previous file, report the failure, and mark content as pending |
 | Google export requires access | Keep the external link and ask the user to grant access/open it |
-| PDF is scanned | Mark OCR required and ground claims after visual or OCR review |
-| PPTX/DOCX has little text | Inspect images/layout with the relevant tool or report the limitation |
+| PDF is scanned | Mark OCR required, run the local OCR queue, and ground claims in the resulting sidecar or visual review |
+| PPTX has image-based slides | Run the local OCR queue and review its slide/image markers |
+| DOCX has little text | Inspect images/layout with the relevant tool or report the limitation |
 | Date pending | Keep the item under “date to verify” |
 | Weight pending | Keep it `null` |
 | Course reference pending | Fix the course record before applying |

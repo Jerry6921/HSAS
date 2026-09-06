@@ -21,6 +21,15 @@ facts. `information.json` is the canonical database consumed by the calendar.
 The batch checkpoint advances only after a successful information write. A stale
 batch is rejected if Moodle was synchronized again after it was generated.
 
+## Personal information inbox
+
+For facts supplied directly by the user, validate the same `InformationUpdate`
+payload and stage it with `hsas inbox add <UPDATE.json> --title <TITLE>`. Run
+`hsas inbox list` and present the create/update action plus field-level
+before/after values. Apply the selected entry with
+`hsas inbox apply <ENTRY_ID> --confirmed` after the user confirms the preview.
+The canonical store still uses the normal validated atomic upsert.
+
 ## Upsert behavior
 
 An update is incremental. Courses are matched by `course_id`; information items

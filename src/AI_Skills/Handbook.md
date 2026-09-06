@@ -17,6 +17,8 @@ hsas login
 hsas sync-courses [COURSE_ID_OR_URL]
 hsas materials list [--course COURSE_ID]
 hsas materials search QUERY [--course COURSE_ID]
+hsas ocr status
+hsas ocr run [--course COURSE_ID] --confirmed
 ```
 
 The user completes SSO/MFA in the visible browser. Passwords, MFA codes, cookies,
@@ -85,7 +87,8 @@ Pypdf extraction writes page markers:
 page text
 ```
 
-Sparse extractable text sets `ocr_required=true`.
+Sparse extractable text sets `ocr_required=true` and adds the file to the local
+OCR queue.
 
 ### DOCX
 
@@ -96,8 +99,16 @@ remain inert.
 ### PPTX
 
 The extractor reads slide text and speaker-note XML with explicit markers.
-Macros, media, and embedded objects remain inert. Image-based slides use visual
-inspection or OCR.
+Macros, media, and embedded objects remain inert. Image-based slides set
+`ocr_required=true` and enter the local OCR queue.
+
+### OCR queue
+
+`hsas ocr status` reports local engine capability and every queued source.
+`hsas ocr run --confirmed` uses Apple Vision on macOS, with Tesseract and
+Poppler as the portable fallback. OCR output is appended to the extracted text
+sidecar with page/slide markers. HIQS then refreshes analysis hashes, summaries,
+keywords and reading estimates and atomically updates the course archive.
 
 The local materials search indexes every file that has an
 `extracted_text_path`, regardless of whether the original was PDF, DOCX or

@@ -36,6 +36,9 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="login-moodle"' in loaded["/"][0]
     assert b'id="sync-courses"' in loaded["/"][0]
     assert b'id="metric-pending"' in loaded["/"][0]
+    assert b'id="status-title"' in loaded["/"][0]
+    assert b'id="run-ocr"' in loaded["/"][0]
+    assert b'id="inbox-list"' in loaded["/"][0]
     assert b'id="course-overview-view"' in loaded["/"][0]
     assert b'id="course-navigation"' in loaded["/"][0]
     assert b'id="show-home"' in loaded["/"][0]
@@ -47,6 +50,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"/api/source-preview" in loaded["/assets/app.js"][0]
     assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
     assert b'"/api/sync"' in loaded["/assets/app.js"][0]
+    assert b'"/api/ocr/run"' in loaded["/assets/app.js"][0]
+    assert b'"/api/inbox/apply"' in loaded["/assets/app.js"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
     assert "相关学习材料".encode() in loaded["/assets/app.js"][0]
@@ -81,6 +86,36 @@ def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path)
         "calendar_item_count": 0,
         "unknown_date_count": 1,
     }
+    assert snapshot["material_status"]["counts"]["date_unknown"] == 1
+    assert snapshot["personal_inbox"]["pending_count"] == 0
+
+
+def test_ocr_action_requires_confirmation_and_reports_results(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[Path] = []
+
+    def run(resources: Path):
+        calls.append(resources)
+        return {
+            "processed_count": 2,
+            "failed_count": 1,
+            "processed": [],
+            "failures": [],
+        }
+
+    monkeypatch.setattr("hsas.interfaces.run_dashboard.run_ocr_queue", run)
+    service = DashboardService(tmp_path)
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.process_ocr_queue({"confirmed": False})
+
+    result = service.process_ocr_queue({"confirmed": True})
+
+    assert result["processed_count"] == 2
+    assert result["failed_count"] == 1
+    assert calls == [tmp_path]
 
 
 def test_request_host_must_match_loopback_server() -> None:

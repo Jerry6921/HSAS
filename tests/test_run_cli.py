@@ -14,7 +14,7 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
     group_names = {group.name for group in app.registered_groups}
     assert result.exit_code == 0
     assert command_names == {"list-status", "login", "query", "sync-courses", "ui"}
-    assert group_names == {"changes", "information", "materials"}
+    assert group_names == {"changes", "inbox", "information", "materials", "ocr"}
 
 
 def test_sync_command_dispatches_single_or_all(tmp_path: Path, monkeypatch) -> None:

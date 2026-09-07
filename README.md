@@ -92,125 +92,20 @@ Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 
 
 ## 快速开始
 
-### macOS App 状态
-
-仓库包含独立 HIQS 窗口及完整打包源码。公开 Release 暂时提供源码版本；完成 Apple
-Developer ID 签名与公证后再提供可直接安装的 macOS DMG。
-
-### 要求
-
-- macOS 或 Linux；
-- Python 3.11 或更高版本；
-- 可访问 HKU Moodle 的账号；
-- 用户本人完成 HKU SSO 和 MFA。
-
-### Agent 启动提示词
-
 将以下提示词交给能够操作本地终端的 Agent：
 
 ```text
-请定位 HIQS 项目根目录，完整阅读 AGENTS.md 和 src/AI_Skills/SKILL.md，
-然后按照 Skill 启动 HIQS，并向我报告运行状态与 Dashboard 访问地址。
-```
+请从 https://github.com/Jerry6921/HSAS 下载最新的 HIQS 源码，并在合适的本地目录中完成安装。
+如果目标目录已经是该仓库，请先检查工作树并以安全方式更新；保留所有用户数据与未提交修改。
 
-### 安装
+定位包含 pyproject.toml 且项目名为 hku-information-query-system 的根目录，完整阅读
+AGENTS.md 与 src/AI_Skills/SKILL.md，并遵循其中的项目边界。检查 Python 版本与系统依赖，
+创建项目专用的 .venv，按照 requirements.lock 安装项目依赖，再安装匹配的 Playwright
+Chromium。运行项目测试或必要的启动检查，确认环境可用后启动 `hsas ui`，让 Dashboard
+自动在本机打开，并向我报告安装位置、运行状态与访问地址。
 
-```bash
-git clone https://github.com/Jerry6921/HSAS.git
-cd HSAS
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -c requirements.lock -e .
-playwright install chromium
-```
-
-CLI 为兼容旧版继续使用 `hsas`，产品名称已经改为 HIQS。
-
-### 登录与同步
-
-```bash
-hsas login
-hsas sync-courses
-hsas list-status
-hsas class-planner login
-hsas class-planner sync
-hsas class-planner status
-hsas class-planner changes --output planner-changes.json
-```
-
-`hsas login` 会打开浏览器。密码与 MFA 始终由用户在 HKU 页面中输入；AI 仅接触同步后的
-课程资料与经过清理的来源信息。
-
-`hsas class-planner login` 会打开官方 Class Planner，并沿用 HKU Portal 与 Microsoft 登录
-流程。浏览器会话负责携带临时令牌；HIQS 保存经过隐私过滤的课表响应、同步时间与课程级
-差异。该快照位于私有 resources 目录，可供 AI 核对班别、时间和地点后生成经过校验的
-`information.json` 更新。
-
-完成 Class Planner 差异整理时，可让 information 写入和 checkpoint 顺序执行：
-
-```bash
-hsas information apply information-update.json \
-  --class-planner-changes planner-changes.json \
-  --confirmed
-```
-
-若审阅确认课表事实保持一致，可直接推进独立 checkpoint：
-
-```bash
-hsas class-planner acknowledge planner-changes.json --confirmed
-```
-
-同步单门课程时可传入 Moodle course ID 或同源课程 URL：
-
-```bash
-hsas sync-courses 138907
-```
-
-### 让 AI 整理资料
-
-```bash
-hsas changes list
-hsas changes show --output pending-changes.json
-hsas information template information-update.json
-hsas information validate information-update.json
-hsas information apply information-update.json \
-  --changes pending-changes.json \
-  --confirmed
-```
-
-扫描 PDF 与图片型 PPT 会自动进入 OCR 队列。macOS 使用本机 Apple Vision；安装了
-Tesseract 与 Poppler 的 Linux 环境可使用对应本地引擎：
-
-```bash
-hsas ocr status
-hsas ocr run --confirmed
-```
-
-### 通过 AI 添加个人补充信息
-
-AI 把用户确认的 Tutorial group、临时教室或个人提醒整理成普通
-`InformationUpdate`，再放入 Inbox：
-
-```bash
-hsas inbox add personal-update.json \
-  --title "MATH1851 Tutorial group 与临时教室"
-hsas inbox list
-hsas inbox apply PERSONAL_ENTRY_ID --confirmed
-```
-
-Dashboard 会在写入前展示记录动作与逐字段差异。确认后仍由同一套 Schema、课程引用和
-时间规则完成校验，再原子更新 `information.json`。
-
-AI 应先读取 `pending-changes.json`。首次同步的课程会列出全部文件；完成首次整理后，后续
-批次只包含新增、修改或删除的活动与课件，以及当前 `course.json`。如果批次生成后 Moodle
-再次同步，系统会要求重新生成批次，以覆盖最新变化。
-
-若 AI 阅读后确认课程事实保持一致：
-
-```bash
-hsas changes acknowledge pending-changes.json \
-  --confirmed \
-  --reviewed-no-information-change
+HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由我在官方页面亲自完成；
+请勿索取、读取或输出密码、验证码、Cookie、sesskey 或访问令牌。
 ```
 
 ## 启动 Dashboard
@@ -383,6 +278,11 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 后续版本更新继续记录在本节顶部。
+
+### 2.2.0 Agent 快速开始更新 · 2026-09-07
+
+- README 的“快速开始”集中为一段可直接交给本地 Agent 的启动提示词；
+- Agent 可从 GitHub 获取源码、创建隔离环境、安装锁定依赖与浏览器运行时，并自动启动 HIQS UI。
 
 ### 2.2.0 首页演示更新 · 2026-09-07
 

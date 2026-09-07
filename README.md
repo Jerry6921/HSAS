@@ -108,60 +108,21 @@ HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由�
 请勿索取、读取或输出密码、验证码、Cookie、sesskey 或访问令牌。
 ```
 
-## 启动 Dashboard
+## 使用方式
 
-```bash
-hsas ui
-```
+### 在 Agent 中向课程资料提问
 
-Dashboard 绑定本机 `127.0.0.1`，侧栏提供首页、日历和各课程概览。
-请通过 `hsas ui` 启动，并使用终端显示的 `http://127.0.0.1:...` 地址访问；本地 HTTP
-服务为搜索、来源预览、同步和 Moodle 跳转提供数据接口。
+启动 HIQS 后，直接在 Agent 对话中提出自然语言问题，例如询问某次考试的日期、占分、
+范围与相关课件。Agent 会按照项目 Skill 检索本地 `information.json` 和课程文本副本，
+组合结构化事实与相关材料，并在答案中标明来源、待确认字段和冲突信息。
 
-macOS App 会自动完成上述启动过程，并在 WKWebView 窗口中加载同一套界面。HTTP 服务仍然
-只存在于本机回环接口，窗口不显示地址栏；外部 Moodle 链接交给系统默认浏览器打开。
+学生也可以请 Agent 比较已经确认的 DDL 与课程时间，在对话中自行调整学习安排。
 
-## AI 如何总结课程
+### 在 Agent 中写入额外信息
 
-首次全量整理时，AI 可根据 syllabus、course introduction、assessment information 等
-官方资料填写：
-
-- `overview`：课程综述；
-- `objectives`：资料明确支持的课程目的；
-- `starts_on` / `ends_on`：课程在该学期的教学起止日期；
-- `sources`：可供用户复查的文件、页码或链接。
-
-AI 还可在日历事项的 `materials` 中关联相应 Lecture、Notes、Tutorial、Exercises 与
-Reading。用户从月历或每日议程打开事项后，可直接预览相关课件原文或文本副本。
-
-这些内容依据课程资料归纳。来源有限时字段保持为空；
-后续只有相关课件发生变化时才重新总结。
-
-## 用 RAG 向课程资料提问
-
-HIQS 的 RAG 在本地运行，并为每次提问组合两类证据：精确日期、课程时间和占分来自经过
-校验的 `information.json`，课程内容与详细
-要求来自 PDF、DOCX、PPTX 的文本副本。
-
-```bash
-hsas query "MATH1851 Part I test 几时、占几分，范围是什么？" \
-  --course COURSE_ID
-```
-
-命令会输出机器可读的 RAG context，其中包括：
-
-- 匹配的课程与日历事项；
-- 已记录的日期、形式、占分、要求、状态与来源；
-- 相关课件段落、文件名、Moodle activity，以及可用的页码或 slide 标记；
-- 数据库时效、待补资料与空检索结果警告。
-
-课程文件保留在本地，`hsas query` 以模型无关的方式生成检索结果。项目内置的
-[`hiqs-course-information` AI Skill](src/AI_Skills/SKILL.md) 会指导兼容的 AI 先运行
-`hsas query`，再根据返回证据回答并附上出处。当前检索结合结构化事实匹配与本地
-BM25 风格全文检索，并保留文件哈希与来源信息。
-
-在学习计划场景中，学生可以询问“根据这些确认过的 DDL，我该怎样安排这一周？”。AI 可
-用于比较事项和修改方案；计划由学生决定，并作为课程事实库之外的独立内容保存与执行。
+把 Tutorial group、临时教室、个人提醒或其他补充信息直接告诉 Agent。Agent 会将内容整理
+为待写入草稿，并在 Inbox 中展示记录动作与逐字段变化。用户确认预览后，HIQS 再通过同一套
+Schema、课程引用和时间规则完成校验，并原子更新本地信息库。
 
 ## 支持的课程文件
 
@@ -173,14 +134,6 @@ BM25 风格全文检索，并保留文件哈希与来源信息。
 
 旧 `.doc`、`.ppt` 文件会完整下载；Open XML 文本提取流程适用于 DOCX/PPTX。
 Google Workspace 返回登录页或权限页时，项目会标记为 external 并保留真实访问状态。
-
-查看与搜索本地课件：
-
-```bash
-hsas materials list
-hsas materials list --course COURSE_ID
-hsas materials search "assignment requirements" --course COURSE_ID
-```
 
 ## 数据与增量更新
 
@@ -204,8 +157,6 @@ hsas materials search "assignment requirements" --course COURSE_ID
 └── state/
 ```
 
-可用 `HSAS_DATA_DIR` 或全局 `--resources` 覆盖数据位置。
-
 `information.json` 是日历与课程概览的唯一结构化事实来源。写入采用增量 upsert：相同
 `course_id` 或 `item_id` 被完整更新，新 ID 被追加，未出现在本次更新中的记录会保留。
 上一份有效数据库会在校验失败时继续保留；删除操作始终需要显式流程。
@@ -223,45 +174,6 @@ hsas materials search "assignment requirements" --course COURSE_ID
 - 每门课程在 staging 中完成下载、分析和校验后才原子发布；
 - 同步中断或失败会保留上一份完整课程快照。
 
-## 常用命令
-
-```text
-hsas login                 登录 Moodle
-hsas sync-courses          同步全部课程
-hsas sync-courses COURSE   同步指定课程
-hsas class-planner login   登录 HKU Portal / Class Planner
-hsas class-planner sync    同步官方课表并生成差异快照
-hsas class-planner status  查看课表快照状态
-hsas class-planner changes 导出 checkpoint 后的课表差异
-hsas class-planner acknowledge 确认已审阅的课表差异
-hsas calendar export       导出 Apple Calendar 可导入的 ICS
-hsas list-status           查看资料与待整理状态
-hsas changes list          查看增量整理摘要
-hsas changes show          导出 AI 应阅读的范围
-hsas information show      查看结构化信息库
-hsas materials list        查看全部本地文件
-hsas materials search      搜索文本副本
-hsas query                 为 AI 检索课程事实与课件证据
-hsas ocr status            查看本地 OCR 能力与等待队列
-hsas ocr run --confirmed   批量 OCR 并更新可搜索文本副本
-hsas inbox add             将 AI 准备的个人补充更新放入 Inbox
-hsas inbox list            预览个人补充信息的逐字段差异
-hsas inbox apply           确认并写入一条个人补充信息
-hsas ui                    打开本地 Dashboard
-```
-
-## 构建 macOS DMG
-
-仓库提供固定打包程序：
-
-```bash
-./scripts/build_macos_dmg.sh
-```
-
-脚本会安装锁定版本的 PyInstaller、确认匹配的 Playwright Chromium、冻结 Python 后端、
-编译 Swift/WKWebView 原生外壳、执行 ad-hoc 签名，并在 `dist/` 生成 `.app` 与压缩 DMG。
-构建文件名包含 HIQS 版本与当前 CPU 架构。
-
 ## 文档
 
 - [架构与数据流](ARCHITECTURE.md)
@@ -278,6 +190,11 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 后续版本更新继续记录在本节顶部。
+
+### 2.2.0 README 使用方式更新 · 2026-09-07
+
+- README 移除课程总结机制说明、手动终端命令与 DMG 构建步骤；
+- 新增面向学生的“使用方式”，介绍如何在 Agent 中查询课程资料和预览、确认额外信息写入。
 
 ### 2.2.0 Agent 快速开始更新 · 2026-09-07
 

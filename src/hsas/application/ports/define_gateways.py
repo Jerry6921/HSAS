@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +21,7 @@ class SyncBatchResult:
     succeeded_course_ids: tuple[str, ...]
     failures: tuple[dict[str, str], ...]
     report_path: Path
+    cancelled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +61,12 @@ class CourseGateway(Protocol):
 
     def sync_course(self, course: str) -> SyncCourseResult: ...
 
-    def sync_all(self) -> SyncBatchResult: ...
+    def sync_all(
+        self,
+        *,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SyncBatchResult: ...
 
 
 @dataclass(frozen=True, slots=True)

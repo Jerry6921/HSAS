@@ -142,6 +142,14 @@ def build_information_template() -> InformationUpdate:
                         "end_time": "15:20:00",
                         "excluded_dates": [],
                         "additional_dates": [],
+                        "exceptions": [
+                            {
+                                "date": "2026-10-06",
+                                "status": "cancelled",
+                                "note": "Public holiday; replace from an official source",
+                                "sources": [],
+                            }
+                        ],
                     },
                     "location": "To be replaced from the source",
                     "requirements": [],

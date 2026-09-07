@@ -7,6 +7,11 @@ from typing import Annotated
 
 import typer
 
+from hsas.infrastructure.class_planner.manage_changes import (
+    ClassPlannerReviewError,
+    acknowledge_class_planner_changes,
+    collect_class_planner_changes,
+)
 from hsas.application.synchronize_class_planner import (
     ClassPlannerSynchronizationService,
 )
@@ -15,6 +20,7 @@ from hsas.infrastructure.class_planner import (
     class_planner_status,
 )
 from hsas.infrastructure.runtime import get_runtime_paths
+from hsas.infrastructure.storage.persist_data import read_json, write_json
 
 
 class_planner_app = typer.Typer(
@@ -69,8 +75,44 @@ def status(ctx: typer.Context) -> None:
     typer.echo(
         f"Class Planner: {value['course_count']} course(s), "
         f"{value['meeting_count']} meeting(s), term(s) {terms}; "
-        f"synced={value['synced_at']}"
+        f"synced={value['synced_at']}; "
+        f"pending review={value['review']['pending_change_count']}"
     )
+
+
+@class_planner_app.command("changes")
+def changes(
+    ctx: typer.Context,
+    output_path: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write the pending review batch to JSON"),
+    ] = None,
+) -> None:
+    """Show Class Planner changes after the independent review checkpoint."""
+    batch = collect_class_planner_changes(_resources(ctx))
+    if output_path is not None:
+        write_json(output_path, batch)
+        typer.echo(f"Class Planner review batch -> {output_path}")
+    typer.echo(
+        f"Class Planner review: {batch['pending_change_count']} change(s) "
+        f"across {batch['pending_snapshot_count']} snapshot(s)"
+    )
+
+
+@class_planner_app.command("acknowledge")
+def acknowledge(
+    ctx: typer.Context,
+    batch_path: Annotated[Path, typer.Argument(help="Exported Class Planner review batch")],
+    confirmed: Annotated[bool, typer.Option("--confirmed")] = False,
+) -> None:
+    """Advance the Class Planner checkpoint after a reviewed import."""
+    try:
+        checkpoint = acknowledge_class_planner_changes(
+            _resources(ctx), read_json(batch_path), confirmed=confirmed
+        )
+    except (OSError, ValueError, ClassPlannerReviewError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Class Planner checkpoint -> {checkpoint['acknowledged_through']}")
 
 
 def _service(resources_dir: Path) -> ClassPlannerSynchronizationService:

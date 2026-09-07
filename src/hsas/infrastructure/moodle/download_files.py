@@ -16,6 +16,7 @@ from hsas.infrastructure.storage.persist_data import safe_filename, write_bytes
 from hsas.domain.courses.index_courses import iter_activities
 from hsas.domain.courses.define_courses import CourseActivity, CourseArchive, StoredFile
 from hsas.domain.courses.calculate_statistics import refresh_archive_stats
+from hsas.infrastructure.moodle.handle_cancellation import raise_if_cancelled
 
 
 DownloadProgressCallback = Callable[[str, CourseActivity, int, int], None]
@@ -439,6 +440,7 @@ async def download_course_files(
     concurrency: int,
     previous_archive: CourseArchive | None = None,
     progress_callback: DownloadProgressCallback | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> None:
     semaphore = asyncio.Semaphore(concurrency)
     jobs = []
@@ -453,7 +455,9 @@ async def download_course_files(
 
     async def run(activity: CourseActivity, directory: Path) -> None:
         nonlocal completed
+        raise_if_cancelled(cancel_requested)
         async with semaphore:
+            raise_if_cancelled(cancel_requested)
             if progress_callback:
                 progress_callback("start", activity, completed, total_jobs)
             await download_activity_files(
@@ -466,6 +470,7 @@ async def download_course_files(
                 timeout_ms=timeout_ms,
                 previous_activity=previous_activities.get(activity.module_id),
             )
+            raise_if_cancelled(cancel_requested)
             async with completion_lock:
                 completed += 1
                 if progress_callback:

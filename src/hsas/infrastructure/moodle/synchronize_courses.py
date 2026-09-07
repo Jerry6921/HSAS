@@ -31,7 +31,14 @@ from hsas.infrastructure.storage.persist_data import read_json, write_json, writ
 from hsas.infrastructure.storage.publish_courses import CourseSnapshotTransaction
 from hsas.infrastructure.moodle.display_progress import SyncProgress
 from hsas.infrastructure.moodle.record_sync import record_sync_operation
-from hsas.infrastructure.moodle.record_session import record_moodle_session_status
+from hsas.infrastructure.moodle.record_session import (
+    load_moodle_session_status,
+    record_moodle_session_status,
+)
+from hsas.infrastructure.moodle.handle_cancellation import (
+    MoodleSyncCancelled,
+    raise_if_cancelled,
+)
 from hsas.domain.courses.detect_changes import (
     CourseChangeSet,
     compare_course_archives,
@@ -105,6 +112,7 @@ async def _persist_course(
     state: dict,
     progress: SyncProgress | None = None,
     progress_task: int | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> tuple[CourseArchive, CourseChangeSet, Path]:
     """Download every accessible file, create text sidecars, and persist one course."""
     live_storage_root = settings.output_dir
@@ -122,6 +130,7 @@ async def _persist_course(
         staged_course_path = course_root / "course.json"
         raw_path = course_root / "raw" / "course-state.json"
         raw_relative_path = raw_path.relative_to(storage_root).as_posix()
+        raise_if_cancelled(cancel_requested)
         with _stage(progress, progress_task, "StateMapper", "Mapping Moodle state"):
             archive = build_course_archive(
                 state,
@@ -130,6 +139,7 @@ async def _persist_course(
             )
         with _stage(progress, progress_task, "FileStore", "Staging raw course state"):
             write_json(raw_path, state)
+        raise_if_cancelled(cancel_requested)
         with _stage(progress, progress_task, "Downloader", "Staging course files"):
             await download_course_files(
                 context,
@@ -146,13 +156,16 @@ async def _persist_course(
                     if progress is not None and progress_task is not None
                     else None
                 ),
+                cancel_requested=cancel_requested,
             )
+        raise_if_cancelled(cancel_requested)
         with _stage(progress, progress_task, "PdfAnalyzer", "Extracting PDF text"):
             analyze_course_pdfs(
                 archive,
                 storage_root=storage_root,
                 course_root=course_root,
             )
+        raise_if_cancelled(cancel_requested)
         with _stage(
             progress,
             progress_task,
@@ -164,6 +177,7 @@ async def _persist_course(
                 storage_root=storage_root,
                 course_root=course_root,
             )
+        raise_if_cancelled(cancel_requested)
         with _stage(
             progress,
             progress_task,
@@ -177,6 +191,7 @@ async def _persist_course(
                 stamp = changes.detected_at.strftime("%Y%m%dT%H%M%SZ")
                 write_model(changes_root / "history" / f"{stamp}.json", changes)
         with _stage(progress, progress_task, "FileStore", "Publishing course snapshot"):
+            raise_if_cancelled(cancel_requested)
             write_model(staged_course_path, archive)
             output_path = transaction.commit()
     return archive, changes, output_path
@@ -268,9 +283,16 @@ def check_login_status(settings: Settings | None = None) -> MoodleSessionResult:
         )
 
     result = asyncio.run(run())
+    previous_status = load_moodle_session_status(active_settings.output_dir).get(
+        "login_status"
+    )
     persisted_status = {
         "logged_in": "logged_in",
-        "logged_out": "login_required",
+        "logged_out": (
+            "expired"
+            if previous_status in {"logged_in", "expired"}
+            else "login_required"
+        ),
     }.get(result.status, "unknown")
     record_moodle_session_status(
         active_settings.output_dir,
@@ -487,7 +509,12 @@ def sync_course(
     return result
 
 
-def sync_all(settings: Settings | None = None) -> SyncBatchResult:
+def sync_all(
+    settings: Settings | None = None,
+    *,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> SyncBatchResult:
     """Download and fully process every available Moodle course."""
     active_settings = settings or _settings()
 
@@ -496,30 +523,49 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
         succeeded: list[str] = []
         change_counts: dict[str, int] = {}
         failures: list[dict[str, str]] = []
+        cancelled = False
+
+        def report(**values: object) -> None:
+            if progress_callback is not None:
+                progress_callback(values)
 
         with SyncProgress() as progress:
             discovery_task = progress.add_operation(
                 "MoodleAPI",
                 "Discovering available courses",
             )
+            report(stage="discovering", detail="正在读取 Moodle 课程目录", completed=0, total=0)
             async with persistent_context(active_settings) as context:
                 page = await open_page(context, str(active_settings.dashboard_url))
-                results = await discover_all_course_states(
-                    context,
-                    page,
-                    dashboard_url=str(active_settings.dashboard_url),
-                    base_url=str(active_settings.base_url),
-                    selectors=selectors,
-                    progress_callback=lambda index, total, course: (
-                        progress.update_discovery(
-                            discovery_task,
-                            index,
-                            total,
-                            course,
-                        )
-                    ),
-                )
+                try:
+                    results = await discover_all_course_states(
+                        context,
+                        page,
+                        dashboard_url=str(active_settings.dashboard_url),
+                        base_url=str(active_settings.base_url),
+                        selectors=selectors,
+                        progress_callback=lambda index, total, course: (
+                            progress.update_discovery(
+                                discovery_task,
+                                index,
+                                total,
+                                course,
+                            )
+                        ),
+                        cancel_requested=cancel_requested,
+                    )
+                except MoodleSyncCancelled:
+                    results = []
+                    cancelled = True
                 if not results:
+                    if cancelled:
+                        report(
+                            stage="finished",
+                            detail="同步已取消",
+                            completed=0,
+                            total=0,
+                        )
+                        return _cancelled_batch_result(active_settings, results)
                     raise RuntimeError(
                         "No courses were discovered. The Moodle session may have "
                         "expired or dashboard selectors may need updating; existing "
@@ -529,14 +575,31 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
                     discovery_task,
                     f"{len(results)} courses discovered",
                 )
+                report(
+                    stage="processing",
+                    detail=f"已发现 {len(results)} 门课程",
+                    completed=0,
+                    total=len(results),
+                )
                 write_json(
                     active_settings.output_dir / "courses.json",
                     [result.course.model_dump(mode="json") for result in results],
                 )
                 batch_task = progress.add_batch(len(results))
 
-                for result in results:
+                for index, result in enumerate(results, start=1):
+                    if cancel_requested is not None and cancel_requested():
+                        cancelled = True
+                        break
                     course_id = result.course.course_id
+                    report(
+                        stage="processing",
+                        detail=f"正在处理 {result.title}",
+                        course_id=course_id or "",
+                        course_title=result.title,
+                        completed=index - 1,
+                        total=len(results),
+                    )
                     if not result.succeeded or not course_id or result.state is None:
                         failures.append(
                             {
@@ -548,6 +611,12 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
                         progress.advance_batch(
                             batch_task,
                             f"failed: {course_id or result.course.title}",
+                        )
+                        report(
+                            stage="processing",
+                            detail=f"已跳过 {result.course.title}",
+                            completed=index,
+                            total=len(results),
                         )
                         continue
                     course_task = progress.add_course(
@@ -564,11 +633,16 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
                             state=result.state,
                             progress=progress,
                             progress_task=course_task,
+                            cancel_requested=cancel_requested,
                         )
                         progress.finish_course(course_task, archive.course.title)
                         succeeded.append(course_id)
                         change_counts[course_id] = len(changes.changes)
                         progress.advance_batch(batch_task, f"completed: {course_id}")
+                    except MoodleSyncCancelled:
+                        cancelled = True
+                        progress.advance_batch(batch_task, f"cancelled: {course_id}")
+                        break
                     except Exception as exc:
                         failures.append(
                             {
@@ -578,6 +652,14 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
                             }
                         )
                         progress.advance_batch(batch_task, f"failed: {course_id}")
+                    report(
+                        stage="processing",
+                        detail=f"已处理 {result.title}",
+                        course_id=course_id,
+                        course_title=result.title,
+                        completed=index,
+                        total=len(results),
+                    )
 
         course_results = [
             {
@@ -602,15 +684,41 @@ def sync_all(settings: Settings | None = None) -> SyncBatchResult:
             succeeded_course_ids=tuple(succeeded),
             failures=tuple(failures),
             report_path=report_path,
+            cancelled=cancelled,
         )
 
-    result = asyncio.run(run())
-    record_moodle_session_status(
-        active_settings.output_dir,
-        "logged_in",
-        available_course_count=result.discovered_course_count,
-    )
+    try:
+        result = asyncio.run(run())
+    except RuntimeError as exc:
+        if "No courses were discovered" in str(exc):
+            record_moodle_session_status(active_settings.output_dir, "expired")
+        raise
+    if not result.cancelled:
+        record_moodle_session_status(
+            active_settings.output_dir,
+            "logged_in",
+            available_course_count=result.discovered_course_count,
+        )
     return result
+
+
+def _cancelled_batch_result(
+    settings: Settings,
+    results: list,
+) -> SyncBatchResult:
+    report_path = record_sync_operation(
+        settings.output_dir,
+        scope="all",
+        discovered_course_count=len(results),
+        course_results=[],
+    )
+    return SyncBatchResult(
+        discovered_course_count=len(results),
+        succeeded_course_ids=(),
+        failures=(),
+        report_path=report_path,
+        cancelled=True,
+    )
 
 
 class MoodleCourseGateway:
@@ -646,5 +754,14 @@ class MoodleCourseGateway:
     def sync_course(self, course: str) -> SyncCourseResult:
         return sync_course(course, self.settings)
 
-    def sync_all(self) -> SyncBatchResult:
-        return sync_all(self.settings)
+    def sync_all(
+        self,
+        *,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SyncBatchResult:
+        return sync_all(
+            self.settings,
+            progress_callback=progress_callback,
+            cancel_requested=cancel_requested,
+        )

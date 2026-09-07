@@ -20,6 +20,11 @@ from hsas.application.manage_changes import (
     acknowledge_change_batch,
     validate_change_batch,
 )
+from hsas.infrastructure.class_planner.manage_changes import (
+    ClassPlannerReviewError,
+    acknowledge_class_planner_changes,
+    validate_class_planner_batch,
+)
 from hsas.domain.courses.define_change_queue import PendingChangeBatch
 from hsas.domain.information import InformationUpdate
 from hsas.infrastructure.runtime import get_runtime_paths
@@ -95,11 +100,19 @@ def information_apply(
             help="Pending batch to acknowledge only after this update succeeds",
         ),
     ] = None,
+    class_planner_changes_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--class-planner-changes",
+            help="Class Planner batch to checkpoint after this update succeeds",
+        ),
+    ] = None,
 ) -> None:
     """Atomically upsert reviewed course facts into information.json."""
     resources = _resources(ctx)
     path = information_path or resources / "information.json"
     batch: PendingChangeBatch | None = None
+    planner_batch: dict | None = None
     try:
         payload = read_json(update_path)
         if changes_path is not None:
@@ -111,13 +124,29 @@ def information_apply(
                     "an empty information update cannot acknowledge Moodle changes; "
                     "use `changes acknowledge --reviewed-no-information-change`"
                 )
+        if class_planner_changes_path is not None:
+            planner_batch = read_json(class_planner_changes_path)
+            if not isinstance(planner_batch, dict):
+                raise ClassPlannerReviewError("Class Planner batch must be a JSON object")
+            validate_class_planner_batch(resources, planner_batch)
+            update = validate_information_update(payload)
+            if not update.courses and not update.items:
+                raise ClassPlannerReviewError(
+                    "an empty information update cannot acknowledge Class Planner changes"
+                )
         result = apply_information_update(
             path,
             payload,
             confirmed=confirmed,
             repository=INFORMATION_REPOSITORY,
         )
-    except (OSError, ValueError, InformationServiceError, ChangeQueueError) as exc:
+    except (
+        OSError,
+        ValueError,
+        InformationServiceError,
+        ChangeQueueError,
+        ClassPlannerReviewError,
+    ) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
         "Information updated atomically: "
@@ -142,6 +171,24 @@ def information_apply(
         typer.echo(
             f"Reviewed Moodle changes acknowledged: {len(batch.courses)} course(s); "
             f"checkpoint={checkpoint.updated_at.isoformat()}"
+        )
+    if planner_batch is not None:
+        try:
+            checkpoint = acknowledge_class_planner_changes(
+                resources,
+                planner_batch,
+                confirmed=confirmed,
+            )
+        except (OSError, ValueError, ClassPlannerReviewError) as exc:
+            typer.echo(
+                "Information was saved, but Class Planner changes remain pending: "
+                f"{exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        typer.echo(
+            "Reviewed Class Planner changes acknowledged: "
+            f"checkpoint={checkpoint['acknowledged_through']}"
         )
 
 

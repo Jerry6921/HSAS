@@ -16,6 +16,7 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
     assert command_names == {"list-status", "login", "query", "sync-courses", "ui"}
     assert group_names == {
         "changes",
+        "calendar",
         "class-planner",
         "inbox",
         "information",

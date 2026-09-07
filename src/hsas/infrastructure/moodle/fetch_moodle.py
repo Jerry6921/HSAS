@@ -14,6 +14,7 @@ from playwright.async_api import BrowserContext, Page, async_playwright
 
 from .load_settings import SelectorConfig, Settings
 from hsas.domain.courses.define_courses import CourseSummary
+from hsas.infrastructure.moodle.handle_cancellation import raise_if_cancelled
 
 
 class MoodleAjaxError(RuntimeError):
@@ -269,6 +270,7 @@ async def discover_all_course_states(
     base_url: str,
     selectors: SelectorConfig,
     progress_callback: CourseDiscoveryProgressCallback | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> list[CourseStateResult]:
     """Discover every dashboard course and fetch each course's AJAX state.
 
@@ -284,6 +286,7 @@ async def discover_all_course_states(
     results: list[CourseStateResult] = []
 
     for index, course in enumerate(courses, start=1):
+        raise_if_cancelled(cancel_requested)
         if progress_callback:
             progress_callback(index, len(courses), course)
         course_id = course.course_id
@@ -322,5 +325,6 @@ async def discover_all_course_states(
                     error=f"{type(exc).__name__}: {str(exc)[:300]}",
                 )
             )
+        raise_if_cancelled(cancel_requested)
 
     return results

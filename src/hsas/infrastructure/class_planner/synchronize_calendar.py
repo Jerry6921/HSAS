@@ -15,6 +15,7 @@ from hsas.application.ports.define_gateways import (
 from hsas.infrastructure.storage.persist_data import read_json, write_json
 
 from .fetch_calendar import ClassPlannerAuthenticationError, capture_calendar_response
+from .define_review_fields import timetable_course_fields
 
 
 SENSITIVE_KEYS = {
@@ -82,7 +83,7 @@ def _course_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             str(row.get("CLASS_NBR") or row.get("class_nbr") or ""),
         )
         result[key] = {
-            "course": row,
+            "course": timetable_course_fields(row),
             "patterns": sorted(
                 patterns_by_course.get(identity)
                 or patterns_by_catalog.get(identity[:2], []),
@@ -112,7 +113,22 @@ def _summary(payload: dict[str, Any]) -> dict[str, Any]:
 def _diff(previous: dict[str, Any] | None, current: dict[str, Any]) -> dict[str, Any]:
     if previous is None:
         current_ids = sorted(_course_map(current))
-        return {"changed": True, "added": current_ids, "modified": [], "removed": []}
+        return {
+            "changed": True,
+            "added": current_ids,
+            "modified": [],
+            "removed": [],
+            "details": [
+                {
+                    "action": "added",
+                    "course_key": key,
+                    "fields": ["course", "patterns"],
+                    "before": None,
+                    "after": _course_map(current)[key],
+                }
+                for key in current_ids
+            ],
+        }
     old = _course_map(previous)
     new = _course_map(current)
     added = sorted(set(new) - set(old))
@@ -123,15 +139,37 @@ def _diff(previous: dict[str, Any] | None, current: dict[str, Any]) -> dict[str,
         if json.dumps(old[key], sort_keys=True, ensure_ascii=False)
         != json.dumps(new[key], sort_keys=True, ensure_ascii=False)
     )
+    details = []
+    for key in added:
+        details.append({
+            "action": "added", "course_key": key, "fields": ["course", "patterns"],
+            "before": None, "after": new[key],
+        })
+    for key in modified:
+        fields = [field for field in ("course", "patterns") if old[key][field] != new[key][field]]
+        details.append({
+            "action": "modified", "course_key": key, "fields": fields,
+            "before": old[key], "after": new[key],
+        })
+    for key in removed:
+        details.append({
+            "action": "removed", "course_key": key, "fields": ["course", "patterns"],
+            "before": old[key], "after": None,
+        })
     return {
         "changed": bool(added or modified or removed),
         "added": added,
         "modified": modified,
         "removed": removed,
+        "details": details,
     }
 
 
 def class_planner_status(resources_dir: Path) -> dict[str, Any]:
+    from hsas.infrastructure.class_planner.manage_changes import (
+        collect_class_planner_changes,
+    )
+
     session = _read_session_status(resources_dir)
     path = resources_dir / "class-planner" / "latest.json"
     if not path.is_file():
@@ -142,6 +180,7 @@ def class_planner_status(resources_dir: Path) -> dict[str, Any]:
             "meeting_count": 0,
             "term_ids": [],
             "changes": {"changed": False, "added": [], "modified": [], "removed": []},
+            "review": collect_class_planner_changes(resources_dir),
             **session,
         }
     envelope = read_json(path)
@@ -154,6 +193,7 @@ def class_planner_status(resources_dir: Path) -> dict[str, Any]:
         **summary,
         "changes": envelope.get("changes") or {},
         "source": "HKU Class Planner",
+        "review": collect_class_planner_changes(resources_dir),
         **session,
     }
 
@@ -232,6 +272,11 @@ class ClassPlannerBrowserGateway:
             previous = read_json(target)
             if isinstance(previous, dict) and isinstance(previous.get("payload"), dict):
                 previous_payload = previous["payload"]
+                from hsas.infrastructure.class_planner.manage_changes import (
+                    initialize_class_planner_checkpoint,
+                )
+
+                initialize_class_planner_checkpoint(self.resources_dir, previous)
         changes = _diff(previous_payload, payload)
         synced_at = datetime.now(timezone.utc).isoformat()
         _write_session_status(self.resources_dir, "logged_in")
@@ -246,7 +291,7 @@ class ClassPlannerBrowserGateway:
         }
         write_json(target, envelope).chmod(0o600)
         if changes["changed"]:
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             write_json(target.parent / "history" / f"{stamp}.json", envelope).chmod(0o600)
         return ClassPlannerSyncResult(
             status="synced",

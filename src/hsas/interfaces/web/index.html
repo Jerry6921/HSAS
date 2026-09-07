@@ -14,7 +14,10 @@
         <span class="brand-mark">H</span>
         <span><strong>HIQS</strong><small>HKU Information Query System</small></span>
       </a>
-      <div class="local-state"><span aria-hidden="true"></span>仅限本机 · 数据由 AI 整理</div>
+      <div class="topbar-actions">
+        <button id="canvas-effect-toggle" class="effect-toggle" type="button" aria-pressed="true">动态质感 · 开</button>
+        <div class="local-state"><span aria-hidden="true"></span>仅限本机 · 数据由 AI 整理</div>
+      </div>
     </header>
 
     <div class="app-body">
@@ -70,7 +73,31 @@
         </header>
 
         <div id="home-view">
-          <section class="application-card">
+          <button id="next-up-card" class="next-up-card" type="button" aria-label="查看下一项课程安排">
+            <span class="next-up-orbit orbit-one" aria-hidden="true"></span>
+            <span class="next-up-orbit orbit-two" aria-hidden="true"></span>
+            <span class="next-up-copy">
+              <span class="next-up-label">NEXT UP</span>
+              <strong id="next-up-course">正在整理下一项安排…</strong>
+              <span id="next-up-meta" class="next-up-meta">从本地课程日历读取</span>
+            </span>
+            <span class="next-up-time">
+              <strong id="next-up-start">—</strong>
+              <span id="next-up-end"></span>
+            </span>
+          </button>
+          <section class="home-command-center" aria-labelledby="command-center-title">
+            <div id="canvas-ui-content" class="command-center-content">
+            <div class="command-center-heading">
+              <div>
+                <p class="eyebrow">COMMAND CENTER</p>
+                <h2 id="command-center-title">同步工作台</h2>
+                <p>连接课程来源、读取变更，再由你决定哪些信息进入本地资料库。</p>
+              </div>
+              <span id="command-center-state" class="command-center-status"><i aria-hidden="true"></i>本地工作区</span>
+            </div>
+            <div class="sync-grid">
+              <section class="application-card moodle-card">
             <div>
               <p class="eyebrow">MOODLE APPLICATION</p>
               <h2>课程资料同步</h2>
@@ -81,8 +108,16 @@
               <button id="login-moodle" class="button" type="button">登录 Moodle</button>
               <button id="sync-courses" class="button primary" type="button">同步课程</button>
             </div>
-          </section>
-          <section class="application-card">
+            <div id="sync-progress" class="sync-progress hidden" role="status" aria-live="polite">
+              <div class="sync-progress-copy">
+                <span id="sync-progress-label">准备同步</span>
+                <strong id="sync-progress-count">0 / 0</strong>
+              </div>
+              <progress id="sync-progress-bar" value="0" max="1"></progress>
+              <button id="cancel-sync" class="button compact" type="button">取消同步</button>
+            </div>
+              </section>
+              <section class="application-card planner-card">
             <div>
               <p class="eyebrow">HKU CLASS PLANNER</p>
               <h2>官方课表同步</h2>
@@ -94,15 +129,23 @@
               <button id="login-class-planner" class="button" type="button">登录 HKU Portal</button>
               <button id="sync-class-planner" class="button primary" type="button">同步课表</button>
             </div>
-          </section>
-          <section class="metrics" aria-label="信息库摘要">
+              </section>
+            </div>
+            <section class="metrics" aria-label="信息库摘要">
             <article><span>课程</span><strong id="metric-courses">—</strong><small>统一课程目录</small></article>
             <article><span>信息事项</span><strong id="metric-items">—</strong><small>课程、tutorial 与 assessment</small></article>
             <article><span>本月日程</span><strong id="metric-month">—</strong><small>含每周重复时间</small></article>
             <article><span>日期待确认</span><strong id="metric-unknown">—</strong><small>保留并等待来源核实</small></article>
             <article><span>待 AI 整理</span><strong id="metric-pending">—</strong><small>仅处理新增或变化资料</small></article>
+            </section>
+            </div>
+            <div class="canvas-effects" aria-hidden="true">
+              <canvas id="canvas-ui-source" layoutsubtree="true"></canvas>
+              <canvas id="canvas-ui-output"></canvas>
+            </div>
           </section>
-          <section class="status-card" aria-labelledby="status-title">
+          <div class="home-intelligence-grid">
+            <section class="status-card" aria-labelledby="status-title">
             <div class="section-heading">
               <div><p class="eyebrow">MATERIAL STATUS</p><h2 id="status-title">资料状态</h2></div>
               <span id="status-total">0 项待处理</span>
@@ -127,24 +170,27 @@
                 <div id="attention-list" class="compact-list"></div>
               </section>
             </div>
-          </section>
-          <section class="inbox-card" aria-labelledby="inbox-title">
+            </section>
+            <div class="home-side-stack">
+              <section class="local-search-card" aria-labelledby="local-search-title">
+                <div>
+                  <p class="eyebrow">LOCAL SEARCH</p>
+                  <h2 id="local-search-title">本地问答式搜索</h2>
+                  <p>输入问题或关键词，在本地课程事项、课件和来源中查找匹配内容。</p>
+                </div>
+                <input id="home-search-input" type="search" aria-label="本地课程资料搜索" placeholder="例如：MATH1851 Part I test 占分多少？" autocomplete="off">
+                <div id="home-search-results" class="home-search-results"></div>
+              </section>
+              <section class="inbox-card" aria-labelledby="inbox-title">
             <div class="section-heading">
               <div><p class="eyebrow">PERSONAL INBOX</p><h2 id="inbox-title">个人补充信息</h2></div>
               <span id="inbox-count">0 条草稿</span>
             </div>
             <p class="section-note">AI 将 Tutorial group、临时教室和个人提醒放入这里；逐字段预览后再确认写入。</p>
             <div id="inbox-list" class="inbox-list"></div>
-          </section>
-          <section class="local-search-card" aria-labelledby="local-search-title">
-            <div>
-              <p class="eyebrow">LOCAL SEARCH</p>
-              <h2 id="local-search-title">本地问答式搜索</h2>
-              <p>输入问题或关键词，在本地课程事项、课件和来源中查找匹配内容。</p>
+              </section>
             </div>
-            <input id="home-search-input" type="search" aria-label="本地课程资料搜索" placeholder="例如：MATH1851 Part I test 占分多少？" autocomplete="off">
-            <div id="home-search-results" class="home-search-results"></div>
-          </section>
+          </div>
           <section class="updates-card" aria-labelledby="updates-title">
             <div class="section-heading">
               <div><p class="eyebrow">MOODLE CHANGES</p><h2 id="updates-title">更新记录</h2></div>
@@ -172,6 +218,7 @@
                   <button id="previous-month" class="icon-button" type="button" aria-label="上个月">←</button>
                   <button id="next-month" class="icon-button" type="button" aria-label="下个月">→</button>
                   <strong id="calendar-label"></strong>
+                  <a id="export-calendar" class="button compact" href="/api/calendar.ics" download="HIQS-calendar.ics">导出 ICS</a>
                 </div>
               </div>
               <div id="weekday-row" class="weekday-row" aria-hidden="true">
@@ -180,14 +227,6 @@
               <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
               <div id="daily-agenda" class="daily-agenda hidden" aria-live="polite"></div>
             </section>
-
-            <aside id="detail-panel" class="detail-panel" aria-live="polite">
-              <div class="empty-detail">
-                <span>↗</span>
-                <h2>点击日历事项</h2>
-                <p>在这里查看 DDL、课业形式、要求、GPA 占比、地点和证据来源。</p>
-              </div>
-            </aside>
           </div>
 
           <section class="unscheduled-card" aria-labelledby="unscheduled-title">
@@ -206,6 +245,13 @@
       </main>
     </div>
   </div>
+  <dialog id="item-detail-dialog" class="item-detail-dialog">
+    <div class="detail-dialog-heading">
+      <p class="eyebrow">CALENDAR ITEM</p>
+      <button id="close-item-detail" class="icon-button" type="button" aria-label="关闭事项详情">×</button>
+    </div>
+    <div id="detail-panel" class="detail-panel" aria-live="polite"></div>
+  </dialog>
   <dialog id="source-preview" class="source-preview">
     <div class="preview-heading">
       <div><p class="eyebrow">SOURCE PREVIEW</p><h2 id="preview-title">来源预览</h2><p id="preview-path"></p></div>
@@ -214,9 +260,11 @@
     <div id="preview-body" class="preview-body"></div>
     <div class="preview-actions">
       <a id="open-original" class="button primary" target="_self">打开原文</a>
-      <a id="open-source-url" class="button" target="_self">打开 Moodle 来源</a>
+      <a id="open-source-url" class="button" target="_blank" rel="noopener noreferrer">打开 Moodle 来源</a>
     </div>
   </dialog>
+  <script src="assets/ripple.js"></script>
+  <script src="assets/canvas-effects.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>

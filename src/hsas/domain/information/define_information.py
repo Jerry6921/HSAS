@@ -47,6 +47,7 @@ RelatedMaterialType = Literal[
     "announcement",
     "other",
 ]
+RecurrenceExceptionStatus = Literal["cancelled", "changed"]
 
 
 class SourceReference(StrictModel):
@@ -143,6 +144,41 @@ class CourseRecord(StrictModel):
         return self
 
 
+class RecurrenceException(StrictModel):
+    """One cancelled or changed occurrence of a weekly timetable rule."""
+
+    date: date
+    status: RecurrenceExceptionStatus
+    start_time: time | None = None
+    end_time: time | None = None
+    location: str | None = None
+    title: str | None = None
+    note: str | None = None
+    sources: list[SourceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_override(self) -> "RecurrenceException":
+        if self.status == "cancelled" and any(
+            value is not None
+            for value in (self.start_time, self.end_time, self.location, self.title)
+        ):
+            raise ValueError("cancelled recurrence exceptions cannot override fields")
+        if self.status == "changed" and not any(
+            value is not None
+            for value in (self.start_time, self.end_time, self.location, self.title, self.note)
+        ):
+            raise ValueError("changed recurrence exceptions require an override")
+        if self.end_time is not None and self.start_time is None:
+            raise ValueError("exception end_time requires start_time")
+        if (
+            self.start_time is not None
+            and self.end_time is not None
+            and self.end_time <= self.start_time
+        ):
+            raise ValueError("exception end_time must be later than start_time")
+        return self
+
+
 class WeeklyRecurrence(StrictModel):
     """A weekly timetable rule; weekdays use Monday=0 through Sunday=6."""
 
@@ -153,6 +189,7 @@ class WeeklyRecurrence(StrictModel):
     end_time: time
     excluded_dates: list[date] = Field(default_factory=list)
     additional_dates: list[date] = Field(default_factory=list)
+    exceptions: list[RecurrenceException] = Field(default_factory=list)
 
     @field_validator("weekdays")
     @classmethod
@@ -167,6 +204,9 @@ class WeeklyRecurrence(StrictModel):
             raise ValueError("valid_until must not be earlier than valid_from")
         if self.end_time <= self.start_time:
             raise ValueError("end_time must be later than start_time")
+        exception_dates = [value.date for value in self.exceptions]
+        if len(exception_dates) != len(set(exception_dates)):
+            raise ValueError("recurrence exception dates must be unique")
         return self
 
 

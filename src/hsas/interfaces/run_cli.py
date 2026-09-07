@@ -22,6 +22,7 @@ from hsas.infrastructure.storage import JsonPersonalInboxRepository
 
 from .manage_information import INFORMATION_REPOSITORY, information_app
 from .manage_class_planner import class_planner_app
+from .manage_calendar import calendar_app
 from .manage_changes import CHANGE_REPOSITORY, changes_app
 from .manage_inbox import inbox_app
 from .manage_ocr import ocr_app
@@ -36,6 +37,7 @@ app.add_typer(changes_app, name="changes")
 app.add_typer(inbox_app, name="inbox")
 app.add_typer(ocr_app, name="ocr")
 app.add_typer(class_planner_app, name="class-planner")
+app.add_typer(calendar_app, name="calendar")
 
 
 @app.callback()
@@ -118,7 +120,8 @@ def list_status(ctx: typer.Context) -> None:
     typer.echo(
         f"Class Planner: {planner['course_count']} course(s), "
         f"{planner['meeting_count']} meeting(s); "
-        f"synced={planner['synced_at'] or 'never'}"
+        f"synced={planner['synced_at'] or 'never'}; "
+        f"pending review={planner['review']['pending_change_count']}"
     )
 
 

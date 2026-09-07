@@ -8,14 +8,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any, Callable
 from urllib.parse import parse_qs, quote, urlparse
 import webbrowser
+from uuid import uuid4
 
 from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.domain.information.generate_calendar import build_ics
 from hsas.application.synchronize_class_planner import (
     ClassPlannerSynchronizationService,
 )
@@ -51,6 +53,8 @@ ASSET_ROOT = Path(__file__).with_name("web")
 ALLOWED_ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    "/assets/ripple.js": ("ripple.js", "text/javascript; charset=utf-8"),
+    "/assets/canvas-effects.js": ("canvas-effects.js", "text/javascript; charset=utf-8"),
     "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
 INFORMATION_REPOSITORY = JsonInformationRepository()
@@ -67,6 +71,23 @@ class DashboardError(RuntimeError):
 class DashboardService:
     resources_dir: Path
     mutation_lock: Lock = field(default_factory=Lock, repr=False)
+    sync_job_lock: Lock = field(default_factory=Lock, repr=False)
+    sync_cancel_event: Event = field(default_factory=Event, repr=False)
+    sync_thread: Thread | None = field(default=None, repr=False)
+    sync_job: dict[str, Any] = field(
+        default_factory=lambda: {
+            "job_id": None,
+            "state": "idle",
+            "stage": None,
+            "detail": None,
+            "completed": 0,
+            "total": 0,
+            "cancel_requested": False,
+            "result": None,
+            "error": None,
+        },
+        repr=False,
+    )
 
     def information_snapshot(self) -> dict[str, Any]:
         """Return the validated AI-authored database used by the calendar UI."""
@@ -169,6 +190,37 @@ class DashboardService:
                 "changes": {},
                 "error": f"{type(exc).__name__}: {str(exc)[:200]}",
             }
+
+    def calendar_ics(self) -> bytes:
+        path = self.resources_dir / "information.json"
+        if not INFORMATION_REPOSITORY.exists(path):
+            raise DashboardError("information.json 尚未建立。")
+        try:
+            return build_ics(INFORMATION_REPOSITORY.load(path)).encode("utf-8")
+        except (OSError, ValueError, ValidationError) as exc:
+            raise DashboardError(f"日历导出失败：{type(exc).__name__}") from exc
+
+    def verify_moodle_session(self) -> dict[str, Any]:
+        """Verify the saved Moodle browser session without changing course data."""
+        if not self.mutation_lock.acquire(blocking=False):
+            return {
+                **load_moodle_session_status(self.resources_dir),
+                "verification_deferred": True,
+            }
+        try:
+            result = _course_service(self.resources_dir).check_login_status()
+        except Exception as exc:
+            return {
+                **load_moodle_session_status(self.resources_dir),
+                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+            }
+        finally:
+            self.mutation_lock.release()
+        return {
+            **load_moodle_session_status(self.resources_dir),
+            "error": result.error,
+            "verification_deferred": False,
+        }
 
     def _dashboard_courses(
         self,
@@ -478,6 +530,91 @@ class DashboardService:
             ),
         }
 
+    def start_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Start a cancellable background Moodle synchronization job."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认开始同步 Moodle 课程资料。")
+        with self.sync_job_lock:
+            if self.sync_thread is not None and self.sync_thread.is_alive():
+                raise DashboardError("已有 Moodle 同步正在进行。")
+            job_id = uuid4().hex
+            self.sync_cancel_event = Event()
+            self.sync_job = {
+                "job_id": job_id,
+                "state": "running",
+                "stage": "starting",
+                "detail": "正在启动 Moodle 同步",
+                "completed": 0,
+                "total": 0,
+                "cancel_requested": False,
+                "result": None,
+                "error": None,
+            }
+            self.sync_thread = Thread(
+                target=self._run_course_sync_job,
+                args=(job_id,),
+                name=f"hiqs-sync-{job_id[:8]}",
+                daemon=True,
+            )
+            self.sync_thread.start()
+            return dict(self.sync_job)
+
+    def course_sync_status(self) -> dict[str, Any]:
+        with self.sync_job_lock:
+            return dict(self.sync_job)
+
+    def cancel_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认取消 Moodle 同步。")
+        with self.sync_job_lock:
+            if self.sync_job.get("state") != "running":
+                raise DashboardError("当前没有正在运行的 Moodle 同步。")
+            self.sync_cancel_event.set()
+            self.sync_job["cancel_requested"] = True
+            self.sync_job["detail"] = "正在取消"
+            return dict(self.sync_job)
+
+    def _run_course_sync_job(self, job_id: str) -> None:
+        def report(values: dict[str, object]) -> None:
+            with self.sync_job_lock:
+                if self.sync_job.get("job_id") == job_id:
+                    if self.sync_cancel_event.is_set():
+                        values = {**values, "detail": "正在取消"}
+                    self.sync_job.update(values)
+
+        try:
+            with self.mutation_lock:
+                result = _course_service(self.resources_dir).sync_all(
+                    progress_callback=report,
+                    cancel_requested=self.sync_cancel_event.is_set,
+                )
+            payload = {
+                "discovered_course_count": result.discovered_course_count,
+                "succeeded_course_count": len(result.succeeded_course_ids),
+                "failed_course_count": len(result.failures),
+                "report_path": str(result.report_path),
+                "pending_review": self._pending_review_summary(
+                    _load_information_if_available(self.resources_dir)
+                ),
+            }
+            with self.sync_job_lock:
+                if self.sync_job.get("job_id") == job_id:
+                    self.sync_job.update(
+                        state="cancelled" if result.cancelled else "completed",
+                        stage="finished",
+                        detail="同步已取消" if result.cancelled else "同步完成",
+                        result=payload,
+                    )
+        except Exception as exc:
+            with self.sync_job_lock:
+                if self.sync_job.get("job_id") == job_id:
+                    self.sync_job.update(
+                        state="failed",
+                        stage="finished",
+                        detail="同步失败，上一份有效资料已保留",
+                        error=f"{type(exc).__name__}: {str(exc)[:300]}",
+                    )
+
     def login_class_planner(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Open Class Planner and wait for user-completed HKU Portal sign-in."""
         if payload.get("confirmed") is not True:
@@ -552,6 +689,34 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, value)
             return
+        if path == "/api/sync/status":
+            self._send_json(
+                HTTPStatus.OK,
+                self.server.dashboard_service.course_sync_status(),
+            )
+            return
+        if path == "/api/moodle/status":
+            self._send_json(
+                HTTPStatus.OK,
+                self.server.dashboard_service.verify_moodle_session(),
+            )
+            return
+        if path == "/api/calendar.ics":
+            try:
+                content = self.server.dashboard_service.calendar_ics()
+            except DashboardError as exc:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
+                return
+            self.send_response(HTTPStatus.OK)
+            self._security_headers()
+            self.send_header("Content-Type", "text/calendar; charset=utf-8")
+            self.send_header(
+                "Content-Disposition", 'attachment; filename="HIQS-calendar.ics"'
+            )
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         if path == "/api/material":
             relative_path = parse_qs(urlparse(self.path).query).get("path", [""])[0]
             try:
@@ -594,6 +759,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if path not in {
             "/api/moodle/login",
             "/api/sync",
+            "/api/sync/start",
+            "/api/sync/cancel",
             "/api/class-planner/login",
             "/api/class-planner/sync",
             "/api/ocr/run",
@@ -607,6 +774,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.login_moodle(payload)
             elif path == "/api/sync":
                 result = self.server.dashboard_service.synchronize_courses(payload)
+            elif path == "/api/sync/start":
+                result = self.server.dashboard_service.start_course_sync(payload)
+            elif path == "/api/sync/cancel":
+                result = self.server.dashboard_service.cancel_course_sync(payload)
             elif path == "/api/class-planner/login":
                 result = self.server.dashboard_service.login_class_planner(payload)
             elif path == "/api/class-planner/sync":

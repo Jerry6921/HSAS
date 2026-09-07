@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from hsas.application.ports.define_gateways import (
     CourseCatalogResult,
@@ -32,8 +33,18 @@ class CourseSynchronizationService:
     def sync_course(self, course: str) -> SyncCourseResult:
         return self.gateway.sync_course(course)
 
-    def sync_all(self) -> SyncBatchResult:
-        return self.gateway.sync_all()
+    def sync_all(
+        self,
+        *,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SyncBatchResult:
+        if progress_callback is None and cancel_requested is None:
+            return self.gateway.sync_all()
+        return self.gateway.sync_all(
+            progress_callback=progress_callback,
+            cancel_requested=cancel_requested,
+        )
 
 
 __all__ = [

@@ -116,6 +116,24 @@ def test_information_rejects_reversed_course_teaching_period(tmp_path: Path) -> 
         )
 
 
+def test_recurrence_accepts_changed_and_cancelled_occurrences() -> None:
+    payload = _update_payload()
+    payload["items"][0]["recurrence"]["exceptions"] = [
+        {"date": "2026-10-05", "status": "cancelled", "note": "Reading week"},
+        {
+            "date": "2026-10-12",
+            "status": "changed",
+            "start_time": "11:30:00",
+            "end_time": "12:20:00",
+            "location": "CPD-2.16",
+        },
+    ]
+    update = build_information_template().model_validate(payload)
+    exceptions = update.items[0].recurrence.exceptions
+    assert exceptions[0].status == "cancelled"
+    assert exceptions[1].location == "CPD-2.16"
+
+
 def test_information_upsert_preserves_unmentioned_records(tmp_path: Path) -> None:
     path = tmp_path / "information.json"
     apply_information_update(

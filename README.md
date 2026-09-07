@@ -18,14 +18,14 @@ HIQS 的侧栏由首页、日历和课程概览组成。课程资料、结构化
 首页承担应用入口的功能：
 
 1. 点击“登录 Moodle”，由学生本人完成 HKU SSO 与 MFA；
-2. 点击“同步课程”，下载当前账号可访问的课程页面和附件；
+2. 点击“同步课程”，下载当前账号可访问的课程页面和附件，并在首页查看进度或请求安全取消；
 3. 查看课程数、信息事项、本月日程、待确认日期与待 AI 整理数量；
 4. 在“资料状态”中集中查看等待 AI 整理、等待 OCR、等待 Google 授权、日期待确认和来源冲突；
 5. 通过“OCR 队列”批量识别扫描 PDF 与图片型 PPT，并把识别结果写回可搜索文本副本；
 6. 在“个人补充信息”中逐字段预览 AI 准备的 Tutorial group、临时教室与个人提醒草稿，确认后写入；
 7. 在“本地问答式搜索”中输入课程代码、事项名称、DDL、地点或课件关键词；
 8. 在“更新记录”中查看 Moodle 项目的新增、修改与删除，以及等待 AI 审阅的资料。
-9. 通过 HKU Portal 登录 Class Planner，同步官方课程、班别、上课时间和地点，并查看课程级差异。
+9. 通过 HKU Portal 登录 Class Planner，同步官方课程、班别、上课时间和地点，并查看带 checkpoint 的逐字段差异队列。
 
 ![HIQS 首页：Moodle、Class Planner 同步与资料状态](docs/images/ui/home.png)
 
@@ -33,12 +33,14 @@ HIQS 的侧栏由首页、日历和课程概览组成。课程资料、结构化
 
 月视图统一呈现课程、Tutorial、Lab、Office hour、Assessment 与 DDL。课程筛选器可以控制
 日历中显示的课程，侧栏搜索可以进一步筛选事项。点击月历中的事项会在右侧显示日期状态、
-地点、课业形式、提交方式、字数、占分、要求、警告和证据来源。
+地点、课业形式、提交方式、字数、占分、要求、警告和证据来源。日历工具栏可导出
+`HIQS-calendar.ics`，用于导入 Apple Calendar 等支持 iCalendar 的应用。
 
 点击日期数字或“日”按钮可进入每日议程。日视图采用纵向时间轴，按照开始与结束时间放置
 活动；日期型事项显示在全天区域。活动卡片会标出关联材料数量，点击后可在右侧打开 AI 配对
 的 Lecture、Notes、Tutorial、Exercises 与 Reading。顶部箭头在月视图切换月份，在日视图
-切换前后一天，“今天”返回当前日期。
+切换前后一天。每周活动支持假期与 Reading Week 排除、补课日期，以及单次取消、改时、
+改教室和标题变更；月视图、每日议程与 ICS 导出共用同一组例外规则。
 
 ### 课程概览页：理解一门课程的整体结构
 
@@ -75,6 +77,14 @@ AI 阅读待处理文件，归纳课程事实与课程综述
 HIQS 校验并增量写入 information.json
   ↓
 Dashboard 映射为日历、课程概览与课件目录
+
+HKU Class Planner
+  ↓
+隐私过滤的官方课表快照与独立差异队列
+  ↓
+AI 核对班别、时间、地点和单次课表例外
+  ↓
+经校验写入 information.json 后推进 Class Planner checkpoint
 ```
 
 Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 读取。所有可查询事实由 AI
@@ -125,6 +135,7 @@ hsas list-status
 hsas class-planner login
 hsas class-planner sync
 hsas class-planner status
+hsas class-planner changes --output planner-changes.json
 ```
 
 `hsas login` 会打开浏览器。密码与 MFA 始终由用户在 HKU 页面中输入；AI 仅接触同步后的
@@ -134,6 +145,20 @@ hsas class-planner status
 流程。浏览器会话负责携带临时令牌；HIQS 保存经过隐私过滤的课表响应、同步时间与课程级
 差异。该快照位于私有 resources 目录，可供 AI 核对班别、时间和地点后生成经过校验的
 `information.json` 更新。
+
+完成 Class Planner 差异整理时，可让 information 写入和 checkpoint 顺序执行：
+
+```bash
+hsas information apply information-update.json \
+  --class-planner-changes planner-changes.json \
+  --confirmed
+```
+
+若审阅确认课表事实保持一致，可直接推进独立 checkpoint：
+
+```bash
+hsas class-planner acknowledge planner-changes.json --confirmed
+```
 
 同步单门课程时可传入 Moodle course ID 或同源课程 URL：
 
@@ -273,6 +298,8 @@ hsas materials search "assignment requirements" --course COURSE_ID
 │   ├── information.json
 │   ├── ai-state/change-checkpoint.json
 │   ├── ai-state/personal-inbox.json
+│   ├── class-planner/latest.json
+│   ├── class-planner/review-checkpoint.json
 │   └── courses/COURSE_ID/
 │       ├── course.json
 │       ├── files/
@@ -310,6 +337,9 @@ hsas sync-courses COURSE   同步指定课程
 hsas class-planner login   登录 HKU Portal / Class Planner
 hsas class-planner sync    同步官方课表并生成差异快照
 hsas class-planner status  查看课表快照状态
+hsas class-planner changes 导出 checkpoint 后的课表差异
+hsas class-planner acknowledge 确认已审阅的课表差异
+hsas calendar export       导出 Apple Calendar 可导入的 ICS
 hsas list-status           查看资料与待整理状态
 hsas changes list          查看增量整理摘要
 hsas changes show          导出 AI 应阅读的范围
@@ -353,6 +383,68 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 后续版本更新继续记录在本节顶部。
+
+### 2.2.0 首页演示更新 · 2026-09-07
+
+- README 首页演示图更新为当前 Dashboard，展示 Next Up、同步工作台、课程摘要与动态质感界面；
+- 演示图沿用 README 的单图首页展示方式。
+
+### 2.2.0 同步卡片环境光更新 · 2026-09-07
+
+- Moodle 与 HKU Class Planner 同步卡片加入随鼠标位置移动的局部环境光；
+- 同步卡片同时保留轻微透视反馈，并继续遵循动态质感开关与减少动态效果设置。
+
+### 2.2.0 取消状态文案更新 · 2026-09-07
+
+- 用户请求取消 Moodle 同步后，进度区域统一显示“正在取消”；
+- 取消期间收起计数、进度条与操作按钮，任务结束后自动隐藏整个进度区域。
+
+### 2.2.0 同步进度交互更新 · 2026-09-07
+
+- Moodle 同步进度栏仅在同步任务运行期间显示；
+- 同步完成、取消或失败后自动收起进度栏，并在页面状态提示中保留结果。
+
+### 2.2.0 同步卡片对齐更新 · 2026-09-07
+
+- Moodle 与 HKU Class Planner 卡片的标题、说明文字和操作区采用统一纵向基线；
+- 桌面宽度下登录状态与两个操作按钮保持单行排列，小屏幕下继续自适应换行。
+
+### 2.2.0 同步状态修复 · 2026-09-07
+
+- Class Planner 差异只比较课程身份、名称、教师、课时、地点与课程说明等稳定事实，实时名额统计不再产生待审阅的黄色“修改”标记；
+- Moodle 登录状态在首页载入与手动刷新时进行实时校验，会话过期会立即更新为“已过期”；
+- Moodle 未发现课程时保留既有资料，同时把会话状态更新为过期并明确显示同步失败；
+- 同步取消扩展到课程发现、文件下载、文本分析与发布边界，当前原子课程完成回滚后结束后台任务。
+
+### 2.2.0 日历与同步更新 · 2026-09-07
+
+- Class Planner 新增独立差异队列、逐字段 before/after 信息、陈旧批次校验与审阅 checkpoint；
+- AI 可在写入 `information.json` 后同步推进 Class Planner checkpoint，也可确认本轮无需改动；
+- 每周课程在既有假期排除与补课日期基础上，新增单次取消、改时、改教室和标题覆盖；
+- 月视图、每日议程和 Next Up 卡片统一应用课程例外；
+- Moodle 全量同步改为后台任务，首页显示课程级进度并支持原子边界安全取消；
+- 日历页新增 ICS 导出，可导入 Apple Calendar 等 iCalendar 应用。
+
+### 2.2.0 Canvas UI 视觉更新 · 2026-09-07
+
+- Dashboard 重组为同步工作台、资料状态、本地搜索、个人补充信息与更新记录五个清晰层级；
+- 首页加入由真实日历数据驱动的问候语与 Next Up 焦点卡，展示下一项课程或 DDL、地点、时间和倒计时；
+- 引入 Canvas UI Ripple 的 Vanilla WebGL 实现，在关键操作点击时提供克制的水波折射与光泽反馈；
+- 整页增加随指针缓慢移动的环境光、卡片局部光泽、轻微景深和滚动分层淡入，并与动态质感开关联动；
+- 新增动态质感开关并记住本机偏好；不支持 WebGL 或启用“减少动态效果”时自动安全降级；
+- 更新卡片、导航、对话框、日历和深浅色主题，统一为更清晰的半透明层次与高对比信息排版。
+
+### 2.2.0 日历布局更新 · 2026-09-07
+
+- 月历与每日议程横向使用完整内容区域；
+- 事项详情改为带半透明背景与模糊效果的独立窗口；
+- 事项详情支持右上角关闭、点击遮罩关闭与 Esc 关闭；
+- 来源预览可从事项详情继续打开，并保持独立预览层级。
+
+### 2.2.0 链接交互更新 · 2026-09-07
+
+- 课件、证据来源、课程概览与相关链接中的 Moodle 页面统一在新标签页打开；
+- 本地来源预览与本地原文继续保留在 HIQS 当前页面。
 
 ### 2.2.0 后续更新 · 2026-09-06
 

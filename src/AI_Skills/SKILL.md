@@ -39,7 +39,9 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 
 1. Resolve the exact course and source scope from stable identifiers.
 2. Collect or refresh authorized Moodle materials when requested, then run `hsas changes list`. For official class sections, times and locations, run `hsas class-planner status` and synchronize through HKU Portal when needed.
-3. When the Class Planner snapshot reports differences, read `<RESOURCES_DIR>/class-planner/latest.json`, compare its `mainTable` and `patterns` with the current information items, and preserve conflicts for review.
+3. When `hsas class-planner changes --output <PLANNER_CHANGES.json>` reports
+   differences, read the field-level queue and the referenced snapshots, compare
+   `mainTable` and `patterns` with current information items, and preserve conflicts.
 4. Run `hsas ocr status`; when queued files are relevant, run `hsas ocr run --confirmed` before reading them.
 5. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
 6. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`.
@@ -47,9 +49,11 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
 9. Preserve pending fields as `unknown`. Record conflicts as tentative with warnings.
 10. Run `hsas information validate <UPDATE.json>`.
-11. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --confirmed`.
+11. When authorized, run `hsas information apply <UPDATE.json> --changes <CHANGES.json> --class-planner-changes <PLANNER_CHANGES.json> --confirmed`, omitting either batch option when that source was outside the review.
 12. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
-13. Verify with `hsas list-status` and answer from the resulting database.
+13. For a reviewed Class Planner batch with zero information changes, advance
+    its independent checkpoint with `hsas class-planner acknowledge <PLANNER_CHANGES.json> --confirmed`.
+14. Verify with `hsas list-status` and answer from the resulting database.
 
 ## Personal information inbox
 
@@ -82,7 +86,8 @@ confirms that preview.
   presentations, projects, reports, readings, deadlines, and other dated or
   undated course facts;
 - one-off timing (`starts_at`, `ends_at`, `due_at`, `due_on`) and weekly
-  recurrence rules;
+  recurrence rules, including excluded/additional dates and source-backed
+  single-occurrence cancellation, time, room, or title overrides;
 - assessment format, submission method, weight, word limit, requirements,
   policies, warnings, links, related `materials`, and evidence.
 
@@ -127,6 +132,8 @@ hsas sync-courses [COURSE]
 hsas class-planner login
 hsas class-planner sync
 hsas class-planner status
+hsas class-planner changes [--output PLANNER_CHANGES.json]
+hsas class-planner acknowledge PLANNER_CHANGES.json --confirmed
 hsas materials list [--course COURSE]
 hsas materials search QUERY [--course COURSE]
 hsas query QUESTION [--course COURSE]

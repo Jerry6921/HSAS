@@ -167,6 +167,33 @@ uncertainty visible.
   before/after values, require confirmation, atomically upsert the canonical
   information store, and mark the Inbox entry applied.
 
+### 30. Class Planner checkpoint
+
+- Given: two official timetable snapshots changed after the last Class Planner checkpoint.
+- Expected: export both through one field-level review batch, reject a stale batch,
+  and advance the checkpoint only after a successful reviewed information write
+  or explicit zero-change acknowledgement.
+
+### 31. Single meeting exception
+
+- Given: an announcement cancels one class and moves another occurrence to a new
+  time and room.
+- Expected: preserve the weekly rule, store source-backed recurrence exceptions,
+  suppress the cancelled occurrence, and render the changed instance once.
+
+### 32. Cancellable synchronization
+
+- Given: the user requests cancellation during an all-course Moodle sync.
+- Expected: show current course-level progress, finish or roll back the active
+  atomic course step, stop before the next course, and retain published snapshots.
+
+### 33. Calendar export
+
+- Given: the information store contains exact, all-day and recurring items with
+  exclusions, additions and exceptions.
+- Expected: export a valid local ICS projection with matching event times and
+  recurrence behavior.
+
 ## Regression use
 
 Add a scenario only for a distinct ownership, safety, evidence or data-loss risk.

@@ -54,6 +54,8 @@ An upsert record contains the complete reviewed state of that record.
 - Use `recurrence` for weekly classes, tutorials, labs, and office hours.
 - `recurrence.weekdays` uses Monday `0` through Sunday `6`.
 - Put reading weeks and public holidays in `excluded_dates`; use `additional_dates` for make-up meetings.
+- Use `recurrence.exceptions` for an individual cancelled or changed meeting;
+  keep its announcement or timetable evidence in the exception `sources`.
 - `date_status: confirmed` requires an actual date or recurrence.
 - When two sources conflict, retain the best-supported operational value only if justified, set the status to `tentative`, and describe both sources in `warnings` and `sources`.
 

@@ -60,16 +60,28 @@ def test_class_planner_diff_tracks_course_level_changes() -> None:
     initial = _diff(None, first)
     update = _diff(first, changed)
     assert initial["added"] == ["4261-012345-1001"]
-    assert update == {
-        "changed": True,
-        "added": [],
-        "modified": ["4261-012345-1001"],
-        "removed": [],
-    }
+    assert update["changed"] is True
+    assert update["added"] == []
+    assert update["modified"] == ["4261-012345-1001"]
+    assert update["removed"] == []
+    assert update["details"][0]["fields"] == ["course"]
 
     meeting_changed = payload()
     meeting_changed["patterns"][0]["start_time"] = "10:00 AM"
     assert _diff(first, meeting_changed)["modified"] == ["4261-012345-1001"]
+
+
+def test_class_planner_diff_ignores_live_enrolment_statistics() -> None:
+    first = payload()
+    first["mainTable"][0]["APPROVED_HEAD_CNT"] = None
+    changed = payload()
+    changed["mainTable"][0]["APPROVED_HEAD_CNT"] = 42
+
+    update = _diff(first, changed)
+
+    assert update["changed"] is False
+    assert update["modified"] == []
+    assert update["details"] == []
 
 
 def test_class_planner_status_reads_local_snapshot(tmp_path: Path) -> None:

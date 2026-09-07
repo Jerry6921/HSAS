@@ -6,6 +6,7 @@ from .define_information import (
     InformationStore,
     InformationUpdate,
     RelatedMaterial,
+    RecurrenceException,
     SourceReference,
     WeeklyRecurrence,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "PersonalInbox",
     "PersonalInboxEntry",
     "RelatedMaterial",
+    "RecurrenceException",
     "SourceReference",
     "WeeklyRecurrence",
 ]

@@ -76,6 +76,9 @@ When sources conflict:
 - Monday is weekday 0 and Sunday is weekday 6.
 - Put holidays and reading weeks in `excluded_dates`.
 - Put one-off make-up sessions in `additional_dates`.
+- Use `recurrence.exceptions` for a source-backed single cancellation, changed
+  time, changed room, or changed title. A `cancelled` exception suppresses that
+  occurrence; a `changed` exception overrides only the supplied fields.
 
 Use each item's `materials` array to connect the activity with the downloaded
 slides, notes, tutorial sheets, exercises, readings, or assessment brief that

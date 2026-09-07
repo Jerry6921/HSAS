@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -11,6 +12,7 @@ from hsas.application.update_information import apply_information_update
 from hsas.domain.courses.define_courses import StoredFile
 from hsas.domain.courses.define_documents import PdfAnalysis
 from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.moodle.record_session import record_moodle_session_status
 from hsas.infrastructure.storage import JsonInformationRepository
 from hsas.infrastructure.storage.persist_data import write_model
 from hsas.interfaces.run_dashboard import (
@@ -28,6 +30,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert (ASSET_ROOT / "index.html").is_file()
     assert (ASSET_ROOT / "styles.css").is_file()
     assert (ASSET_ROOT / "app.js").is_file()
+    assert (ASSET_ROOT / "ripple.js").is_file()
+    assert (ASSET_ROOT / "canvas-effects.js").is_file()
     loaded = _load_dashboard_assets()
     assert b"HKU Information Query System" in loaded["/"][0]
     assert b'id="calendar-grid"' in loaded["/"][0]
@@ -51,18 +55,42 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="show-home"' in loaded["/"][0]
     assert b'id="updates-list"' in loaded["/"][0]
     assert b'id="source-preview"' in loaded["/"][0]
-    assert 'target="_self">打开 Moodle 来源'.encode() in loaded["/"][0]
+    assert b'id="item-detail-dialog"' in loaded["/"][0]
+    assert b'id="close-item-detail"' in loaded["/"][0]
+    assert b'id="canvas-effect-toggle"' in loaded["/"][0]
+    assert b'id="canvas-ui-output"' in loaded["/"][0]
+    assert b'id="next-up-card"' in loaded["/"][0]
+    assert b'id="next-up-course"' in loaded["/"][0]
+    assert 'target="_blank" rel="noopener noreferrer">打开 Moodle 来源'.encode() in loaded["/"][0]
     assert b'window.location.protocol === "file:"' in loaded["/assets/app.js"][0]
     assert b"/api/information" in loaded["/assets/app.js"][0]
     assert b"/api/source-preview" in loaded["/assets/app.js"][0]
     assert b"/api/moodle/login" in loaded["/assets/app.js"][0]
-    assert b'"/api/sync"' in loaded["/assets/app.js"][0]
+    assert b'"/api/sync/start"' in loaded["/assets/app.js"][0]
+    assert b'"/api/sync/status"' in loaded["/assets/app.js"][0]
+    assert b'"/api/sync/cancel"' in loaded["/assets/app.js"][0]
+    assert b'panel.classList.toggle("hidden", !running)' in loaded["/assets/app.js"][0]
+    assert b'panel.classList.toggle("cancelling", cancelling)' in loaded["/assets/app.js"][0]
+    assert b'"/api/moodle/status"' in loaded["/assets/app.js"][0]
+    assert b'href="/api/calendar.ics"' in loaded["/"][0]
     assert b'"/api/class-planner/login"' in loaded["/assets/app.js"][0]
     assert b'"/api/class-planner/sync"' in loaded["/assets/app.js"][0]
     assert b'"/api/ocr/run"' in loaded["/assets/app.js"][0]
     assert b'"/api/inbox/apply"' in loaded["/assets/app.js"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
+    assert b"closeItemDetail" in loaded["/assets/app.js"][0]
+    assert b'window.open(url, "_blank", "noopener,noreferrer")' in loaded["/assets/app.js"][0]
+    assert b'card.target = "_blank"' in loaded["/assets/app.js"][0]
+    assert "本轮 ${changeCount} 项差异".encode() not in loaded["/assets/app.js"][0]
+    assert b"createRipple" in loaded["/assets/ripple.js"][0]
+    assert b"CanvasUIRipple" in loaded["/assets/ripple.js"][0]
+    assert b"hiqs-canvas-effects" in loaded["/assets/canvas-effects.js"][0]
+    assert b"motion-enabled" in loaded["/assets/canvas-effects.js"][0]
+    assert b"IntersectionObserver" in loaded["/assets/canvas-effects.js"][0]
+    assert loaded["/assets/canvas-effects.js"][0].count(b'".application-card"') >= 2
+    assert b"align-items: flex-start" in loaded["/assets/styles.css"][0]
+    assert b"flex-wrap: nowrap" in loaded["/assets/styles.css"][0]
     assert "相关学习材料".encode() in loaded["/assets/app.js"][0]
     assert "由 AI 根据已下载课程资料归纳".encode() in loaded["/assets/app.js"][0]
 
@@ -234,6 +262,73 @@ def test_class_planner_actions_require_confirmation_and_report_differences(
     assert sync["added_course_count"] == 1
     assert sync["modified_course_count"] == 1
     assert calls == ["login", "sync"]
+
+
+def test_background_moodle_sync_reports_progress_and_can_cancel(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class Service:
+        def sync_all(self, *, progress_callback, cancel_requested):
+            progress_callback(
+                {
+                    "stage": "processing",
+                    "detail": "正在处理 Demo",
+                    "completed": 0,
+                    "total": 2,
+                }
+            )
+            deadline = time.monotonic() + 1
+            while not cancel_requested() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            return SimpleNamespace(
+                discovered_course_count=2,
+                succeeded_course_ids=("1",),
+                failures=(),
+                report_path=tmp_path / "sync-report.json",
+                cancelled=cancel_requested(),
+            )
+
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._course_service",
+        lambda _resources: Service(),
+    )
+    service = DashboardService(tmp_path)
+    started = service.start_course_sync({"confirmed": True})
+    assert started["state"] == "running"
+    cancelled = service.cancel_course_sync({"confirmed": True})
+    assert cancelled["cancel_requested"] is True
+    assert cancelled["detail"] == "正在取消"
+    for _ in range(100):
+        status = service.course_sync_status()
+        if status["state"] != "running":
+            break
+        time.sleep(0.005)
+    assert status["state"] == "cancelled"
+    assert status["result"]["succeeded_course_count"] == 1
+
+
+def test_moodle_session_verification_replaces_stale_logged_in_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    record_moodle_session_status(tmp_path, "logged_in", available_course_count=8)
+
+    class Service:
+        def check_login_status(self):
+            record_moodle_session_status(tmp_path, "expired")
+            return SimpleNamespace(status="logged_out", error=None)
+
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._course_service",
+        lambda _resources: Service(),
+    )
+
+    status = DashboardService(tmp_path).verify_moodle_session()
+
+    assert status["login_status"] == "expired"
+    assert status["available_course_count"] == 0
+    assert status["verification_deferred"] is False
 
 
 def test_write_request_requires_local_marker() -> None:

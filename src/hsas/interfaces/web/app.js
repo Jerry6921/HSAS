@@ -137,6 +137,25 @@ function occurrenceEndTime(item) {
   return value && value.includes("T") ? value.slice(11, 16) : "";
 }
 
+function recurrenceException(recurrence, key) {
+  return (recurrence.exceptions || []).find((value) => value.date === key) || null;
+}
+
+function recurringOccurrence(item, key) {
+  const recurrence = item.recurrence;
+  const exception = recurrenceException(recurrence, key);
+  if ((recurrence.excluded_dates || []).includes(key) || exception?.status === "cancelled") return null;
+  return {
+    item,
+    key,
+    time: (exception?.start_time || recurrence.start_time).slice(0, 5),
+    endTime: (exception?.end_time || recurrence.end_time).slice(0, 5),
+    title: exception?.title || item.title,
+    location: exception?.location || item.location,
+    exception,
+  };
+}
+
 function buildOccurrences() {
   if (!state.data) return [];
   const { start, end } = visibleRange();
@@ -147,19 +166,24 @@ function buildOccurrences() {
   for (const item of state.data.items.filter(itemMatches)) {
     if (item.recurrence) {
       const recurrence = item.recurrence;
-      const excluded = new Set(recurrence.excluded_dates || []);
       const dates = new Set();
       let cursor = parseDateOnly(recurrence.valid_from > startKey ? recurrence.valid_from : startKey);
       const last = parseDateOnly(recurrence.valid_until < endKey ? recurrence.valid_until : endKey);
       while (cursor <= last) {
         const key = dateKey(cursor);
-        if (recurrence.weekdays.includes(mondayIndex(cursor)) && !excluded.has(key)) dates.add(key);
+        if (recurrence.weekdays.includes(mondayIndex(cursor))) dates.add(key);
         cursor = addDays(cursor, 1);
       }
       for (const key of recurrence.additional_dates || []) {
-        if (key >= startKey && key <= endKey && !excluded.has(key)) dates.add(key);
+        if (key >= startKey && key <= endKey) dates.add(key);
       }
-      for (const key of dates) occurrences.push({ item, key, time: occurrenceTime(item) });
+      for (const exception of recurrence.exceptions || []) {
+        if (exception.status === "changed" && exception.date >= startKey && exception.date <= endKey) dates.add(exception.date);
+      }
+      for (const key of dates) {
+        const occurrence = recurringOccurrence(item, key);
+        if (occurrence) occurrences.push(occurrence);
+      }
       continue;
     }
     const key = primaryDateKey(item);
@@ -233,9 +257,7 @@ function setView(view) {
 
 function showHome() {
   setView("home");
-  byId("page-eyebrow").textContent = "APPLICATION";
-  byId("page-title").textContent = "HIQS 首页";
-  byId("data-caption").textContent = dataCaption();
+  renderHomeFocus();
 }
 
 function showCalendar() {
@@ -255,6 +277,145 @@ function dataCaption() {
   return state.data && state.data.updated_at
     ? `最近更新：${formatDateTime(state.data.updated_at)} · 时区 ${state.data.timezone}`
     : "尚未写入课程资料；AI 整理后会补充综合信息，Moodle 课件仍可浏览。";
+}
+
+function localDateTime(key, time = "23:59") {
+  return new Date(`${key}T${time.slice(0, 5)}:00`);
+}
+
+function upcomingOccurrences(now = new Date()) {
+  if (!state.data) return [];
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const horizon = addDays(today, 120);
+  const startKey = dateKey(today);
+  const endKey = dateKey(horizon);
+  const candidates = [];
+
+  function addCandidate(item, key, startTime, endTime = "") {
+    const startsAt = startTime ? localDateTime(key, startTime) : localDateTime(key);
+    const endsAt = endTime ? localDateTime(key, endTime) : startsAt;
+    if (endsAt < now || startsAt > horizon) return;
+    candidates.push({ item, key, time: startTime, endTime, startsAt, endsAt });
+  }
+
+  for (const item of state.data.items) {
+    if (item.recurrence) {
+      const recurrence = item.recurrence;
+      const recurringKeys = new Set();
+      const firstKey = recurrence.valid_from > startKey ? recurrence.valid_from : startKey;
+      const lastKey = recurrence.valid_until < endKey ? recurrence.valid_until : endKey;
+      let cursor = parseDateOnly(firstKey);
+      const last = parseDateOnly(lastKey);
+      while (cursor <= last) {
+        const key = dateKey(cursor);
+        if (recurrence.weekdays.includes(mondayIndex(cursor))) {
+          const occurrence = recurringOccurrence(item, key);
+          if (occurrence) {
+            addCandidate(item, key, occurrence.time, occurrence.endTime);
+            recurringKeys.add(key);
+          }
+        }
+        cursor = addDays(cursor, 1);
+      }
+      for (const key of recurrence.additional_dates || []) {
+        if (key >= startKey && key <= endKey) {
+          const occurrence = recurringOccurrence(item, key);
+          if (occurrence && !recurringKeys.has(key)) {
+            addCandidate(item, key, occurrence.time, occurrence.endTime);
+            recurringKeys.add(key);
+          }
+        }
+      }
+      for (const exception of recurrence.exceptions || []) {
+        if (exception.status !== "changed" || exception.date < startKey || exception.date > endKey || recurringKeys.has(exception.date)) continue;
+        const occurrence = recurringOccurrence(item, exception.date);
+        if (occurrence) addCandidate(item, exception.date, occurrence.time, occurrence.endTime);
+      }
+      continue;
+    }
+
+    const key = primaryDateKey(item);
+    if (!key || key < startKey || key > endKey) continue;
+    const sourceValue = item.due_at || item.starts_at || item.opens_at;
+    const startsAt = sourceValue?.includes("T") ? new Date(sourceValue) : null;
+    const endValue = item.ends_at;
+    const endsAt = endValue?.includes("T") ? new Date(endValue) : startsAt;
+    if (startsAt && !Number.isNaN(startsAt.valueOf())) {
+      if ((endsAt || startsAt) >= now) {
+        candidates.push({
+          item,
+          key,
+          time: occurrenceTime(item),
+          endTime: occurrenceEndTime(item),
+          startsAt,
+          endsAt: endsAt || startsAt,
+        });
+      }
+    } else {
+      addCandidate(item, key, occurrenceTime(item), occurrenceEndTime(item));
+    }
+  }
+
+  return candidates.sort((left, right) => left.startsAt - right.startsAt);
+}
+
+function greetingFor(date) {
+  const hour = date.getHours();
+  if (hour < 5) return "夜深了";
+  if (hour < 12) return "早上好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+}
+
+function homeDateCaption(date) {
+  const weekday = new Intl.DateTimeFormat("zh-HK", { weekday: "long" }).format(date);
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日 · ${weekday}`;
+}
+
+function relativeStartLabel(startsAt, endsAt, now) {
+  if (startsAt <= now && endsAt >= now) return "正在进行";
+  const minutes = Math.max(1, Math.round((startsAt - now) / 60000));
+  if (minutes < 60) return `还有 ${minutes} 分钟`;
+  if (minutes < 24 * 60) return `还有 ${Math.round(minutes / 60)} 小时`;
+  const days = Math.ceil(minutes / (24 * 60));
+  return days === 1 ? "明天" : `${days} 天后`;
+}
+
+function renderHomeFocus() {
+  const now = new Date();
+  if (state.view === "home") {
+    byId("page-eyebrow").textContent = "TODAY";
+    byId("page-title").textContent = `${greetingFor(now)}，Jerry`;
+    byId("data-caption").textContent = homeDateCaption(now);
+  }
+  if (!state.data) return;
+
+  const card = byId("next-up-card");
+  const next = upcomingOccurrences(now)[0];
+  if (!next) {
+    card.disabled = true;
+    card.classList.add("empty");
+    delete card.dataset.itemId;
+    delete card.dataset.dateKey;
+    byId("next-up-course").textContent = "近期没有已排定事项";
+    byId("next-up-meta").textContent = "待确认日期仍保留在课程日历中";
+    byId("next-up-start").textContent = "CLEAR";
+    byId("next-up-end").textContent = "";
+    return;
+  }
+
+  const course = courseFor(next.item);
+  const dateLabel = `${next.startsAt.getMonth() + 1} 月 ${next.startsAt.getDate()} 日`;
+  const relative = relativeStartLabel(next.startsAt, next.endsAt, now);
+  const verification = next.item.date_status === "confirmed" ? "" : " · 待核实";
+  card.disabled = false;
+  card.classList.remove("empty");
+  card.dataset.itemId = next.item.item_id;
+  card.dataset.dateKey = next.key;
+  byId("next-up-course").textContent = `${course.code || course.title} · ${course.title}`;
+  byId("next-up-meta").textContent = [next.item.title, next.item.location, `${dateLabel} · ${relative}${verification}`].filter(Boolean).join("　·　");
+  byId("next-up-start").textContent = next.time || dateLabel;
+  byId("next-up-end").textContent = next.endTime ? `— ${next.endTime.slice(0, 5)}` : categoryLabels[next.item.category] || "查看详情";
 }
 
 function appendOverviewList(parent, values, emptyText) {
@@ -341,7 +502,8 @@ function renderMaterialCard(list, material) {
       card.addEventListener("click", () => openSourcePreview(material));
     } else if (remoteUrl) {
       card.href = remoteUrl;
-      card.target = "_self";
+      card.target = "_blank";
+      card.rel = "noopener noreferrer";
     }
     const icon = element("span", "material-icon", material.relative_path ? "FILE" : "LINK");
     const copy = element("div", "material-copy");
@@ -368,6 +530,11 @@ function renderMaterialCard(list, material) {
 
 function safeHttpUrl(value) {
   return typeof value === "string" && /^https?:\/\//i.test(value) ? value : null;
+}
+
+function openExternalTab(value) {
+  const url = safeHttpUrl(value);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function closeSourcePreview() {
@@ -451,7 +618,8 @@ function renderCourseOverview() {
   if (course.moodle && /^https?:\/\//i.test(course.moodle.url)) {
     const link = element("a", "button", "打开 Moodle");
     link.href = course.moodle.url;
-    link.target = "_self";
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
     hero.append(link);
   }
   container.append(hero);
@@ -569,7 +737,7 @@ function renderMaterialStatus() {
           state.selectedItemId = informationItem.item_id;
           state.selectedDateKey = primaryDateKey(informationItem);
           renderDetail(informationItem, state.selectedDateKey);
-        } : item.url ? () => window.location.assign(item.url) : null,
+        } : item.url ? () => openExternalTab(item.url) : null,
       );
     }
   }
@@ -671,8 +839,8 @@ function renderCalendar(occurrences) {
       if (occurrence.item.date_status !== "confirmed") chip.classList.add("tentative");
       if (state.selectedItemId === occurrence.item.item_id && state.selectedDateKey === key) chip.classList.add("selected");
       if (occurrence.time) chip.append(element("time", "", occurrence.time));
-      chip.append(document.createTextNode(occurrence.item.title));
-      chip.title = `${course.code} · ${occurrence.item.title}`;
+      chip.append(document.createTextNode(occurrence.title || occurrence.item.title));
+      chip.title = `${course.code} · ${occurrence.title || occurrence.item.title}`;
       chip.addEventListener("click", () => {
         state.selectedItemId = occurrence.item.item_id;
         state.selectedDateKey = key;
@@ -727,7 +895,7 @@ function renderDailyAgenda(occurrences) {
   const eventLayer = element("div", "agenda-events-layer");
   for (const occurrence of timed) {
     const startMinutes = timeMinutes(occurrence.time);
-    const endValue = occurrenceEndTime(occurrence.item);
+    const endValue = occurrence.endTime || occurrenceEndTime(occurrence.item);
     const endMinutes = endValue ? timeMinutes(endValue) : startMinutes + 50;
     const duration = Math.max(30, endMinutes > startMinutes ? endMinutes - startMinutes : 50);
     const event = buildAgendaEvent(occurrence, key, values, false);
@@ -762,11 +930,11 @@ function buildAgendaEvent(occurrence, key, allOccurrences, compact) {
     button.style.setProperty("--course-color", course.color);
     if (state.selectedItemId === item.item_id && state.selectedDateKey === key) button.classList.add("selected");
     const start = occurrence.time || (item.all_day ? "全天" : "待定");
-    const end = occurrenceEndTime(item);
+    const end = occurrence.endTime || occurrenceEndTime(item);
     const copy = element("span", "agenda-copy");
     copy.append(
-      element("strong", "", item.title),
-      element("small", "", [course.code, categoryLabels[item.category] || item.category, item.location].filter(Boolean).join(" · ")),
+      element("strong", "", occurrence.title || item.title),
+      element("small", "", [course.code, categoryLabels[item.category] || item.category, occurrence.location || item.location].filter(Boolean).join(" · ")),
     );
     const materialCount = (item.materials || []).length;
     button.append(
@@ -824,7 +992,8 @@ function sourcePreviewButton(source) {
     button.addEventListener("click", () => openSourcePreview(source));
   } else if (remoteUrl) {
     button.href = remoteUrl;
-    button.target = "_self";
+    button.target = "_blank";
+    button.rel = "noopener noreferrer";
   } else {
     button.type = "button";
     button.disabled = true;
@@ -834,12 +1003,16 @@ function sourcePreviewButton(source) {
 }
 
 function renderDetail(item, occurrenceKey = null) {
+  const dialog = byId("item-detail-dialog");
   const panel = byId("detail-panel");
   const course = courseFor(item);
+  const exception = item.recurrence && occurrenceKey
+    ? recurrenceException(item.recurrence, occurrenceKey)
+    : null;
   panel.replaceChildren();
   panel.style.setProperty("--course-color", course.color);
   panel.append(element("div", "detail-course", `${course.code} · ${categoryLabels[item.category] || item.category}`));
-  panel.append(element("h2", "", item.title));
+  panel.append(element("h2", "", exception?.title || item.title));
 
   const pills = element("div", "detail-pills");
   pills.append(element("span", "pill", item.date_status === "confirmed" ? "日期已确认" : item.date_status === "tentative" ? "日期待核实" : "日期未知"));
@@ -851,8 +1024,11 @@ function renderDetail(item, occurrenceKey = null) {
   const facts = element("dl", "detail-facts");
   if (item.recurrence) {
     appendFact(facts, "本次日期", occurrenceKey || "每周重复");
-    appendFact(facts, "时间", `${item.recurrence.start_time.slice(0, 5)}–${item.recurrence.end_time.slice(0, 5)}`);
+    const startTime = exception?.start_time || item.recurrence.start_time;
+    const endTime = exception?.end_time || item.recurrence.end_time;
+    appendFact(facts, "时间", `${startTime.slice(0, 5)}–${endTime.slice(0, 5)}`);
     appendFact(facts, "有效日期", `${item.recurrence.valid_from} 至 ${item.recurrence.valid_until}`);
+    appendFact(facts, "本次变更", exception?.note);
   } else {
     appendFact(facts, "开放", formatDateTime(item.opens_at));
     appendFact(facts, "开始", formatDateTime(item.starts_at));
@@ -860,7 +1036,7 @@ function renderDetail(item, occurrenceKey = null) {
     appendFact(facts, "DDL", formatDateTime(item.due_at) || item.due_on);
     appendFact(facts, "安排日期", item.scheduled_on);
   }
-  appendFact(facts, "地点", item.location);
+  appendFact(facts, "地点", exception?.location || item.location);
   appendFact(facts, "课业形式", item.assessment_format);
   appendFact(facts, "GPA 占比", item.weight_percent === null || item.weight_percent === undefined ? null : `${item.weight_percent}%`);
   appendFact(facts, "字数限制", item.word_limit === null || item.word_limit === undefined ? null : `${item.word_limit} 字`);
@@ -891,7 +1067,8 @@ function renderDetail(item, occurrenceKey = null) {
       const node = element(safe ? "a" : "div", "source-card", link.label);
       if (safe) {
         node.href = link.url;
-        node.target = "_self";
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
       }
       block.append(node);
     }
@@ -906,6 +1083,21 @@ function renderDetail(item, occurrenceKey = null) {
     }
     panel.append(block);
   }
+  if (exception?.sources?.length) {
+    const block = element("section", "detail-block");
+    block.append(element("h3", "", "本次变更来源"));
+    for (const source of exception.sources) block.append(sourcePreviewButton(source));
+    panel.append(block);
+  }
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeItemDetail() {
+  state.selectedItemId = null;
+  state.selectedDateKey = null;
+  const dialog = byId("item-detail-dialog");
+  if (dialog.open) dialog.close();
+  renderDataViews();
 }
 
 function renderUnscheduled() {
@@ -1068,7 +1260,7 @@ function renderHomeSearch() {
     button.addEventListener("click", () => {
       if (record.kind === "material") {
         const remoteUrl = safeHttpUrl(record.value.source_url);
-        if (!record.value.relative_path && remoteUrl) window.location.assign(remoteUrl);
+        if (!record.value.relative_path && remoteUrl) openExternalTab(remoteUrl);
         else openSourcePreview(record.value);
       } else {
         showCalendar();
@@ -1083,6 +1275,7 @@ function renderHomeSearch() {
 
 function renderDataViews() {
   const occurrences = buildOccurrences();
+  renderHomeFocus();
   renderMetrics(occurrences);
   renderMaterialStatus();
   renderPersonalInbox();
@@ -1122,6 +1315,22 @@ function renderMoodleSessionStatus() {
   );
 }
 
+async function verifyMoodleSession() {
+  if (!state.data || window.location.protocol === "file:") return;
+  const loginState = byId("moodle-login-state");
+  loginState.className = "login-state logging-in";
+  loginState.replaceChildren(element("span"), document.createTextNode("验证中"));
+  try {
+    const response = await fetch("/api/moodle/status", { cache: "no-store" });
+    const status = await response.json();
+    if (!response.ok) throw new Error(status.error || "无法验证 Moodle 会话");
+    state.data.moodle_session = status;
+    renderMoodleSessionStatus();
+  } catch (_error) {
+    renderLoginState("moodle-login-state", "unknown");
+  }
+}
+
 function renderClassPlannerStatus() {
   const planner = state.data.class_planner || {};
   const status = byId("class-planner-status");
@@ -1138,19 +1347,19 @@ function renderClassPlannerStatus() {
     return;
   }
   const terms = (planner.term_ids || []).join("、") || "当前学期";
-  const changes = planner.changes || {};
-  const changeCount = (changes.added || []).length + (changes.modified || []).length + (changes.removed || []).length;
-  status.textContent = `${terms} · ${planner.course_count} 门课程 · ${planner.meeting_count} 个上课时段 · 本轮 ${changeCount} 项差异`;
-  const groups = [
-    ["新增", changes.added || [], "added"],
-    ["修改", changes.modified || [], "modified"],
-    ["移除", changes.removed || [], "removed"],
-  ];
-  for (const [label, values, className] of groups) {
-    for (const value of values) {
-      diff.append(element("span", `planner-change ${className}`, `${label} · ${value}`));
-    }
+  const pendingCount = planner.review?.pending_change_count || 0;
+  status.textContent = `${terms} · ${planner.course_count} 门课程 · ${planner.meeting_count} 个上课时段 · 待审阅 ${pendingCount} 项`;
+  const actionLabels = { added: "新增", modified: "修改", removed: "移除" };
+  const pendingChanges = planner.review?.changes || [];
+  for (const value of pendingChanges.slice(0, 12)) {
+    const fields = (value.fields || []).join("、");
+    diff.append(element(
+      "span",
+      `planner-change ${value.action}`,
+      `${actionLabels[value.action] || value.action} · ${value.course_key}${fields ? ` · ${fields}` : ""}`,
+    ));
   }
+  if (pendingChanges.length > 12) diff.append(element("span", "planner-change", `另有 ${pendingChanges.length - 12} 项`));
 }
 
 async function loadInformation() {
@@ -1298,19 +1507,69 @@ async function synchronizeCourses() {
   );
   if (!confirmed) return;
   const result = await runMoodleOperation(
-    "/api/sync",
-    "正在同步 Moodle 课程与文件，请保持此页面打开…",
+    "/api/sync/start",
+    "正在启动 Moodle 课程资料同步…",
   );
   if (!result) return;
-  const failure = result.failed_course_count
-    ? `，${result.failed_course_count} 门失败`
-    : "";
-  await loadInformation();
-  const pending = result.pending_review?.change_count || 0;
-  setOperationState(
-    false,
-    `同步完成：${result.succeeded_course_count}/${result.discovered_course_count} 门成功${failure}。待 AI 整理 ${pending} 项。`,
+  renderSyncProgress(result);
+  await pollCourseSync(result.job_id);
+}
+
+function renderSyncProgress(job) {
+  const panel = byId("sync-progress");
+  const running = job.state === "running";
+  const cancelling = running && Boolean(job.cancel_requested);
+  panel.classList.toggle("hidden", !running);
+  panel.classList.toggle("cancelling", cancelling);
+  byId("sync-progress-label").textContent = cancelling ? "正在取消" : job.detail || "正在同步";
+  byId("sync-progress-count").textContent = cancelling ? "" : `${job.completed || 0} / ${job.total || 0}`;
+  const bar = byId("sync-progress-bar");
+  bar.max = Math.max(1, job.total || 1);
+  bar.value = Math.min(job.completed || 0, bar.max);
+  byId("cancel-sync").disabled = !running || cancelling;
+}
+
+async function pollCourseSync(jobId = null) {
+  try {
+    const response = await fetch("/api/sync/status", { cache: "no-store" });
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || "无法读取同步进度");
+    if (jobId && job.job_id !== jobId) return;
+    renderSyncProgress(job);
+    if (job.state === "running") {
+      setOperationState(true, job.cancel_requested ? "正在取消" : job.detail || "正在同步 Moodle 课程资料…");
+      byId("cancel-sync").disabled = job.cancel_requested;
+      window.setTimeout(() => pollCourseSync(job.job_id), 700);
+      return;
+    }
+    if (job.state === "idle") return;
+    await loadInformation();
+    const result = job.result || {};
+    const pending = result.pending_review?.change_count || 0;
+    const message = job.state === "completed"
+      ? `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门成功。待 AI 整理 ${pending} 项。`
+      : job.state === "cancelled"
+        ? `同步已取消；已完成 ${result.succeeded_course_count || 0} 门课程，已发布资料已保留。`
+        : `同步失败：${job.error || "上一份有效资料已保留"}`;
+    setOperationState(false, message);
+  } catch (error) {
+    setOperationState(false);
+    const alert = byId("global-error");
+    alert.textContent = error.message;
+    alert.classList.remove("hidden");
+  }
+}
+
+async function cancelCourseSync() {
+  const result = await runLocalMutation(
+    "/api/sync/cancel",
+    { confirmed: true },
+    "正在请求安全取消…",
   );
+  if (result) {
+    renderSyncProgress(result);
+    await pollCourseSync(result.job_id);
+  }
 }
 
 async function loginClassPlanner() {
@@ -1391,10 +1650,19 @@ byId("select-all-courses").addEventListener("click", () => {
   renderDataViews();
 });
 byId("show-home").addEventListener("click", showHome);
+byId("next-up-card").addEventListener("click", () => {
+  const card = byId("next-up-card");
+  const item = state.data?.items.find((value) => value.item_id === card.dataset.itemId);
+  if (item) renderDetail(item, card.dataset.dateKey || null);
+});
 byId("show-calendar").addEventListener("click", showCalendar);
-byId("reload-data").addEventListener("click", loadInformation);
+byId("reload-data").addEventListener("click", async () => {
+  await loadInformation();
+  await verifyMoodleSession();
+});
 byId("login-moodle").addEventListener("click", loginMoodle);
 byId("sync-courses").addEventListener("click", synchronizeCourses);
+byId("cancel-sync").addEventListener("click", cancelCourseSync);
 byId("login-class-planner").addEventListener("click", loginClassPlanner);
 byId("sync-class-planner").addEventListener("click", synchronizeClassPlanner);
 byId("run-ocr").addEventListener("click", processOcrQueue);
@@ -1402,5 +1670,16 @@ byId("close-preview").addEventListener("click", closeSourcePreview);
 byId("source-preview").addEventListener("click", (event) => {
   if (event.target === byId("source-preview")) closeSourcePreview();
 });
+byId("close-item-detail").addEventListener("click", closeItemDetail);
+byId("item-detail-dialog").addEventListener("click", (event) => {
+  if (event.target === byId("item-detail-dialog")) closeItemDetail();
+});
+byId("item-detail-dialog").addEventListener("close", () => {
+  if (!state.selectedItemId) return;
+  state.selectedItemId = null;
+  state.selectedDateKey = null;
+  renderDataViews();
+});
 
-loadInformation();
+loadInformation().then(verifyMoodleSession);
+pollCourseSync();

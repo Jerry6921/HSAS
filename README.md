@@ -8,7 +8,7 @@
 HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、校验和可视化；AI 负责阅读资料
 并归纳课程信息。系统保留信息来源、待补字段和 Moodle 内容变化记录。
 
-![HIQS 首页：并发课程同步、聚合进度与资料状态](docs/images/ui/home.png)
+![HIQS 首页：并发课程同步、聚合进度与资料状态](docs/images/ui/home-sync-workflow.png)
 
 ## 目录
 

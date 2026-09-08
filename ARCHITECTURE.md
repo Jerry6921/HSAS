@@ -7,15 +7,23 @@ AI 写入的事实，并把事实确定性映射到日历；完整 Assessment �
 
 ```mermaid
 flowchart LR
+    StudentCenter[HKU SIS Student Center] --> Roster[当前学期课程名单]
+    Roster --> Collector
+    Roster --> SIS[HKU SIS Course Information]
     Moodle[HKU Moodle 与授权外部文件] --> Collector[Collector]
     Collector --> Files[本地原文件]
     Collector --> Text[PDF DOCX PPTX 文本副本]
     Collector --> OCR[OCR Queue]
     OCR --> Text
     Collector --> Queue[待处理变化队列]
+    SIS --> SisText[清洗后的官方课程正文]
+    SIS --> SisQueue[独立内容哈希与差异队列]
     Files --> AI[AI 阅读]
     Text --> AI
     Queue --> AI
+    SisText --> AI
+    SisQueue --> AI
+    Roster --> AI
     User[用户在 AI 对话中补充] --> AI
     AI --> Inbox[Personal Inbox 草稿与差异预览]
     Inbox --> Validator
@@ -28,7 +36,9 @@ flowchart LR
 
 职责边界：
 
-- Collector：发现 Moodle 活动、下载文件、记录来源与失败；
+- Student Center Collector：读取当前学期注册课程名单，保存原始可读文本、课程代码和独立审阅 checkpoint；
+- Collector：按注册课程发现 Moodle 活动、下载文件、记录来源与失败；
+- SIS Course Information Collector：从 Student Center 课程代码查询官方课程页，清洗页面并保存可读副本、来源和内容哈希；
 - AI：阅读原文件或文本副本，识别课程、tutorial、DDL、课业要求、形式和占分；
 - Information Service：检查类型、范围、唯一 ID、课程引用与时间关系，原子写入；
 - Change Queue：区分首次全量与后续增量，提供精确文件路径并记录处理游标；
@@ -48,6 +58,7 @@ src/hsas/
 │   └── courses/      Moodle 归档、文件与文本分析模型
 └── infrastructure/
     ├── moodle/       登录、发现、下载和快照事务
+    ├── sis_course_info/ HKU SIS 登录、课程页面采集与独立 checkpoint
     ├── documents/    PDF、DOCX、PPTX 文本提取与本地 OCR
     ├── storage/      原子 JSON/文件持久化
     └── runtime/      本地数据目录
@@ -107,6 +118,18 @@ Google Workspace 链接是受控例外：`docs.google.com/document`、`presentat
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
 
+HKU SIS 课程页面保存在 `sis-course-info/courses/<COURSE_CODE>/latest.txt` 与
+`latest.html`。采集器只截取可见课程正文、移除 PeopleSoft 导航和会话状态，并记录安全的
+Subject/Catalogue URL 与 SHA-256。课程事实保持由 AI 阅读，页面结构差异不会进入固定事实
+parser。当前学期课程名单保存在 `sis-enrollment/latest.json`，Student Center 可见正文
+保存在 `sis-enrollment/latest.txt`；课程名单的变化使用独立 batch 与 checkpoint 交给 AI
+审阅。相同课程的多个 Moodle section 共用一份 SIS 来源。Class Planner 与 SIS 访问器
+共享持久化 HKU Portal browser profile；SIS 登录从 `z_signon.jsp` 开始，并由用户在可见
+窗口完成可能出现的图形验证码。统一同步先在主 profile 中完成登录与 Student Center 课程
+名单采集，浏览器关闭后为 Moodle、SIS Course Information 和 Class Planner 创建三个临时
+认证快照。三个采集器通过 `asyncio.gather` 并发运行，各自持有独立 Chromium profile，避开
+浏览器进程锁；临时快照在任务结束后清理。来源分别写入自己的目录，聚合状态只在锁内更新。
+
 提取器会把文字覆盖不足的扫描 PDF 和图片型 PPT 标为 `ocr_required`。`hsas ocr status`
 读取这些分析记录生成队列，`hsas ocr run --confirmed` 使用本地 Apple Vision 或
 Tesseract/Poppler 批量识别。识别结果追加到文本副本并重新计算哈希、摘要、关键词和阅读
@@ -128,6 +151,10 @@ changes show → AI 阅读列出的 files → information apply --changes → ch
 
 checkpoint 在信息写入成功后推进。信息已保存而游标确认失败时，变化保持 pending 以支持
 安全重试。审查确认课程事实保持一致时，使用带双重确认的独立 acknowledge。
+
+HKU SIS 页面使用 `sis-course-info/history/` 和 `review-checkpoint.json` 维护独立增量队列。
+AI 先阅读变更记录指向的 `text_relative_path`，并以 `source_type: sis_course_info` 引用来源；
+SIS 明确陈述的重叠课程事实拥有最高优先级。
 
 ## Information Store
 
@@ -184,7 +211,9 @@ Inbox 条目标为 applied。
 ## Dashboard
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
-store。首页集中 Moodle 登录、同步、本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异；日历作为
+store。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
+SIS Course Information 与 Class Planner；单一进度条显示阶段、当前课程和完成数量。同时
+集中本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异。日历作为
 独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，并提供按日排列
 开始与结束时间的议程视图。两种视图共享课程与全文筛选，日期待确认事项单独列出。
 

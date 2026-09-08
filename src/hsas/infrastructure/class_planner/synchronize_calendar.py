@@ -13,6 +13,7 @@ from hsas.application.ports.define_gateways import (
     ClassPlannerSyncResult,
 )
 from hsas.infrastructure.storage.persist_data import read_json, write_json
+from hsas.infrastructure.runtime import hku_portal_profile_dir
 
 from .fetch_calendar import ClassPlannerAuthenticationError, capture_calendar_response
 from .define_review_fields import timetable_course_fields
@@ -222,9 +223,13 @@ def _write_session_status(resources_dir: Path, status: str) -> None:
 
 
 class ClassPlannerBrowserGateway:
-    def __init__(self, resources_dir: Path) -> None:
+    def __init__(self, resources_dir: Path, *, profile_dir: Path | None = None) -> None:
         self.resources_dir = resources_dir.expanduser().resolve()
-        self.profile_dir = self.resources_dir.parent / "class-planner-browser-profile"
+        self.profile_dir = (
+            profile_dir.expanduser().resolve()
+            if profile_dir is not None
+            else hku_portal_profile_dir(self.resources_dir)
+        )
 
     def login_until_ready(
         self, *, timeout_seconds: int = 300

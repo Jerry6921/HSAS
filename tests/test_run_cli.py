@@ -22,6 +22,8 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
         "information",
         "materials",
         "ocr",
+        "sis-course-info",
+        "sis-enrollment",
     }
 
 

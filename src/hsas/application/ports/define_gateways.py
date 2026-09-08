@@ -100,3 +100,40 @@ class ClassPlannerGateway(Protocol):
     ) -> ClassPlannerSessionResult: ...
 
     def sync(self, *, timeout_seconds: int = 90) -> ClassPlannerSyncResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SisCourseInfoSessionResult:
+    status: str
+    checked_at: str
+    available_course_count: int
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SisCourseInfoSyncResult:
+    status: str
+    synced_at: str
+    discovered_course_count: int
+    succeeded_course_codes: tuple[str, ...]
+    unchanged_course_codes: tuple[str, ...]
+    skipped_course_titles: tuple[str, ...]
+    failures: tuple[dict[str, str], ...]
+    output_path: Path
+
+
+class SisCourseInfoGateway(Protocol):
+    """Authenticated HKU SIS course-information collection operations."""
+
+    def login_until_ready(
+        self, *, timeout_seconds: int = 300
+    ) -> SisCourseInfoSessionResult: ...
+
+    def sync(
+        self,
+        *,
+        timeout_seconds: int = 90,
+        selected_courses: list[dict[str, str]] | None = None,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SisCourseInfoSyncResult: ...

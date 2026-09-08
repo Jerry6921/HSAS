@@ -15,9 +15,17 @@ from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.domain.information import InformationStore
 from hsas.infrastructure.documents.run_ocr import collect_ocr_queue
 from hsas.infrastructure.class_planner import class_planner_status
+from hsas.infrastructure.fetch_sis_enrollment import SisEnrollmentBrowserGateway
+from hsas.infrastructure.manage_sis_enrollment import collect_sis_enrollment_changes
+from hsas.infrastructure.sis_course_info import sis_course_info_status
+from hsas.infrastructure.sis_course_info.manage_changes import collect_sis_course_info_changes
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
-from hsas.infrastructure.runtime import ensure_resources_layout, get_runtime_paths
+from hsas.infrastructure.runtime import (
+    ensure_resources_layout,
+    get_runtime_paths,
+    hku_portal_profile_dir,
+)
 from hsas.infrastructure.storage import JsonPersonalInboxRepository
 
 from .manage_information import INFORMATION_REPOSITORY, information_app
@@ -26,6 +34,8 @@ from .manage_calendar import calendar_app
 from .manage_changes import CHANGE_REPOSITORY, changes_app
 from .manage_inbox import inbox_app
 from .manage_ocr import ocr_app
+from .manage_sis_course_info import sis_course_info_app
+from .manage_sis_enrollment import sis_enrollment_app
 from .query_materials import materials_app
 from .run_dashboard import serve_dashboard
 
@@ -38,6 +48,8 @@ app.add_typer(inbox_app, name="inbox")
 app.add_typer(ocr_app, name="ocr")
 app.add_typer(class_planner_app, name="class-planner")
 app.add_typer(calendar_app, name="calendar")
+app.add_typer(sis_course_info_app, name="sis-course-info")
+app.add_typer(sis_enrollment_app, name="sis-enrollment")
 
 
 @app.callback()
@@ -116,12 +128,26 @@ def list_status(ctx: typer.Context) -> None:
     typer.echo(
         f"Personal inbox: {inbox.get('pending_count', 0)} draft(s)"
     )
+    enrollment = SisEnrollmentBrowserGateway(resources).status()
+    enrollment_review = collect_sis_enrollment_changes(resources)
+    typer.echo(
+        f"Student Center: {enrollment['course_count']} course(s); "
+        f"term={enrollment.get('term') or 'unknown'}; "
+        f"pending review={enrollment_review['pending_change_count']}"
+    )
     planner = class_planner_status(resources)
     typer.echo(
         f"Class Planner: {planner['course_count']} course(s), "
         f"{planner['meeting_count']} meeting(s); "
         f"synced={planner['synced_at'] or 'never'}; "
         f"pending review={planner['review']['pending_change_count']}"
+    )
+    sis = sis_course_info_status(resources)
+    sis_review = collect_sis_course_info_changes(resources)
+    typer.echo(
+        f"HKU SIS course information: {sis['course_count']} course(s); "
+        f"synced={sis['synced_at'] or 'never'}; "
+        f"pending review={sis_review['pending_change_count']}"
     )
 
 
@@ -168,9 +194,15 @@ def query(
 
 
 @app.command("login")
-def login() -> None:
+def login(ctx: typer.Context) -> None:
     """Open Moodle and persist the user-completed SSO/MFA session."""
-    _course_service().login()
+    resources = _resources(ctx)
+    _course_service(
+        Settings.load(
+            output_dir=resources,
+            profile_dir=hku_portal_profile_dir(resources),
+        )
+    ).login()
 
 
 @app.command("sync-courses")
@@ -182,7 +214,11 @@ def sync_courses(
     ] = None,
 ) -> None:
     """Download all accessible course files and create local text sidecars."""
-    settings = Settings.load(output_dir=_resources(ctx))
+    resources = _resources(ctx)
+    settings = Settings.load(
+        output_dir=resources,
+        profile_dir=hku_portal_profile_dir(resources),
+    )
     service = _course_service(settings)
     if course is None:
         result = service.sync_all()

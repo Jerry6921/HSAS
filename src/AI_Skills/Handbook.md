@@ -19,6 +19,8 @@ hsas materials list [--course COURSE_ID]
 hsas materials search QUERY [--course COURSE_ID]
 hsas ocr status
 hsas ocr run [--course COURSE_ID] --confirmed
+hsas sis-course-info login
+hsas sis-course-info sync
 ```
 
 The user completes SSO/MFA in the visible browser. Passwords, MFA codes, cookies,
@@ -134,6 +136,15 @@ their published snapshots when another course reports a failure.
 The AI serves as the assessment interpreter in this pipeline, derives course
 facts from cited local evidence, and writes them through the validated
 information-update path.
+
+After Moodle course discovery, the SIS course-information collector splits a
+standard course code such as `BMED2206` into Subject Area `BMED` and Catalogue
+Number `2206`. It stores only cleaned visible text/HTML plus provenance and a
+content hash under `sis-course-info/`; it does not parse those pages into course
+facts. Duplicate Moodle sections of the same course are queried once.
+The SIS and Class Planner adapters share the persistent HKU Portal browser
+profile. SIS sign-in opens `z_signon.jsp`; the user completes any image
+verification in that visible browser before headless collection begins.
 
 `hsas changes show` turns this history into a pending batch. A course awaiting
 its first checkpoint receives one full review; later batches contain changes

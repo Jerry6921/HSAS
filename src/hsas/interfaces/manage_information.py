@@ -25,6 +25,16 @@ from hsas.infrastructure.class_planner.manage_changes import (
     acknowledge_class_planner_changes,
     validate_class_planner_batch,
 )
+from hsas.infrastructure.sis_course_info.manage_changes import (
+    SisCourseInfoReviewError,
+    acknowledge_sis_course_info_changes,
+    validate_sis_course_info_batch,
+)
+from hsas.infrastructure.manage_sis_enrollment import (
+    SisEnrollmentReviewError,
+    acknowledge_sis_enrollment_changes,
+    validate_sis_enrollment_batch,
+)
 from hsas.domain.courses.define_change_queue import PendingChangeBatch
 from hsas.domain.information import InformationUpdate
 from hsas.infrastructure.runtime import get_runtime_paths
@@ -107,12 +117,28 @@ def information_apply(
             help="Class Planner batch to checkpoint after this update succeeds",
         ),
     ] = None,
+    sis_course_info_changes_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--sis-course-info-changes",
+            help="HKU SIS course-information batch to checkpoint after this update succeeds",
+        ),
+    ] = None,
+    sis_enrollment_changes_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--sis-enrollment-changes",
+            help="Student Center enrolment batch to checkpoint after this update succeeds",
+        ),
+    ] = None,
 ) -> None:
     """Atomically upsert reviewed course facts into information.json."""
     resources = _resources(ctx)
     path = information_path or resources / "information.json"
     batch: PendingChangeBatch | None = None
     planner_batch: dict | None = None
+    sis_batch: dict | None = None
+    enrollment_batch: dict | None = None
     try:
         payload = read_json(update_path)
         if changes_path is not None:
@@ -134,6 +160,28 @@ def information_apply(
                 raise ClassPlannerReviewError(
                     "an empty information update cannot acknowledge Class Planner changes"
                 )
+        if sis_course_info_changes_path is not None:
+            sis_batch = read_json(sis_course_info_changes_path)
+            if not isinstance(sis_batch, dict):
+                raise SisCourseInfoReviewError("HKU SIS batch must be a JSON object")
+            validate_sis_course_info_batch(resources, sis_batch)
+            update = validate_information_update(payload)
+            if not update.courses and not update.items:
+                raise SisCourseInfoReviewError(
+                    "an empty information update cannot acknowledge HKU SIS changes"
+                )
+        if sis_enrollment_changes_path is not None:
+            enrollment_batch = read_json(sis_enrollment_changes_path)
+            if not isinstance(enrollment_batch, dict):
+                raise SisEnrollmentReviewError(
+                    "Student Center batch must be a JSON object"
+                )
+            validate_sis_enrollment_batch(resources, enrollment_batch)
+            update = validate_information_update(payload)
+            if not update.courses and not update.items:
+                raise SisEnrollmentReviewError(
+                    "an empty information update cannot acknowledge enrolment changes"
+                )
         result = apply_information_update(
             path,
             payload,
@@ -146,6 +194,8 @@ def information_apply(
         InformationServiceError,
         ChangeQueueError,
         ClassPlannerReviewError,
+        SisCourseInfoReviewError,
+        SisEnrollmentReviewError,
     ) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
@@ -189,6 +239,42 @@ def information_apply(
         typer.echo(
             "Reviewed Class Planner changes acknowledged: "
             f"checkpoint={checkpoint['acknowledged_through']}"
+        )
+    if sis_batch is not None:
+        try:
+            checkpoint = acknowledge_sis_course_info_changes(
+                resources,
+                sis_batch,
+                confirmed=confirmed,
+            )
+        except (OSError, ValueError, SisCourseInfoReviewError) as exc:
+            typer.echo(
+                "Information was saved, but HKU SIS changes remain pending: "
+                f"{exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        typer.echo(
+            "Reviewed HKU SIS course-information changes acknowledged: "
+            f"checkpoint={checkpoint['acknowledged_through']}"
+        )
+    if enrollment_batch is not None:
+        try:
+            checkpoint = acknowledge_sis_enrollment_changes(
+                resources,
+                enrollment_batch,
+                confirmed=confirmed,
+            )
+        except (OSError, ValueError, SisEnrollmentReviewError) as exc:
+            typer.echo(
+                "Information was saved, but Student Center changes remain pending: "
+                f"{exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        typer.echo(
+            "Reviewed Student Center enrolment changes acknowledged: "
+            f"checkpoint={checkpoint['content_sha256']}"
         )
 
 

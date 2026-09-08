@@ -12,28 +12,37 @@
   let pointerFrame = 0;
   let activeSurface = null;
 
-  const surfaceSelector = [
+  const tiltSelectors = [
     ".next-up-card",
     ".home-command-center",
     ".application-card",
+    ".metrics article",
     ".status-card",
+    ".status-grid article",
+    ".status-details > section",
+    ".compact-status",
     ".local-search-card",
+    ".search-result",
     ".inbox-card",
+    ".inbox-entry",
     ".updates-card",
+    ".update-course",
+    ".change-card",
     ".calendar-card",
+    ".event-chip",
+    ".agenda-item",
     ".unscheduled-card",
+    ".unscheduled-item",
+    ".course-manager-row",
+  ];
+  const surfaceSelector = [
+    ...tiltSelectors,
     ".course-hero",
     ".overview-card",
     ".course-materials-card",
-  ].join(",");
-  const tiltSelector = [
-    ".application-card",
-    ".metrics article",
-    ".status-grid article",
     ".material-card",
-    ".search-result",
-    ".update-course",
   ].join(",");
+  const tiltSelector = tiltSelectors.join(",");
   const revealSelector = [
     ".next-up-card",
     ".home-command-center",

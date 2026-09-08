@@ -61,6 +61,11 @@ def ensure_resources_layout(resources_dir: Path) -> Path:
     return resources
 
 
+def hku_portal_profile_dir(resources_dir: Path) -> Path:
+    """Return the browser profile shared by every authenticated course source."""
+    return resources_dir.expanduser().resolve().parent / "browser-profile"
+
+
 def _environment_data_dir() -> Path | None:
     value = os.environ.get(DATA_DIR_ENV, "").strip()
     return Path(value) if value else None

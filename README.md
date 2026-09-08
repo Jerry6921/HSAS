@@ -1,6 +1,6 @@
 # HIQS — HKU Information Query System
 
-> 将 Moodle、课件和 syllabus 中的课程资料同步到本地，由 AI 整理为可查询的信息库与日历。
+> 将 Moodle、HKU SIS、课件和 syllabus 中的课程资料同步到本地，由 AI 整理为可查询的信息库与日历。
 
 课程时间、DDL、评分方式和 Tutorial 安排通常分布在 timetable、Moodle、syllabus 与课程
 公告中。查询一个事项可能需要交叉核对多个页面和文件。
@@ -8,7 +8,7 @@
 HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、校验和可视化；AI 负责阅读资料
 并归纳课程信息。系统保留信息来源、待补字段和 Moodle 内容变化记录。
 
-![HIQS 首页：Moodle、Class Planner 同步与资料状态](docs/images/ui/home.png)
+![HIQS 首页：并发课程同步、聚合进度与资料状态](docs/images/ui/home.png)
 
 ## 目录
 
@@ -24,12 +24,23 @@ HIQS 的界面由首页、日历和课程概览组成，并将课程资料、结
 ### 首页
 
 首页集中呈现近期事项、外部课程来源和本地信息库状态。Next Up 卡片显示下一项课程活动或
-DDL 的时间、地点与倒计时；同步工作台整合 Moodle 与 HKU Class Planner 的登录状态、课程
-同步和课表同步，并显示后台任务的实时进度。
+DDL 的时间、地点与倒计时；同步工作台通过一个“开始同步”入口运行完整课程数据流程，并
+通过进度条、loading 标识和当前课程名称显示运行状态。流程先用统一浏览器 profile 完成
+HKU Portal 登录并建立来源会话，再从 HKU SIS Student Center 取得当前学期注册课程，按课程
+确定采集范围。随后 Moodle 文件、SIS Course Information 与 HKU Class Planner 课表并发同步，
+首页以一条聚合进度显示三个来源的完成情况。
+
+Student Center 课程名单直接提供课程代码，例如把 `BMED2206` 拆为 Subject Area `BMED`
+与 Catalogue Number `2206`。系统逐门取得 SIS 课程页面，保存经过清洗的可读副本与
+内容哈希；AI 以该官方页面作为重叠课程事实的最高优先级来源。SIS 与 Class Planner 共享
+HKU Portal 浏览器 profile，SIS 登录窗口同时承接可能出现的一次图形验证。
 
 课程数、信息事项、本月日程、待确认日期和待 AI 整理数量构成首页摘要。资料状态进一步汇总
 OCR、Google 授权与来源冲突；本地搜索、个人补充信息 Inbox 和更新记录分别承担资料检索、
 补充信息预览以及 Moodle 变化审阅。
+
+侧栏课程管理可直接向 `information.json` 添加课程，也可删除课程、关联事项与本地课程文件。
+删除的文件先转移到本机回收目录；再次同步 Moodle 时仍可重新取得可访问的课程资料。
 
 ### 日历页
 
@@ -59,9 +70,26 @@ activity、文件大小、文本副本状态和本轮变化标记。
 材料”和“证据来源”共用这一视图。预览底部保留本地原文件与 Moodle 来源链接，使结构化
 事实能够追溯到具体页面、页码或 slide。
 
-## 工作流
+### 同步与整理工作流
 
 ```text
+HKU SIS Student Center
+  ↓
+取得当前学期注册课程，保存原始可读文本与课程名单快照
+  ↓
+复制已认证会话并并发运行三个独立来源
+  ├─ Moodle：按课程同步文件与文本副本
+  ├─ SIS Course Information：按课程同步最高优先级官方页面
+  └─ HKU Class Planner：同步上课时间、班别和地点
+  ↓
+各来源生成独立增量审阅队列
+  ↓
+AI 阅读本轮新增或变化资料
+  ↓
+HIQS 校验并增量写入 information.json，同时推进对应 checkpoint
+  ↓
+Dashboard 映射为日历、课程概览与课件目录
+
 Moodle
   ↓
 Collector 下载文件、保存来源并生成文本副本
@@ -83,6 +111,16 @@ HKU Class Planner
 AI 核对班别、时间、地点和单次课表例外
   ↓
 经校验写入 information.json 后推进 Class Planner checkpoint
+
+Student Center 课程代码
+  ↓
+HKU SIS Course Information 读取官方课程页面
+  ↓
+清洗可见正文、保存哈希并生成独立差异队列
+  ↓
+AI 优先核对课程概述、目标、评分、政策与推荐阅读
+  ↓
+经校验写入 information.json 后推进 SIS checkpoint
 ```
 
 Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 读取。所有可查询事实由 AI
@@ -110,8 +148,8 @@ HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由�
 
 ### 让 Agent 整理新增信息
 
-每次在首页完成 Moodle 课程或官方课表同步后，可以直接告诉 Agent：“请整理 HIQS 本次新增
-或变化的课程资料。”Agent 会读取待审阅队列和 checkpoint：首次整理覆盖该课程的全部资料，
+每次在首页完成课程同步后，可以直接告诉 Agent：“请整理 HIQS 本次新增或变化的课程资料。”
+Agent 会读取 Student Center、Moodle、官方课程信息和课表的待审阅队列与 checkpoint：首次整理覆盖该课程的全部资料，
 后续只阅读新增、修改或删除的项目及相关课程索引，并在需要时先处理 OCR 队列。
 
 Agent 会把有来源支持的新课程事实、日历事项和材料关联整理成更新预览。确认写入后，HIQS
@@ -154,13 +192,19 @@ Google Workspace 返回登录页或权限页时，项目会标记为 external �
 
 ```text
 ~/Library/Application Support/HSAS/
-├── browser-profile/
+├── browser-profile/  # Moodle、HKU Portal、SIS 与 Class Planner 共享会话
 ├── resources/
 │   ├── information.json
 │   ├── ai-state/change-checkpoint.json
 │   ├── ai-state/personal-inbox.json
+│   ├── sis-enrollment/latest.json
+│   ├── sis-enrollment/latest.txt
+│   ├── sis-enrollment/review-checkpoint.json
 │   ├── class-planner/latest.json
 │   ├── class-planner/review-checkpoint.json
+│   ├── sis-course-info/latest.json
+│   ├── sis-course-info/review-checkpoint.json
+│   ├── sis-course-info/courses/COURSE_CODE/latest.txt
 │   └── courses/COURSE_ID/
 │       ├── course.json
 │       ├── files/
@@ -203,6 +247,20 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 本节只记录功能与界面版本，文档措辞和演示图片调整不单独列项。
+
+### 2.5.0 · 2026-09-08
+
+- 首页同步入口整合 Student Center 课程列表、Moodle 资料、SIS 官方课程信息与 Class Planner 课表；
+- 登录集中在工作流起点，所有课程访问器共用同一浏览器 profile；
+- 同步工作区简化为进度条、loading 标识、当前课程和取消操作；
+- 新增 Student Center 注册课程快照、增量审阅批次与独立 checkpoint；
+- 各来源在流程运行时检查会话状态，并在需要认证时打开对应官方登录页；
+- 新增 HKU SIS Course Information 登录与同步，从 Student Center 课程代码拆分 Subject Area 和 Catalogue Number；
+- 官方课程页保存为经过清洗的本地文本与 HTML 副本，并通过内容哈希形成独立增量审阅队列；
+- AI 写入流程支持 SIS checkpoint，并将明确重叠的 SIS 课程事实设为最高来源优先级；
+- 首页同步工作台新增来源状态、同步摘要与待整理差异；
+- 侧栏新增课程数据库管理，可添加课程或删除课程、关联事项与本地课程文件；
+- 动态质感扩展至首页、日历、资料条目与管理窗口；课程概览保留环境光并使用稳定的平面交互。
 
 ### 2.4.0 · 2026-09-07
 

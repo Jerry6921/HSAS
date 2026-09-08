@@ -16,6 +16,7 @@ API_HOST = "class-planner.hku.hk"
 API_PATH = "/api/calendar"
 PORTAL_HOST = "hkuportal.hku.hk"
 PORTAL_BRIDGE_PATH = "/cas/aad"
+PORTAL_LOGIN_PATH_MARKERS = ("login", "signin", "signon", "logout")
 
 
 class ClassPlannerAuthenticationError(RuntimeError):
@@ -56,43 +57,58 @@ def _is_portal_bridge(url: str) -> bool:
     return parsed.scheme == "https" and parsed.netloc == PORTAL_HOST and parsed.path == PORTAL_BRIDGE_PATH
 
 
-async def _resume_after_portal_bridge(
+def _is_portal_resume_page(url: str) -> bool:
+    """Return whether an HKU Portal page can hand control back to Class Planner.
+
+    Depending on the current Portal deployment, a completed sign-in can stop on
+    the AAD bridge, the Portal home page, or another authenticated Portal page.
+    Explicit sign-in pages must remain open so the user can finish interacting
+    with them.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc.lower() != PORTAL_HOST:
+        return False
+    path = parsed.path.lower()
+    return not any(marker in path for marker in PORTAL_LOGIN_PATH_MARKERS)
+
+
+async def _resume_after_portal_login(
     context: BrowserContext,
     payload_future: asyncio.Future[dict[str, Any]],
     *,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    """Return to Class Planner after HKU Portal finishes its AAD bridge.
+    """Return to Class Planner after HKU Portal finishes authentication.
 
-    The official SPA leaves its only tab on the Portal bridge after the user
-    completes sign-in. Re-opening `/app` lets MSAL use that new browser session
-    and issue the authenticated calendar request.
+    The official SPA may leave its only tab on the AAD bridge or another Portal
+    page after sign-in. Re-opening `/app` lets MSAL use the shared browser
+    session and issue the authenticated calendar request.
     """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
-    bridge_since: dict[int, float] = {}
+    portal_since: dict[int, float] = {}
     while loop.time() < deadline:
         if payload_future.done():
             return await payload_future
         pages = list(context.pages)
-        active_bridge_ids: set[int] = set()
+        active_portal_ids: set[int] = set()
         for page in pages:
             identity = id(page)
-            if not _is_portal_bridge(page.url):
-                bridge_since.pop(identity, None)
+            if not _is_portal_resume_page(page.url):
+                portal_since.pop(identity, None)
                 continue
-            active_bridge_ids.add(identity)
-            started = bridge_since.setdefault(identity, loop.time())
-            # A short stable period distinguishes the completed bridge page
-            # from its initial redirect into Microsoft sign-in.
-            if loop.time() - started >= 5:
-                bridge_since.pop(identity, None)
+            active_portal_ids.add(identity)
+            started = portal_since.setdefault(identity, loop.time())
+            # A short stable period lets the Portal finish any automatic
+            # redirect before control returns to Class Planner.
+            if loop.time() - started >= 2:
+                portal_since.pop(identity, None)
                 await page.goto(APP_URL, wait_until="domcontentloaded")
                 break
-        bridge_since = {
+        portal_since = {
             identity: started
-            for identity, started in bridge_since.items()
-            if identity in active_bridge_ids
+            for identity, started in portal_since.items()
+            if identity in active_portal_ids
         }
         await asyncio.sleep(0.5)
     raise TimeoutError
@@ -142,7 +158,7 @@ async def capture_calendar_response(
         try:
             if headless:
                 return await asyncio.wait_for(payload_future, timeout=timeout_seconds)
-            return await _resume_after_portal_bridge(
+            return await _resume_after_portal_login(
                 context,
                 payload_future,
                 timeout_seconds=timeout_seconds,

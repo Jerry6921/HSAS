@@ -18,6 +18,7 @@ SourceType = Literal[
     "announcement",
     "email",
     "manual",
+    "sis_course_info",
     "other",
 ]
 ItemCategory = Literal[

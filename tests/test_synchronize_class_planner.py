@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from hsas.infrastructure.class_planner.fetch_calendar import _is_portal_bridge
+from hsas.infrastructure.class_planner.fetch_calendar import (
+    _is_portal_bridge,
+    _is_portal_resume_page,
+)
 from hsas.infrastructure.class_planner.synchronize_calendar import (
     _diff,
     _sanitize,
@@ -41,6 +44,15 @@ def test_only_official_hku_portal_aad_bridge_triggers_resume() -> None:
     assert _is_portal_bridge("https://hkuportal.hku.hk/cas/aad") is True
     assert _is_portal_bridge("https://hkuportal.hku.hk/login.html") is False
     assert _is_portal_bridge("https://example.invalid/cas/aad") is False
+
+
+def test_authenticated_portal_pages_return_to_class_planner() -> None:
+    assert _is_portal_resume_page("https://hkuportal.hku.hk/cas/aad") is True
+    assert _is_portal_resume_page("https://hkuportal.hku.hk/") is True
+    assert _is_portal_resume_page("https://hkuportal.hku.hk/home") is True
+    assert _is_portal_resume_page("https://hkuportal.hku.hk/login.html") is False
+    assert _is_portal_resume_page("https://hkuportal.hku.hk/cas/signin") is False
+    assert _is_portal_resume_page("https://login.microsoftonline.com/") is False
 
 
 def test_class_planner_snapshot_is_summarized_and_sanitized() -> None:

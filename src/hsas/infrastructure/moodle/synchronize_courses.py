@@ -416,7 +416,7 @@ def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
             downloaded=downloaded_entries,
         )
 
-    asyncio.run(run())
+    return asyncio.run(run())
 
 
 def sync_course(

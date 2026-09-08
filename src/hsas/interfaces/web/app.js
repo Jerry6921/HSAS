@@ -244,6 +244,41 @@ function renderCourseNavigation() {
   }
 }
 
+function renderCourseManager() {
+  const container = byId("course-manager-list");
+  container.replaceChildren();
+  if (!state.data?.courses.length) {
+    container.append(element("p", "empty-list", "本地信息库中暂无课程。"));
+    return;
+  }
+  for (const course of state.data.courses) {
+    const row = element("article", "course-manager-row");
+    row.style.setProperty("--course-color", course.color);
+    const copy = element("div", "course-manager-name");
+    copy.append(
+      element("span", "course-nav-dot"),
+      element("strong", "", course.code || course.title),
+      element("small", "", course.title),
+    );
+    const remove = element("button", "button compact danger", "删除");
+    remove.type = "button";
+    remove.addEventListener("click", () => deleteCourse(course));
+    row.append(copy, remove);
+    container.append(row);
+  }
+}
+
+function openCourseManager() {
+  renderCourseManager();
+  const dialog = byId("course-manager-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeCourseManager() {
+  const dialog = byId("course-manager-dialog");
+  if (dialog.open) dialog.close();
+}
+
 function setView(view) {
   state.view = view;
   byId("home-view").classList.toggle("hidden", view !== "home");
@@ -665,7 +700,7 @@ function renderMetrics(occurrences) {
   byId("metric-items").textContent = filteredItems.length;
   byId("metric-month").textContent = occurrences.filter((value) => value.key.startsWith(monthPrefix)).length;
   byId("metric-unknown").textContent = filteredItems.filter((item) => item.date_status === "unknown").length;
-  byId("metric-pending").textContent = state.data.pending_review?.change_count || 0;
+  byId("metric-pending").textContent = state.data.material_status?.counts?.ai_review || 0;
 }
 
 function appendCompactStatus(container, title, meta, note = null, action = null) {
@@ -1283,83 +1318,11 @@ function renderDataViews() {
   renderUnscheduled();
   renderUpdates();
   renderHomeSearch();
-  renderClassPlannerStatus();
-  renderMoodleSessionStatus();
   if (state.selectedItemId) {
     const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
     if (selected) renderDetail(selected, state.selectedDateKey);
   }
   if (state.view === "course") renderCourseOverview();
-}
-
-function renderLoginState(elementId, loginStatus) {
-  const labels = {
-    logged_in: "已登录",
-    expired: "会话失效",
-    login_required: "未登录",
-    unknown: "状态未知",
-  };
-  const node = byId(elementId);
-  const normalized = loginStatus || "login_required";
-  node.className = `login-state ${normalized.replace("_", "-")}`;
-  node.replaceChildren(
-    element("span"),
-    document.createTextNode(labels[normalized] || "状态未知"),
-  );
-}
-
-function renderMoodleSessionStatus() {
-  renderLoginState(
-    "moodle-login-state",
-    state.data.moodle_session?.login_status,
-  );
-}
-
-async function verifyMoodleSession() {
-  if (!state.data || window.location.protocol === "file:") return;
-  const loginState = byId("moodle-login-state");
-  loginState.className = "login-state logging-in";
-  loginState.replaceChildren(element("span"), document.createTextNode("验证中"));
-  try {
-    const response = await fetch("/api/moodle/status", { cache: "no-store" });
-    const status = await response.json();
-    if (!response.ok) throw new Error(status.error || "无法验证 Moodle 会话");
-    state.data.moodle_session = status;
-    renderMoodleSessionStatus();
-  } catch (_error) {
-    renderLoginState("moodle-login-state", "unknown");
-  }
-}
-
-function renderClassPlannerStatus() {
-  const planner = state.data.class_planner || {};
-  const status = byId("class-planner-status");
-  const diff = byId("class-planner-diff");
-  diff.replaceChildren();
-  const loginStatus = planner.login_status || "login_required";
-  renderLoginState("class-planner-login-state", loginStatus);
-  if (planner.error) {
-    status.textContent = `本地课表快照读取失败：${planner.error}`;
-    return;
-  }
-  if (!planner.available) {
-    status.textContent = "通过 HKU Portal 登录，读取 Class Planner 的课程、班别、时间与地点。";
-    return;
-  }
-  const terms = (planner.term_ids || []).join("、") || "当前学期";
-  const pendingCount = planner.review?.pending_change_count || 0;
-  status.textContent = `${terms} · ${planner.course_count} 门课程 · ${planner.meeting_count} 个上课时段 · 待审阅 ${pendingCount} 项`;
-  const actionLabels = { added: "新增", modified: "修改", removed: "移除" };
-  const pendingChanges = planner.review?.changes || [];
-  for (const value of pendingChanges.slice(0, 12)) {
-    const fields = (value.fields || []).join("、");
-    diff.append(element(
-      "span",
-      `planner-change ${value.action}`,
-      `${actionLabels[value.action] || value.action} · ${value.course_key}${fields ? ` · ${fields}` : ""}`,
-    ));
-  }
-  if (pendingChanges.length > 12) diff.append(element("span", "planner-change", `另有 ${pendingChanges.length - 12} 项`));
 }
 
 async function loadInformation() {
@@ -1401,17 +1364,14 @@ async function loadInformation() {
 }
 
 function setOperationState(running, message = "") {
-  const loginButton = byId("login-moodle");
-  const syncButton = byId("sync-courses");
   const reloadButton = byId("reload-data");
   const ocrButton = byId("run-ocr");
-  const plannerLoginButton = byId("login-class-planner");
-  const plannerSyncButton = byId("sync-class-planner");
-  loginButton.disabled = running;
-  syncButton.disabled = running;
+  const workflowButton = byId("start-workflow");
   reloadButton.disabled = running;
-  plannerLoginButton.disabled = running;
-  plannerSyncButton.disabled = running;
+  workflowButton.disabled = running;
+  document.querySelectorAll("#add-course-form input, #add-course-form button, #course-manager-list button").forEach((control) => {
+    control.disabled = running;
+  });
   const ocr = state.data?.material_status?.ocr;
   ocrButton.disabled = running || !(ocr?.capabilities?.available && ocr?.queue?.length);
   const status = byId("operation-status");
@@ -1447,10 +1407,6 @@ async function runLocalMutation(path, payload, pendingMessage) {
   }
 }
 
-async function runMoodleOperation(path, pendingMessage) {
-  return runLocalMutation(path, { confirmed: true }, pendingMessage);
-}
-
 async function processOcrQueue() {
   const confirmed = window.confirm("将使用本机 OCR 处理队列中的 PDF 与图片型 PPT，并更新文本副本。继续吗？");
   if (!confirmed) return;
@@ -1478,43 +1434,6 @@ async function applyInboxEntry(entry) {
   setOperationState(false, `个人补充信息已写入：新增 ${result.created_items} 项，更新 ${result.updated_items} 项。`);
 }
 
-async function loginMoodle() {
-  const confirmed = window.confirm(
-    "将打开一个 Moodle 登录窗口。请只在该窗口中输入账号并亲自完成 SSO/MFA。继续吗？",
-  );
-  if (!confirmed) return;
-  const loginState = byId("moodle-login-state");
-  loginState.className = "login-state logging-in";
-  loginState.replaceChildren(element("span"), document.createTextNode("登录中"));
-  const result = await runMoodleOperation(
-    "/api/moodle/login",
-    "等待你在新窗口完成 Moodle 登录…",
-  );
-  if (!result) {
-    await loadInformation();
-    return;
-  }
-  await loadInformation();
-  setOperationState(
-    false,
-    `Moodle 登录成功，可访问 ${result.available_course_count} 门课程。`,
-  );
-}
-
-async function synchronizeCourses() {
-  const confirmed = window.confirm(
-    "将同步全部可访问课程，并下载课程文件到本机。同步不会自动改写日历信息库。继续吗？",
-  );
-  if (!confirmed) return;
-  const result = await runMoodleOperation(
-    "/api/sync/start",
-    "正在启动 Moodle 课程资料同步…",
-  );
-  if (!result) return;
-  renderSyncProgress(result);
-  await pollCourseSync(result.job_id);
-}
-
 function renderSyncProgress(job) {
   const panel = byId("sync-progress");
   const running = job.state === "running";
@@ -1529,35 +1448,96 @@ function renderSyncProgress(job) {
   byId("cancel-sync").disabled = !running || cancelling;
 }
 
-async function pollCourseSync(jobId = null) {
+async function pollCourseSync(jobId = null, options = {}) {
+  const announce = options.announce !== false;
+  const refresh = options.refresh !== false;
   try {
-    const response = await fetch("/api/sync/status", { cache: "no-store" });
-    const job = await response.json();
-    if (!response.ok) throw new Error(job.error || "无法读取同步进度");
-    if (jobId && job.job_id !== jobId) return;
-    renderSyncProgress(job);
-    if (job.state === "running") {
-      setOperationState(true, job.cancel_requested ? "正在取消" : job.detail || "正在同步 Moodle 课程资料…");
-      byId("cancel-sync").disabled = job.cancel_requested;
-      window.setTimeout(() => pollCourseSync(job.job_id), 700);
-      return;
+    while (true) {
+      const response = await fetch("/api/sync/status", { cache: "no-store" });
+      const job = await response.json();
+      if (!response.ok) throw new Error(job.error || "无法读取同步进度");
+      if (jobId && job.job_id !== jobId) return null;
+      renderSyncProgress(job);
+      if (job.state === "running") {
+        setOperationState(true, job.cancel_requested ? "正在取消" : job.detail || "正在运行课程同步工作流…");
+        byId("cancel-sync").disabled = job.cancel_requested;
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+        continue;
+      }
+      if (job.state === "idle") return job;
+      if (refresh) await loadInformation();
+      const result = job.result || {};
+      const pending = result.pending_review?.change_count || 0;
+      const sourceFailures = Array.isArray(result.source_failures) ? result.source_failures.length : 0;
+      const message = job.state === "completed"
+        ? `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门 Moodle 课程成功。${sourceFailures ? `${sourceFailures} 个来源需要重试。` : ""}待 AI 整理 ${pending} 项。`
+        : job.state === "cancelled"
+          ? `同步已取消；已完成 ${result.succeeded_course_count || 0} 门课程，已发布资料已保留。`
+          : `同步失败：${job.error || "上一份有效资料已保留"}`;
+      if (announce) setOperationState(false, message);
+      return job;
     }
-    if (job.state === "idle") return;
-    await loadInformation();
-    const result = job.result || {};
-    const pending = result.pending_review?.change_count || 0;
-    const message = job.state === "completed"
-      ? `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门成功。待 AI 整理 ${pending} 项。`
-      : job.state === "cancelled"
-        ? `同步已取消；已完成 ${result.succeeded_course_count || 0} 门课程，已发布资料已保留。`
-        : `同步失败：${job.error || "上一份有效资料已保留"}`;
-    setOperationState(false, message);
   } catch (error) {
     setOperationState(false);
     const alert = byId("global-error");
     alert.textContent = error.message;
     alert.classList.remove("hidden");
+    return null;
   }
+}
+
+async function startWorkflow() {
+  const confirmed = window.confirm(
+    "将先打开共享浏览器供你完成一次 HKU Portal 登录并读取当前学期课程，再并发同步 Moodle、SIS Course Information 与官方课表。继续吗？",
+  );
+  if (!confirmed) return;
+  const job = await runLocalMutation(
+    "/api/sync/start",
+    { confirmed: true },
+    "正在启动课程同步工作流…",
+  );
+  if (!job) return;
+  renderSyncProgress(job);
+  await pollCourseSync(job.job_id);
+}
+
+async function addCourse(event) {
+  event.preventDefault();
+  const course = {
+    course_id: byId("new-course-id").value.trim(),
+    code: byId("new-course-code").value.trim(),
+    title: byId("new-course-title").value.trim(),
+    semester: byId("new-course-semester").value.trim() || null,
+  };
+  const result = await runLocalMutation(
+    "/api/courses/add",
+    { confirmed: true, course },
+    `正在添加 ${course.code || course.course_id}…`,
+  );
+  if (!result) return;
+  byId("add-course-form").reset();
+  await loadInformation();
+  renderCourseManager();
+  setOperationState(false, `课程已添加：${course.code}。`);
+}
+
+async function deleteCourse(course) {
+  const itemCount = state.data.items.filter((item) => item.course_id === course.course_id).length;
+  const confirmed = window.confirm(
+    `将删除“${course.code || course.title}”、${itemCount} 条关联事项与本地课程文件。文件会移入本机回收目录；再次同步 Moodle 可重新下载。继续吗？`,
+  );
+  if (!confirmed) return;
+  const result = await runLocalMutation(
+    "/api/courses/delete",
+    { confirmed: true, confirmation: course.course_id, course_id: course.course_id },
+    `正在删除 ${course.code || course.title}…`,
+  );
+  if (!result) return;
+  if (state.selectedOverviewCourseId === course.course_id) state.selectedOverviewCourseId = null;
+  await loadInformation();
+  renderCourseManager();
+  if (state.view === "course" && !state.selectedOverviewCourseId) showHome();
+  setOperationState(false, `课程已删除：${course.code || course.title}；同时移除 ${result.deleted_item_count} 条关联事项。`);
 }
 
 async function cancelCourseSync() {
@@ -1568,45 +1548,8 @@ async function cancelCourseSync() {
   );
   if (result) {
     renderSyncProgress(result);
-    await pollCourseSync(result.job_id);
+    setOperationState(true, "正在取消");
   }
-}
-
-async function loginClassPlanner() {
-  const confirmed = window.confirm(
-    "将打开 HKU Class Planner。请在该窗口中亲自完成 HKU Portal 登录与 MFA。继续吗？",
-  );
-  if (!confirmed) return;
-  const loginState = byId("class-planner-login-state");
-  loginState.className = "login-state logging-in";
-  loginState.replaceChildren(element("span"), document.createTextNode("登录中"));
-  const result = await runLocalMutation(
-    "/api/class-planner/login",
-    { confirmed: true },
-    "等待你在新窗口完成 HKU Portal 登录…",
-  );
-  if (!result) {
-    await loadInformation();
-    return;
-  }
-  await loadInformation();
-  const terms = (result.term_ids || []).join("、") || "当前学期";
-  setOperationState(false, `Class Planner 登录成功：${terms}，${result.course_count} 门课程。`);
-}
-
-async function synchronizeClassPlanner() {
-  const result = await runLocalMutation(
-    "/api/class-planner/sync",
-    { confirmed: true },
-    "正在从 HKU Class Planner 读取课表…",
-  );
-  if (!result) {
-    await loadInformation();
-    return;
-  }
-  await loadInformation();
-  const changes = result.added_course_count + result.modified_course_count + result.removed_course_count;
-  setOperationState(false, `课表同步完成：${result.course_count} 门课程、${result.meeting_count} 个上课时段、${changes} 项差异。`);
 }
 
 byId("previous-month").addEventListener("click", () => {
@@ -1658,13 +1601,9 @@ byId("next-up-card").addEventListener("click", () => {
 byId("show-calendar").addEventListener("click", showCalendar);
 byId("reload-data").addEventListener("click", async () => {
   await loadInformation();
-  await verifyMoodleSession();
 });
-byId("login-moodle").addEventListener("click", loginMoodle);
-byId("sync-courses").addEventListener("click", synchronizeCourses);
+byId("start-workflow").addEventListener("click", startWorkflow);
 byId("cancel-sync").addEventListener("click", cancelCourseSync);
-byId("login-class-planner").addEventListener("click", loginClassPlanner);
-byId("sync-class-planner").addEventListener("click", synchronizeClassPlanner);
 byId("run-ocr").addEventListener("click", processOcrQueue);
 byId("close-preview").addEventListener("click", closeSourcePreview);
 byId("source-preview").addEventListener("click", (event) => {
@@ -1680,6 +1619,12 @@ byId("item-detail-dialog").addEventListener("close", () => {
   state.selectedDateKey = null;
   renderDataViews();
 });
+byId("manage-courses").addEventListener("click", openCourseManager);
+byId("close-course-manager").addEventListener("click", closeCourseManager);
+byId("course-manager-dialog").addEventListener("click", (event) => {
+  if (event.target === byId("course-manager-dialog")) closeCourseManager();
+});
+byId("add-course-form").addEventListener("submit", addCourse);
 
-loadInformation().then(verifyMoodleSession);
+loadInformation();
 pollCourseSync();

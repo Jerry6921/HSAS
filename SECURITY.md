@@ -1,6 +1,6 @@
 # Security policy
 
-Keep HKU passwords, MFA codes, cookies, Moodle sesskeys, browser profiles,
+Keep HKU passwords, MFA codes, cookies, Moodle sesskeys, Moodle/SIS browser profiles,
 tokens, private course files, extracted text sidecars, and information.json
 inside the private authentication and course-data boundary.
 

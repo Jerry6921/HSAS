@@ -33,7 +33,10 @@
           <button id="show-calendar" class="view-link" type="button">
             <span>日历</span><small>全部课程事项</small>
           </button>
-          <p class="nav-label">课程概览</p>
+          <div class="nav-section-heading">
+            <p class="nav-label">课程概览</p>
+            <button id="manage-courses" type="button" aria-label="添加或删除课程">管理</button>
+          </div>
           <div id="course-navigation" class="course-navigation"></div>
         </nav>
         <div id="query-controls" class="hidden">
@@ -94,43 +97,21 @@
                 <h2 id="command-center-title">同步工作台</h2>
                 <p>连接课程来源、读取变更，再由你决定哪些信息进入本地资料库。</p>
               </div>
-              <span id="command-center-state" class="command-center-status"><i aria-hidden="true"></i>本地工作区</span>
+              <div class="command-center-actions">
+                <span id="command-center-state" class="command-center-status"><i aria-hidden="true"></i>本地工作区</span>
+                <button id="start-workflow" class="button primary" type="button">开始同步</button>
+              </div>
             </div>
-            <div class="sync-grid">
-              <section class="application-card moodle-card">
-            <div>
-              <p class="eyebrow">MOODLE APPLICATION</p>
-              <h2>课程资料同步</h2>
-              <p>登录 Moodle 后同步全部课程；刷新会重新读取本地信息库与更新队列。</p>
-            </div>
-            <div class="page-actions" aria-label="Moodle 与本地数据操作">
-              <span id="moodle-login-state" class="login-state login-required"><span aria-hidden="true"></span>未登录</span>
-              <button id="login-moodle" class="button" type="button">登录 Moodle</button>
-              <button id="sync-courses" class="button primary" type="button">同步课程</button>
-            </div>
+            <section class="workflow-board" aria-label="课程同步工作流">
             <div id="sync-progress" class="sync-progress hidden" role="status" aria-live="polite">
               <div class="sync-progress-copy">
-                <span id="sync-progress-label">准备同步</span>
+                <span class="sync-progress-label"><i class="loading-spinner" aria-hidden="true"></i><span id="sync-progress-label">准备同步</span></span>
                 <strong id="sync-progress-count">0 / 0</strong>
               </div>
               <progress id="sync-progress-bar" value="0" max="1"></progress>
               <button id="cancel-sync" class="button compact" type="button">取消同步</button>
             </div>
-              </section>
-              <section class="application-card planner-card">
-            <div>
-              <p class="eyebrow">HKU CLASS PLANNER</p>
-              <h2>官方课表同步</h2>
-              <p id="class-planner-status">通过 HKU Portal 登录，读取 Class Planner 的课程、班别、时间与地点。</p>
-              <div id="class-planner-diff" class="planner-diff"></div>
-            </div>
-            <div class="page-actions" aria-label="HKU Class Planner 操作">
-              <span id="class-planner-login-state" class="login-state login-required"><span aria-hidden="true"></span>未登录</span>
-              <button id="login-class-planner" class="button" type="button">登录 HKU Portal</button>
-              <button id="sync-class-planner" class="button primary" type="button">同步课表</button>
-            </div>
-              </section>
-            </div>
+            </section>
             <section class="metrics" aria-label="信息库摘要">
             <article><span>课程</span><strong id="metric-courses">—</strong><small>统一课程目录</small></article>
             <article><span>信息事项</span><strong id="metric-items">—</strong><small>课程、tutorial 与 assessment</small></article>
@@ -261,6 +242,25 @@
     <div class="preview-actions">
       <a id="open-original" class="button primary" target="_self">打开原文</a>
       <a id="open-source-url" class="button" target="_blank" rel="noopener noreferrer">打开 Moodle 来源</a>
+    </div>
+  </dialog>
+  <dialog id="course-manager-dialog" class="course-manager-dialog">
+    <div class="detail-dialog-heading">
+      <div><p class="eyebrow">COURSE DATABASE</p><h2>管理课程</h2></div>
+      <button id="close-course-manager" class="icon-button" type="button" aria-label="关闭课程管理">×</button>
+    </div>
+    <div class="course-manager-copy">
+      <form id="add-course-form" class="add-course-form">
+        <div>
+          <label>课程 ID<input id="new-course-id" required pattern="[A-Za-z0-9][A-Za-z0-9._:-]*" placeholder="例如 BMED2206-2026-S1"></label>
+          <label>课程代码<input id="new-course-code" required placeholder="例如 BMED2206"></label>
+        </div>
+        <label>课程名称<input id="new-course-title" required placeholder="课程完整名称"></label>
+        <label>学期<input id="new-course-semester" placeholder="例如 2026-27 Semester 1"></label>
+        <button class="button primary" type="submit">添加课程</button>
+      </form>
+      <p class="course-delete-note">删除会移除课程、关联事项和本地课程文件；文件会转移到本机回收目录。</p>
+      <div id="course-manager-list" class="course-manager-list"></div>
     </div>
   </dialog>
   <script src="assets/ripple.js"></script>

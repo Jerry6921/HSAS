@@ -252,6 +252,7 @@ async def _save_response(
     max_download_bytes: int,
     previous_files: dict[str, StoredFile] | None = None,
     source_url_override: str | None = None,
+    claimed_paths: set[Path] | None = None,
 ) -> StoredFile | None:
     content_length = response.headers.get("content-length")
     if content_length and int(content_length) > max_download_bytes:
@@ -277,8 +278,10 @@ async def _save_response(
     else:
         filename = _choose_filename(response, activity, index)
         path = destination_dir / filename
-        if path.exists():
+        if claimed_paths is not None and path in claimed_paths:
             path = destination_dir / f"{path.stem}-{index}{path.suffix}"
+    if claimed_paths is not None:
+        claimed_paths.add(path)
     write_bytes(path, body)
     return StoredFile(
         filename=path.name,
@@ -317,6 +320,7 @@ async def download_activity_files(
         str(stored_file.source_url): stored_file
         for stored_file in (previous_activity.files if previous_activity else [])
     }
+    claimed_paths: set[Path] = set()
     try:
         initial_url = google_export_url or (
             _with_redirect(activity_url)
@@ -380,6 +384,7 @@ async def download_activity_files(
                 max_download_bytes=max_download_bytes,
                 previous_files=previous_files,
                 source_url_override=google_export_url,
+                claimed_paths=claimed_paths,
             )
             await response.dispose()
             if stored:
@@ -400,6 +405,7 @@ async def download_activity_files(
                     timeout_ms=timeout_ms,
                 )
                 if reused is not None:
+                    claimed_paths.add(storage_root / reused.relative_path)
                     activity.files.append(reused)
                     continue
                 assert file_response is not None
@@ -417,6 +423,7 @@ async def download_activity_files(
                             if urlsplit(candidate).netloc == "docs.google.com"
                             else None
                         ),
+                        claimed_paths=claimed_paths,
                     )
                     if stored:
                         activity.files.append(stored)

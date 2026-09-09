@@ -103,6 +103,81 @@ def test_first_review_is_full_then_only_changed_files_are_pending(tmp_path: Path
     }
 
 
+def test_pending_review_hides_transient_remove_restore_of_identical_material(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    first_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    original = _archive(resources, first_at, "a")
+    acknowledge_change_batch(
+        resources,
+        collect_pending_changes(resources, REPOSITORY),
+        REPOSITORY,
+        confirmed=True,
+    )
+
+    missing = original.model_copy(deep=True)
+    missing.collected_at = first_at + timedelta(hours=1)
+    missing.sections[0].activities[0].files = []
+    write_model(
+        resources / "courses/138907/changes/history/01-removed.json",
+        compare_course_archives(original, missing),
+    )
+
+    restored = original.model_copy(deep=True)
+    restored.collected_at = first_at + timedelta(hours=2)
+    restored.sections[0].activities[0].files[0].filename = "brief-1.docx"
+    restored.sections[0].activities[0].files[0].relative_path = (
+        "courses/138907/files/brief-1.docx"
+    )
+    write_model(resources / "courses/138907/course.json", restored)
+    write_model(
+        resources / "courses/138907/changes/history/02-restored.json",
+        compare_course_archives(missing, restored),
+    )
+
+    assert collect_pending_changes(resources, REPOSITORY).courses == []
+
+
+def test_pending_review_compacts_material_flapping_to_one_net_change(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    first_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    original = _archive(resources, first_at, "a")
+    acknowledge_change_batch(
+        resources,
+        collect_pending_changes(resources, REPOSITORY),
+        REPOSITORY,
+        confirmed=True,
+    )
+
+    missing = original.model_copy(deep=True)
+    missing.collected_at = first_at + timedelta(hours=1)
+    missing.sections[0].activities[0].files = []
+    write_model(
+        resources / "courses/138907/changes/history/01-removed.json",
+        compare_course_archives(original, missing),
+    )
+
+    changed = original.model_copy(deep=True)
+    changed.collected_at = first_at + timedelta(hours=2)
+    changed.sections[0].activities[0].files[0].sha256 = "b" * 64
+    write_model(resources / "courses/138907/course.json", changed)
+    write_model(
+        resources / "courses/138907/changes/history/02-restored.json",
+        compare_course_archives(missing, changed),
+    )
+
+    pending = collect_pending_changes(resources, REPOSITORY)
+
+    assert len(pending.courses) == 1
+    assert len(pending.courses[0].changes) == 1
+    assert pending.courses[0].changes[0].action == "modified"
+    assert pending.courses[0].changes[0].before == "a" * 64
+    assert pending.courses[0].changes[0].after == "b" * 64
+
+
 def test_processed_legacy_assessment_history_does_not_break_change_listing(
     tmp_path: Path,
 ) -> None:

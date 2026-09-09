@@ -125,10 +125,11 @@ parser。当前学期课程名单保存在 `sis-enrollment/latest.json`，Studen
 保存在 `sis-enrollment/latest.txt`；课程名单的变化使用独立 batch 与 checkpoint 交给 AI
 审阅。相同课程的多个 Moodle section 共用一份 SIS 来源。Class Planner 与 SIS 访问器
 共享持久化 HKU Portal browser profile；SIS 登录从 `z_signon.jsp` 开始，并由用户在可见
-窗口完成可能出现的图形验证码。统一同步先在主 profile 中完成登录与 Student Center 课程
-名单采集，浏览器关闭后为 Moodle、SIS Course Information 和 Class Planner 创建三个临时
-认证快照。三个采集器通过 `asyncio.gather` 并发运行，各自持有独立 Chromium profile，避开
-浏览器进程锁；临时快照在任务结束后清理。来源分别写入自己的目录，聚合状态只在锁内更新。
+窗口完成可能出现的图形验证码。统一同步先完成登录与 Student Center 课程名单采集，随后由
+application 层的 `UnifiedCourseSyncService` 编排来源任务。infrastructure 层的
+`BrowserSessionBroker` 在整个采集阶段只打开一个 headless Chromium context，Moodle、SIS
+Course Information 和 Class Planner 各自使用独立 page 并通过 `asyncio.gather` 并发运行。
+来源分别写入自己的目录，聚合状态只在锁内更新。
 
 提取器会把文字覆盖不足的扫描 PDF 和图片型 PPT 标为 `ocr_required`。`hsas ocr status`
 读取这些分析记录生成队列，`hsas ocr run --confirmed` 使用本地 Apple Vision 或

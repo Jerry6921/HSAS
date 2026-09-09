@@ -3,13 +3,13 @@ from datetime import datetime, timezone
 from io import BytesIO
 import json
 from pathlib import Path
-from threading import Barrier
 from types import SimpleNamespace
 import time
 
 import pytest
 
 from hsas.application.update_information import apply_information_update
+from hsas.application.synchronize_unified_courses import UnifiedCourseSyncResult
 from hsas.domain.courses.define_courses import StoredFile
 from hsas.domain.courses.define_documents import PdfAnalysis
 from hsas.infrastructure.moodle.map_courses import build_course_archive
@@ -21,26 +21,10 @@ from hsas.interfaces.run_dashboard import (
     DashboardError,
     DashboardRequestHandler,
     DashboardService,
-    _copy_authenticated_profile,
     _material_type,
     _load_dashboard_assets,
     build_dashboard_server,
 )
-
-
-def test_authenticated_profile_snapshot_excludes_browser_process_locks(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "source-profile"
-    (source / "Default").mkdir(parents=True)
-    (source / "Default" / "Cookies").write_text("session", encoding="utf-8")
-    (source / "SingletonLock").write_text("active", encoding="utf-8")
-
-    target = _copy_authenticated_profile(source, tmp_path / "snapshot")
-
-    assert (target / "Default" / "Cookies").read_text(encoding="utf-8") == "session"
-    assert not (target / "SingletonLock").exists()
-    assert target.stat().st_mode & 0o777 == 0o700
 
 
 def test_dashboard_assets_include_application_calendar_and_source_preview() -> None:
@@ -98,6 +82,10 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'"/api/inbox/apply"' in loaded["/assets/app.js"][0]
     assert b'"/api/courses/add"' in loaded["/assets/app.js"][0]
     assert b'"/api/courses/delete"' in loaded["/assets/app.js"][0]
+    assert b'"/api/courses/delete-many"' in loaded["/assets/app.js"][0]
+    assert b'id="course-manager-select-all"' in loaded["/"][0]
+    assert b'id="delete-selected-courses"' in loaded["/"][0]
+    assert b"overflow-y: auto" in loaded["/assets/styles.css"][0]
     assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
     assert b"closeItemDetail" in loaded["/assets/app.js"][0]
@@ -108,6 +96,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"CanvasUIRipple" in loaded["/assets/ripple.js"][0]
     assert b"hiqs-canvas-effects" in loaded["/assets/canvas-effects.js"][0]
     assert b"motion-enabled" in loaded["/assets/canvas-effects.js"][0]
+    assert b".motion-enabled .motion-surface:not(.agenda-item)" in loaded["/assets/styles.css"][0]
+    assert b".motion-enabled .motion-surface { position: relative; }" not in loaded["/assets/styles.css"][0]
     assert b"IntersectionObserver" in loaded["/assets/canvas-effects.js"][0]
     assert b'".application-card"' in loaded["/assets/canvas-effects.js"][0]
     assert b'".calendar-card"' in loaded["/assets/canvas-effects.js"][0]
@@ -213,6 +203,60 @@ def test_course_management_adds_and_deletes_canonical_course_data(tmp_path: Path
     assert store.items == []
     assert not archive.exists()
     assert list((tmp_path / ".trash" / "courses").glob("*-12345/material.pdf"))
+
+
+def test_course_management_batch_deletes_selected_courses(tmp_path: Path) -> None:
+    service = DashboardService(tmp_path)
+    for index in (1, 2):
+        service.add_course(
+            {
+                "confirmed": True,
+                "course": {
+                    "course_id": f"DEMO100{index}",
+                    "code": f"DEMO100{index}",
+                    "title": f"Demo Course {index}",
+                    "moodle_course_id": str(12000 + index),
+                },
+            }
+        )
+        archive = tmp_path / "courses" / str(12000 + index)
+        archive.mkdir(parents=True)
+        (archive / "material.pdf").write_bytes(b"demo")
+
+    apply_information_update(
+        tmp_path / "information.json",
+        {
+            "items": [
+                {
+                    "item_id": f"demo-item-{index}",
+                    "course_id": f"DEMO100{index}",
+                    "title": f"Demo item {index}",
+                    "category": "other",
+                    "date_status": "unknown",
+                }
+                for index in (1, 2)
+            ]
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
+    )
+    course_ids = ["DEMO1001", "DEMO1002"]
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.delete_courses(
+            {"confirmed": True, "confirmation": list(reversed(course_ids)), "course_ids": course_ids}
+        )
+
+    deleted = service.delete_courses(
+        {"confirmed": True, "confirmation": course_ids, "course_ids": course_ids}
+    )
+
+    assert deleted["deleted_course_count"] == 2
+    assert deleted["deleted_item_count"] == 2
+    assert deleted["files_moved_to_trash"] == 2
+    store = JsonInformationRepository().load(tmp_path / "information.json")
+    assert store.courses == []
+    assert store.items == []
 
 
 def test_ocr_action_requires_confirmation_and_reports_results(
@@ -401,9 +445,6 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    rendezvous = Barrier(3)
-    source_profiles: dict[str, Path] = {}
-
     class EnrollmentGateway:
         def sync(self, *, auto_login):
             assert auto_login is True
@@ -420,87 +461,55 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
             }
 
     class MoodleService:
-        def __init__(self, profile_dir):
-            if profile_dir is not None:
-                source_profiles["moodle"] = profile_dir
-
         def check_login_status(self):
             return SimpleNamespace(status="logged_in")
 
-        def list_courses(self):
-            return SimpleNamespace(
-                available=(
-                    SimpleNamespace(
-                        title="BMED2206 Engineering in Biology and Medicine",
-                        course_id="138096",
-                    ),
-                )
-            )
-
-        def sync_course(self, _course_id):
-            rendezvous.wait(timeout=1)
-            return SimpleNamespace()
-
-    class SisService:
-        def __init__(self, profile_dir):
-            source_profiles["sis"] = profile_dir
-
-        def sync(
-            self,
-            *,
-            selected_courses,
-            progress_callback,
-            timeout_seconds,
-            cancel_requested,
-        ):
-            assert selected_courses[0]["course_code"] == "BMED2206"
-            assert timeout_seconds == 30
-            assert cancel_requested() is False
-            rendezvous.wait(timeout=1)
-            progress_callback(
-                {"course_code": "BMED2206", "completed": 1, "total": 1}
-            )
-            return SimpleNamespace(failures=())
-
     class PlannerService:
-        def __init__(self, profile_dir):
-            if profile_dir is not None:
-                source_profiles["class-planner"] = profile_dir
-
         def login_until_ready(self):
             return SimpleNamespace(status="logged_in")
 
-        def sync(self):
-            rendezvous.wait(timeout=1)
-            return SimpleNamespace(course_count=1)
+    class UnifiedService:
+        async def synchronize(
+            self,
+            courses,
+            *,
+            progress_callback,
+            cancel_requested,
+        ):
+            assert courses[0]["course_code"] == "BMED2206"
+            assert cancel_requested() is False
+            for stage, total in (("moodle", 1), ("sis_course_info", 1), ("timetable", 1)):
+                progress_callback(
+                    {
+                        "stage": stage,
+                        "processed": total,
+                        "completed": total,
+                        "failed": 0,
+                        "total": total,
+                        "detail": stage,
+                    }
+                )
+            return UnifiedCourseSyncResult(
+                {"completed": 1, "failures": []},
+                SimpleNamespace(failures=()),
+                SimpleNamespace(course_count=1),
+            )
 
-    def copy_profile(_source, target):
-        target.mkdir(parents=True)
-        return target
-
-    monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard.hku_portal_profile_dir",
-        lambda _resources: tmp_path / "browser-profile",
-    )
-    monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._copy_authenticated_profile",
-        copy_profile,
-    )
     monkeypatch.setattr(
         "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
         "hsas.interfaces.run_dashboard._course_service",
-        lambda _resources, *, profile_dir=None: MoodleService(profile_dir),
-    )
-    monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._sis_course_info_service",
-        lambda _resources, *, profile_dir=None: SisService(profile_dir),
+        lambda _resources, *, profile_dir=None: MoodleService(),
     )
     monkeypatch.setattr(
         "hsas.interfaces.run_dashboard._class_planner_service",
-        lambda _resources, *, profile_dir=None: PlannerService(profile_dir),
+        lambda _resources, *, profile_dir=None: PlannerService(),
+    )
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._unified_course_sync_service",
+        lambda _resources: UnifiedService(),
     )
 
     service = DashboardService(tmp_path)
@@ -514,8 +523,6 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
     assert status["state"] == "completed"
     assert status["detail"] == "同步完成"
     assert status["result"]["source_failures"] == []
-    assert set(source_profiles) == {"moodle", "sis", "class-planner"}
-    assert len(set(source_profiles.values())) == 3
 
 
 def test_moodle_session_verification_replaces_stale_logged_in_state(

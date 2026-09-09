@@ -77,7 +77,7 @@ HKU SIS Student Center
   ↓
 取得当前学期注册课程，保存原始可读文本与课程名单快照
   ↓
-复制已认证会话并并发运行三个独立来源
+`BrowserSessionBroker` 打开一个认证 context，并发运行三个独立来源页面
   ├─ Moodle：按课程同步文件与文本副本
   ├─ SIS Course Information：按课程同步最高优先级官方页面
   └─ HKU Class Planner：同步上课时间、班别和地点

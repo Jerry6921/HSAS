@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from playwright.async_api import BrowserContext
+
 from hsas.application.ports.define_gateways import (
     ClassPlannerSessionResult,
     ClassPlannerSyncResult,
@@ -15,7 +17,11 @@ from hsas.application.ports.define_gateways import (
 from hsas.infrastructure.storage.persist_data import read_json, write_json
 from hsas.infrastructure.runtime import hku_portal_profile_dir
 
-from .fetch_calendar import ClassPlannerAuthenticationError, capture_calendar_response
+from .fetch_calendar import (
+    ClassPlannerAuthenticationError,
+    capture_calendar_response,
+    capture_calendar_response_in_context,
+)
 from .define_review_fields import timetable_course_fields
 
 
@@ -268,6 +274,28 @@ class ClassPlannerBrowserGateway:
         except ClassPlannerAuthenticationError:
             _write_session_status(self.resources_dir, "expired")
             raise
+        return self._persist_payload(payload)
+
+    async def sync_in_context(
+        self,
+        context: BrowserContext,
+        *,
+        timeout_seconds: int = 90,
+    ) -> ClassPlannerSyncResult:
+        """Synchronize the timetable through a broker-owned browser context."""
+        try:
+            payload = _sanitize(
+                await capture_calendar_response_in_context(
+                    context,
+                    timeout_seconds=timeout_seconds,
+                )
+            )
+        except ClassPlannerAuthenticationError:
+            _write_session_status(self.resources_dir, "expired")
+            raise
+        return self._persist_payload(payload)
+
+    def _persist_payload(self, payload: Any) -> ClassPlannerSyncResult:
         if not isinstance(payload, dict):
             raise ValueError("Class Planner payload has an invalid shape")
         summary = _summary(payload)

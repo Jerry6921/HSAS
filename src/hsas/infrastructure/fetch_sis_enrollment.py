@@ -33,9 +33,27 @@ COURSE_PATTERN = re.compile(
     re.I,
 )
 TERM_PATTERNS = (
-    re.compile(r"\b(20\d{2}[-/]\d{2}\s+(?:Semester|Term)\s+\d)\b", re.I),
+    re.compile(r"\b(20\d{2}[-/]\d{2}\s+(?:Semester|Sem|Term)\s+\d)\b", re.I),
     re.compile(r"\b((?:Fall|Spring|Summer|Winter)\s+20\d{2})\b", re.I),
-    re.compile(r"\b(20\d{2}\s+(?:Semester|Term)\s+\d)\b", re.I),
+    re.compile(r"\b(20\d{2}\s+(?:Semester|Sem|Term)\s+\d)\b", re.I),
+)
+CURRENT_SCHEDULE_PATTERN = re.compile(
+    r"This\s+Week(?:'|\N{RIGHT SINGLE QUOTATION MARK})?s\s+Schedule"
+    r"(?P<body>.*?)Student\s+Enrollment",
+    re.I | re.S,
+)
+ENROLLMENT_SECTION_PATTERN = re.compile(
+    r"Student\s+Enrollment(?P<body>.*?)(?:Weekly\s+Schedule|Temporary\s+Course\s+List|\Z)",
+    re.I | re.S,
+)
+ENROLLMENT_ROW_PATTERN = re.compile(
+    r"(?:^|\n)\s*Row\s*\n\s*\d+\s*\n(?P<body>.*?)(?=(?:\n\s*Row\s*\n\s*\d+\s*\n)|\Z)",
+    re.I | re.S,
+)
+ACTIVE_STATUS_PATTERN = re.compile(r"\b(?:Approved|Enrolled)\b", re.I)
+KNOWN_STATUS_PATTERN = re.compile(
+    r"\b(?:Not\s+Approved|Approved|Enrolled|Dropped|Waitlist(?:ed)?)\b",
+    re.I,
 )
 
 
@@ -48,22 +66,71 @@ class SisEnrollmentParseError(RuntimeError):
 
 
 def parse_enrollment_text(text: str) -> tuple[str | None, list[dict[str, str]]]:
-    """Extract current-page course identities while preserving source text separately."""
-    term = next(
+    """Extract only the current, active course identities from Student Center text."""
+    schedule_match = CURRENT_SCHEDULE_PATTERN.search(text)
+    if schedule_match:
+        schedule = schedule_match.group("body")
+        courses = _courses_from_matches(COURSE_PATTERN.finditer(schedule), schedule_only=True)
+        if courses:
+            enrollment_match = ENROLLMENT_SECTION_PATTERN.search(text)
+            term_source = enrollment_match.group("body") if enrollment_match else text
+            return _find_term(term_source), courses
+
+    enrollment_match = ENROLLMENT_SECTION_PATTERN.search(text)
+    enrollment = enrollment_match.group("body") if enrollment_match else text
+    term = _find_term(enrollment)
+    row_bodies = [match.group("body") for match in ENROLLMENT_ROW_PATTERN.finditer(enrollment)]
+    if row_bodies:
+        active_rows = [
+            row
+            for row in row_bodies
+            if _has_active_status(row)
+            and (term is None or _same_term(_find_term(row), term))
+        ]
+        courses = _courses_from_matches(
+            (match for row in active_rows for match in COURSE_PATTERN.finditer(row))
+        )
+    else:
+        active_lines = [
+            line
+            for line in enrollment.splitlines()
+            if _has_active_status(line)
+        ]
+        courses = _courses_from_matches(
+            (match for line in active_lines for match in COURSE_PATTERN.finditer(line))
+        )
+
+    if not courses:
+        raise SisEnrollmentParseError("Student Center did not expose any active current courses")
+    return term, courses
+
+
+def _find_term(text: str) -> str | None:
+    return next(
         (match.group(1).strip() for pattern in TERM_PATTERNS if (match := pattern.search(text))),
         None,
     )
+
+
+def _same_term(left: str | None, right: str | None) -> bool:
+    if left is None or right is None:
+        return left == right
+    normalize = lambda value: re.sub(r"\bSemester\b", "Sem", value, flags=re.I).casefold()
+    return normalize(left) == normalize(right)
+
+
+def _has_active_status(text: str) -> bool:
+    return not re.search(r"\bNot\s+Approved\b", text, re.I) and bool(
+        ACTIVE_STATUS_PATTERN.search(text)
+    )
+
+
+def _courses_from_matches(matches, *, schedule_only: bool = False) -> list[dict[str, str]]:
     courses: dict[str, dict[str, str]] = {}
-    for match in COURSE_PATTERN.finditer(text):
+    for match in matches:
         subject, catalogue, raw_title = match.groups()
         code = f"{subject}{catalogue}".upper()
-        title = (raw_title or code).strip(" -–—:\t")
-        title = re.split(
-            r"\s{2,}|\b(?:Units?|Credits?|Enrolled|Dropped|Waitlist(?:ed)?)\b",
-            title,
-            maxsplit=1,
-            flags=re.I,
-        )[0].strip()
+        title = code if schedule_only else _clean_course_title(raw_title, code)
         courses.setdefault(
             code,
             {
@@ -73,9 +140,16 @@ def parse_enrollment_text(text: str) -> tuple[str | None, list[dict[str, str]]]:
                 "title": title or code,
             },
         )
-    if not courses:
-        raise SisEnrollmentParseError("Student Center did not expose any current course codes")
-    return term, [courses[code] for code in sorted(courses)]
+    return [courses[code] for code in sorted(courses)]
+
+
+def _clean_course_title(raw_title: str | None, code: str) -> str:
+    title = (raw_title or "").strip(" -–—:\t")
+    title = re.split(r"\s{2,}", title, maxsplit=1)[0].strip()
+    title = KNOWN_STATUS_PATTERN.split(title, maxsplit=1)[0].strip()
+    if re.fullmatch(r"\d[A-Z0-9]*?(?:\s+(?:LEC|TUT|LAB)\b.*)?", title, re.I):
+        return code
+    return title or code
 
 
 async def _student_center_text(context, *, timeout_seconds: int) -> str:

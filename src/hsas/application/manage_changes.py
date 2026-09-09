@@ -69,11 +69,15 @@ def collect_pending_changes(
         ]
         if not change_sets:
             continue
-        changes = [
-            _present_change(change_set, change)
-            for change_set in change_sets
-            for change in change_set.changes
-        ]
+        changes = _compact_material_changes(
+            [
+                _present_change(change_set, change)
+                for change_set in change_sets
+                for change in change_set.changes
+            ]
+        )
+        if not changes:
+            continue
         reviews.append(
             CourseReview(
                 course_id=course_id,
@@ -168,6 +172,60 @@ def _present_change(
         text_path=change.text_path,
         source_url=change.source_url,
     )
+
+
+def _compact_material_changes(
+    changes: list[ChangeReference],
+) -> list[ChangeReference]:
+    """Reduce repeated material transitions to their net checkpoint delta."""
+    groups: dict[str, list[tuple[int, ChangeReference]]] = {}
+    for index, change in enumerate(changes):
+        if change.kind == "material":
+            groups.setdefault(change.entity_id, []).append((index, change))
+
+    replacements: dict[int, ChangeReference | None] = {}
+    consumed: set[int] = set()
+    for events in groups.values():
+        if len(events) < 2:
+            continue
+        first_index, first = events[0]
+        initial = None if first.action == "added" else first.before
+        current = initial
+        for _index, event in events:
+            current = None if event.action == "removed" else event.after
+        indices = {index for index, _event in events}
+        consumed.update(indices)
+        if initial == current:
+            replacements[first_index] = None
+            continue
+        last = events[-1][1]
+        if initial is None:
+            action = "added"
+            field = None
+        elif current is None:
+            action = "removed"
+            field = None
+        else:
+            action = "modified"
+            field = "sha256"
+        replacements[first_index] = last.model_copy(
+            update={
+                "action": action,
+                "field": field,
+                "before": initial,
+                "after": current,
+            }
+        )
+
+    compacted: list[ChangeReference] = []
+    for index, change in enumerate(changes):
+        if index in replacements:
+            replacement = replacements[index]
+            if replacement is not None:
+                compacted.append(replacement)
+        elif index not in consumed:
+            compacted.append(change)
+    return compacted
 
 
 def _legacy_change_set_id(change_set: CourseChangeSet) -> str:

@@ -47,6 +47,7 @@ const state = {
   selectedItemId: null,
   selectedDateKey: null,
   selectedOverviewCourseId: null,
+  managerSelectedCourseIds: new Set(),
   view: "home",
   query: "",
   homeQuery: "",
@@ -247,13 +248,30 @@ function renderCourseNavigation() {
 function renderCourseManager() {
   const container = byId("course-manager-list");
   container.replaceChildren();
+  const availableIds = new Set((state.data?.courses || []).map((course) => course.course_id));
+  state.managerSelectedCourseIds = new Set(
+    [...state.managerSelectedCourseIds].filter((courseId) => availableIds.has(courseId)),
+  );
   if (!state.data?.courses.length) {
     container.append(element("p", "empty-list", "本地信息库中暂无课程。"));
+    updateCourseManagerSelection();
     return;
   }
   for (const course of state.data.courses) {
     const row = element("article", "course-manager-row");
     row.style.setProperty("--course-color", course.color);
+    const selection = element("label", "course-manager-check");
+    const checkbox = element("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.managerSelectedCourseIds.has(course.course_id);
+    checkbox.setAttribute("aria-label", `选择 ${course.code || course.title}`);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.managerSelectedCourseIds.add(course.course_id);
+      else state.managerSelectedCourseIds.delete(course.course_id);
+      row.classList.toggle("selected", checkbox.checked);
+      updateCourseManagerSelection();
+    });
+    selection.append(checkbox, element("span", "check"));
     const copy = element("div", "course-manager-name");
     copy.append(
       element("span", "course-nav-dot"),
@@ -263,12 +281,26 @@ function renderCourseManager() {
     const remove = element("button", "button compact danger", "删除");
     remove.type = "button";
     remove.addEventListener("click", () => deleteCourse(course));
-    row.append(copy, remove);
+    row.classList.toggle("selected", checkbox.checked);
+    row.append(selection, copy, remove);
     container.append(row);
   }
+  updateCourseManagerSelection();
+}
+
+function updateCourseManagerSelection() {
+  const courses = state.data?.courses || [];
+  const selectedCount = state.managerSelectedCourseIds.size;
+  const selectAll = byId("course-manager-select-all");
+  selectAll.checked = courses.length > 0 && selectedCount === courses.length;
+  selectAll.indeterminate = selectedCount > 0 && selectedCount < courses.length;
+  selectAll.disabled = courses.length === 0;
+  byId("course-manager-selection").textContent = `已选择 ${selectedCount} 门`;
+  byId("delete-selected-courses").disabled = selectedCount === 0;
 }
 
 function openCourseManager() {
+  state.managerSelectedCourseIds.clear();
   renderCourseManager();
   const dialog = byId("course-manager-dialog");
   if (!dialog.open) dialog.showModal();
@@ -1369,9 +1401,10 @@ function setOperationState(running, message = "") {
   const workflowButton = byId("start-workflow");
   reloadButton.disabled = running;
   workflowButton.disabled = running;
-  document.querySelectorAll("#add-course-form input, #add-course-form button, #course-manager-list button").forEach((control) => {
+  document.querySelectorAll("#course-manager-dialog input, #course-manager-dialog button").forEach((control) => {
     control.disabled = running;
   });
+  if (!running) updateCourseManagerSelection();
   const ocr = state.data?.material_status?.ocr;
   ocrButton.disabled = running || !(ocr?.capabilities?.available && ocr?.queue?.length);
   const status = byId("operation-status");
@@ -1533,11 +1566,42 @@ async function deleteCourse(course) {
     `正在删除 ${course.code || course.title}…`,
   );
   if (!result) return;
+  state.managerSelectedCourseIds.delete(course.course_id);
   if (state.selectedOverviewCourseId === course.course_id) state.selectedOverviewCourseId = null;
   await loadInformation();
   renderCourseManager();
   if (state.view === "course" && !state.selectedOverviewCourseId) showHome();
   setOperationState(false, `课程已删除：${course.code || course.title}；同时移除 ${result.deleted_item_count} 条关联事项。`);
+}
+
+async function deleteSelectedCourses() {
+  const selected = state.data.courses.filter((course) =>
+    state.managerSelectedCourseIds.has(course.course_id)
+  );
+  if (!selected.length) return;
+  const itemCount = state.data.items.filter((item) =>
+    state.managerSelectedCourseIds.has(item.course_id)
+  ).length;
+  const labels = selected.map((course) => course.code || course.title).join("、");
+  const confirmed = window.confirm(
+    `将删除 ${selected.length} 门课程（${labels}）、${itemCount} 条关联事项与对应本地课程文件。文件会移入本机回收目录；再次同步 Moodle 可重新下载。继续吗？`,
+  );
+  if (!confirmed) return;
+  const courseIds = selected.map((course) => course.course_id);
+  const result = await runLocalMutation(
+    "/api/courses/delete-many",
+    { confirmed: true, confirmation: courseIds, course_ids: courseIds },
+    `正在删除 ${selected.length} 门课程…`,
+  );
+  if (!result) return;
+  if (state.selectedOverviewCourseId && state.managerSelectedCourseIds.has(state.selectedOverviewCourseId)) {
+    state.selectedOverviewCourseId = null;
+  }
+  state.managerSelectedCourseIds.clear();
+  await loadInformation();
+  renderCourseManager();
+  if (state.view === "course" && !state.selectedOverviewCourseId) showHome();
+  setOperationState(false, `已删除 ${result.deleted_course_count} 门课程和 ${result.deleted_item_count} 条关联事项。`);
 }
 
 async function cancelCourseSync() {
@@ -1625,6 +1689,13 @@ byId("course-manager-dialog").addEventListener("click", (event) => {
   if (event.target === byId("course-manager-dialog")) closeCourseManager();
 });
 byId("add-course-form").addEventListener("submit", addCourse);
+byId("course-manager-select-all").addEventListener("change", (event) => {
+  state.managerSelectedCourseIds = event.target.checked
+    ? new Set(state.data.courses.map((course) => course.course_id))
+    : new Set();
+  renderCourseManager();
+});
+byId("delete-selected-courses").addEventListener("click", deleteSelectedCourses);
 
 loadInformation();
 pollCourseSync();

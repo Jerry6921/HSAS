@@ -10,6 +10,8 @@ from pathlib import Path
 import re
 from typing import Any, Callable
 
+from playwright.async_api import BrowserContext
+
 from hsas.application.ports.define_gateways import (
     SisCourseInfoSessionResult,
     SisCourseInfoSyncResult,
@@ -188,6 +190,36 @@ class SisCourseInfoBrowserGateway:
         progress_callback: Callable[[dict[str, object]], None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> SisCourseInfoSyncResult:
+        async def run() -> SisCourseInfoSyncResult:
+            async with sis_context(
+                self.profile_dir,
+                headless=True,
+                session_state_path=self.session_state_path,
+            ) as context:
+                return await self.sync_in_context(
+                    context,
+                    timeout_seconds=timeout_seconds,
+                    selected_courses=selected_courses,
+                    progress_callback=progress_callback,
+                    cancel_requested=cancel_requested,
+                )
+
+        try:
+            return asyncio.run(run())
+        except SisCourseInfoAuthenticationError:
+            self._write_session_status("expired")
+            raise
+
+    async def sync_in_context(
+        self,
+        context: BrowserContext,
+        *,
+        timeout_seconds: int = 90,
+        selected_courses: list[dict[str, str]] | None = None,
+        progress_callback: Callable[[dict[str, object]], None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SisCourseInfoSyncResult:
+        """Synchronize SIS pages through a broker-owned browser context."""
         courses, skipped = (
             (selected_courses, [])
             if selected_courses is not None
@@ -195,64 +227,63 @@ class SisCourseInfoBrowserGateway:
         )
         if not courses:
             raise ValueError("No Moodle course titles contain a Subject Area and Catalogue Number")
-
-        async def run() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-            records: list[dict[str, Any]] = []
-            failures: list[dict[str, str]] = []
-            async with sis_context(
-                self.profile_dir,
-                headless=True,
-                session_state_path=self.session_state_path,
-            ) as context:
-                page = context.pages[0] if context.pages else await context.new_page()
-                for index, course in enumerate(courses, start=1):
-                    if cancel_requested is not None and cancel_requested():
-                        break
+        records: list[dict[str, Any]] = []
+        failures: list[dict[str, str]] = []
+        page = await context.new_page()
+        try:
+            for index, course in enumerate(courses, start=1):
+                if cancel_requested is not None and cancel_requested():
+                    break
+                if progress_callback is not None:
+                    progress_callback(
+                        {
+                            "course_code": course["course_code"],
+                            "completed": index - 1,
+                            "total": len(courses),
+                            "state": "running",
+                        }
+                    )
+                try:
+                    _raw_html, visible_text, source_url = await capture_course_page(
+                        page,
+                        subject_area=course["subject_area"],
+                        catalogue_number=course["catalogue_number"],
+                        timeout_seconds=timeout_seconds,
+                    )
+                    records.append(self._persist_course(course, visible_text, source_url))
+                except SisCourseInfoAuthenticationError:
+                    self._write_session_status("expired")
+                    raise
+                except Exception as exc:
+                    failures.append(
+                        {
+                            "course_code": course["course_code"],
+                            "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                        }
+                    )
+                finally:
                     if progress_callback is not None:
                         progress_callback(
                             {
                                 "course_code": course["course_code"],
-                                "completed": index - 1,
+                                "completed": index,
                                 "total": len(courses),
-                                "state": "running",
+                                "state": "completed",
                             }
                         )
-                    try:
-                        _raw_html, visible_text, source_url = await capture_course_page(
-                            page,
-                            subject_area=course["subject_area"],
-                            catalogue_number=course["catalogue_number"],
-                            timeout_seconds=timeout_seconds,
-                        )
-                        records.append(self._persist_course(course, visible_text, source_url))
-                    except SisCourseInfoAuthenticationError:
-                        raise
-                    except Exception as exc:
-                        failures.append(
-                            {
-                                "course_code": course["course_code"],
-                                "error": f"{type(exc).__name__}: {str(exc)[:300]}",
-                            }
-                        )
-                    finally:
-                        if progress_callback is not None:
-                            progress_callback(
-                                {
-                                    "course_code": course["course_code"],
-                                    "completed": index,
-                                    "total": len(courses),
-                                    "state": "completed",
-                                }
-                            )
-                if records:
-                    await save_sis_session(context, self.session_state_path)
-            return records, failures
+        finally:
+            await page.close()
+        if records:
+            await save_sis_session(context, self.session_state_path)
+        return self._finalize_sync(courses, skipped, records, failures)
 
-        try:
-            records, failures = asyncio.run(run())
-        except SisCourseInfoAuthenticationError:
-            self._write_session_status("expired")
-            raise
+    def _finalize_sync(
+        self,
+        courses: list[dict[str, str]],
+        skipped: list[str],
+        records: list[dict[str, Any]],
+        failures: list[dict[str, str]],
+    ) -> SisCourseInfoSyncResult:
         synced_at = datetime.now(timezone.utc).isoformat()
         previous = read_json(self.root / "latest.json") if (self.root / "latest.json").is_file() else {}
         previous_by_code = {

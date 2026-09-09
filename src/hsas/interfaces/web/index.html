@@ -260,6 +260,14 @@
         <button class="button primary" type="submit">添加课程</button>
       </form>
       <p class="course-delete-note">删除会移除课程、关联事项和本地课程文件；文件会转移到本机回收目录。</p>
+      <div class="course-manager-toolbar">
+        <label class="course-manager-select-all">
+          <input id="course-manager-select-all" type="checkbox">
+          <span>全选</span>
+        </label>
+        <span id="course-manager-selection" class="course-manager-selection">已选择 0 门</span>
+        <button id="delete-selected-courses" class="button compact danger" type="button" disabled>删除所选</button>
+      </div>
       <div id="course-manager-list" class="course-manager-list"></div>
     </div>
   </dialog>

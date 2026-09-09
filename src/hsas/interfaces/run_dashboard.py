@@ -10,8 +10,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 from pathlib import Path
-import shutil
-from tempfile import TemporaryDirectory
 from threading import Event, Lock, Thread
 from typing import Any, Callable
 from urllib.parse import parse_qs, quote, urlparse
@@ -21,6 +19,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.application.synchronize_unified_courses import UnifiedCourseSyncService
 from hsas.domain.information.generate_calendar import build_ics
 from hsas.application.synchronize_class_planner import (
     ClassPlannerSynchronizationService,
@@ -39,6 +38,7 @@ from hsas.infrastructure.documents.run_ocr import (
     ocr_capabilities,
     run_ocr_queue,
 )
+from hsas.infrastructure.manage_browser_session import BrowserSessionBroker
 from hsas.infrastructure.class_planner import (
     ClassPlannerBrowserGateway,
     class_planner_status,
@@ -79,42 +79,10 @@ INFORMATION_REPOSITORY = JsonInformationRepository()
 CHANGE_REPOSITORY = JsonChangeQueueRepository()
 INBOX_REPOSITORY = JsonPersonalInboxRepository()
 MAX_REQUEST_BYTES = 16 * 1024
-PROFILE_COPY_IGNORE = shutil.ignore_patterns(
-    "Singleton*",
-    "Cache",
-    "Code Cache",
-    "GPUCache",
-    "DawnCache",
-    "GrShaderCache",
-    "ShaderCache",
-    "Crashpad",
-)
 
 
 class _WorkflowCancelled(RuntimeError):
     pass
-
-
-def _copy_authenticated_profile(source: Path, target: Path) -> Path:
-    """Create a private browser-profile snapshot without process lock files."""
-    if not source.is_dir():
-        raise FileNotFoundError(f"Authenticated browser profile is missing: {source}")
-    shutil.copytree(
-        source,
-        target,
-        dirs_exist_ok=True,
-        symlinks=True,
-        ignore=PROFILE_COPY_IGNORE,
-    )
-    target.chmod(0o700)
-    return target
-
-
-def _course_code(title: str) -> str | None:
-    from hsas.infrastructure.sis_course_info import course_identity
-
-    identity = course_identity(title)
-    return identity[0] if identity else None
 
 
 def _workflow_stage_label(stage: str) -> str:
@@ -349,6 +317,33 @@ class DashboardService:
             raise DashboardError("course_id 必须是有效的课程 ID。")
         if payload.get("confirmed") is not True or payload.get("confirmation") != course_id:
             raise DashboardError("课程删除确认与目标课程不一致。")
+        result = self._delete_courses([course_id])
+        return {
+            "course_id": course_id,
+            "deleted": True,
+            "deleted_item_count": result["deleted_item_count"],
+            "files_moved_to_trash": bool(result["files_moved_to_trash"]),
+        }
+
+    def delete_courses(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Atomically remove selected courses and their related local data."""
+        raw_ids = payload.get("course_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise DashboardError("course_ids 必须包含至少一个课程 ID。")
+        if any(not isinstance(value, str) or not value.strip() for value in raw_ids):
+            raise DashboardError("course_ids 包含无效的课程 ID。")
+        course_ids = list(dict.fromkeys(value.strip() for value in raw_ids))
+        if payload.get("confirmed") is not True or payload.get("confirmation") != course_ids:
+            raise DashboardError("课程批量删除确认与目标课程不一致。")
+        result = self._delete_courses(course_ids)
+        return {
+            "course_ids": course_ids,
+            "deleted": True,
+            "deleted_course_count": len(course_ids),
+            **result,
+        }
+
+    def _delete_courses(self, course_ids: list[str]) -> dict[str, Any]:
         path = self.resources_dir / "information.json"
         with self.mutation_lock:
             try:
@@ -357,32 +352,38 @@ class DashboardService:
                     if INFORMATION_REPOSITORY.exists(path)
                     else InformationStore()
                 )
-                record = next(
-                    (value for value in store.courses if value.course_id == course_id),
-                    None,
-                )
+                records = {value.course_id: value for value in store.courses}
                 archives = {
                     index.archive.course.course_id: index
                     for index in CHANGE_REPOSITORY.load_archives(self.resources_dir)
                 }
-                matched_archive = (
-                    _matching_archive(record, archives, set())
-                    if record is not None
-                    else archives.get(course_id)
-                )
-                moodle_course_id = (
-                    matched_archive.archive.course.course_id
-                    if matched_archive is not None
-                    else record.moodle_course_id
-                    if record is not None and record.moodle_course_id
-                    else course_id
-                )
-                removed_items = [item for item in store.items if item.course_id == course_id]
-                kept_courses = [value for value in store.courses if value.course_id != course_id]
-                kept_items = [item for item in store.items if item.course_id != course_id]
-                archive_path = self.resources_dir / "courses" / moodle_course_id
-                if record is None and not archive_path.is_dir():
-                    raise DashboardError(f"课程不存在：{course_id}")
+                used_archives: set[str] = set()
+                archive_paths: list[tuple[Path, str]] = []
+                planned_paths: set[Path] = set()
+                for course_id in course_ids:
+                    record = records.get(course_id)
+                    matched_archive = (
+                        _matching_archive(record, archives, used_archives)
+                        if record is not None
+                        else archives.get(course_id)
+                    )
+                    moodle_course_id = (
+                        matched_archive.archive.course.course_id
+                        if matched_archive is not None
+                        else record.moodle_course_id
+                        if record is not None and record.moodle_course_id
+                        else course_id
+                    )
+                    archive_path = self.resources_dir / "courses" / moodle_course_id
+                    if record is None and not archive_path.is_dir():
+                        raise DashboardError(f"课程不存在：{course_id}")
+                    if archive_path not in planned_paths:
+                        archive_paths.append((archive_path, moodle_course_id))
+                        planned_paths.add(archive_path)
+                selected_ids = set(course_ids)
+                removed_items = [item for item in store.items if item.course_id in selected_ids]
+                kept_courses = [value for value in store.courses if value.course_id not in selected_ids]
+                kept_items = [item for item in store.items if item.course_id not in selected_ids]
                 updated = InformationStore(
                     timezone=store.timezone,
                     updated_at=datetime.now(UTC),
@@ -390,26 +391,27 @@ class DashboardService:
                     courses=kept_courses,
                     items=kept_items,
                 )
-                archived_files = False
-                trash_target: Path | None = None
-                if archive_path.is_dir():
-                    trash_root = self.resources_dir / ".trash" / "courses"
-                    trash_root.mkdir(parents=True, exist_ok=True)
-                    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-                    target = trash_root / f"{stamp}-{moodle_course_id}"
-                    suffix = 1
-                    while target.exists():
-                        target = trash_root / f"{stamp}-{moodle_course_id}-{suffix}"
-                        suffix += 1
-                    archive_path.replace(target)
-                    trash_target = target
-                    archived_files = True
+                moved_archives: list[tuple[Path, Path]] = []
                 try:
+                    for archive_path, moodle_course_id in archive_paths:
+                        if not archive_path.is_dir():
+                            continue
+                        trash_root = self.resources_dir / ".trash" / "courses"
+                        trash_root.mkdir(parents=True, exist_ok=True)
+                        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+                        target = trash_root / f"{stamp}-{moodle_course_id}"
+                        suffix = 1
+                        while target.exists():
+                            target = trash_root / f"{stamp}-{moodle_course_id}-{suffix}"
+                            suffix += 1
+                        archive_path.replace(target)
+                        moved_archives.append((archive_path, target))
                     INFORMATION_REPOSITORY.save(path, updated)
                 except Exception:
-                    if trash_target is not None and trash_target.exists():
-                        archive_path.parent.mkdir(parents=True, exist_ok=True)
-                        trash_target.replace(archive_path)
+                    for archive_path, trash_target in reversed(moved_archives):
+                        if trash_target.exists() and not archive_path.exists():
+                            archive_path.parent.mkdir(parents=True, exist_ok=True)
+                            trash_target.replace(archive_path)
                     raise
             except DashboardError:
                 raise
@@ -418,10 +420,8 @@ class DashboardService:
                     f"删除课程失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
         return {
-            "course_id": course_id,
-            "deleted": True,
             "deleted_item_count": len(removed_items),
-            "files_moved_to_trash": archived_files,
+            "files_moved_to_trash": len(moved_archives),
         }
 
     def verify_moodle_session(self) -> dict[str, Any]:
@@ -968,23 +968,9 @@ class DashboardService:
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
 
-                selected_sis_courses: list[dict[str, str]] = []
-                for course in courses:
-                    selected_sis_courses.append(
-                        {
-                            "course_code": course["course_code"],
-                            "subject_area": course["subject_area"],
-                            "catalogue_number": course["catalogue_number"],
-                            "moodle_course_id": "",
-                            "moodle_title": course.get("title", course["course_code"]),
-                        }
-                    )
-
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
                 source_progress_lock = Lock()
-                moodle_catalog_ready = Event()
-                available_by_code: dict[str, Any] = {}
                 source_progress = {
                     "moodle": {"processed": 0, "completed": 0, "failed": 0, "total": len(courses)},
                     "sis_course_info": {"processed": 0, "completed": 0, "failed": 0, "total": len(courses)},
@@ -1033,121 +1019,15 @@ class DashboardService:
                             phase_summaries=existing,
                         )
 
-                def synchronize_moodle(profile_dir: Path) -> dict[str, Any]:
-                    service = _course_service(self.resources_dir, profile_dir=profile_dir)
-                    try:
-                        catalog = service.list_courses()
-                        for entry in catalog.available:
-                            identity = _course_code(entry.title)
-                            if identity and entry.course_id.isdigit():
-                                available_by_code.setdefault(identity, entry)
-                    finally:
-                        # SIS can begin as soon as Moodle identity metadata is
-                        # available; the heavier file downloads continue beside it.
-                        moodle_catalog_ready.set()
-                    failures: list[dict[str, str]] = []
-                    completed = 0
-                    processed = 0
-                    for course in courses:
-                        if self.sync_cancel_event.is_set():
-                            raise _WorkflowCancelled
-                        code = course["course_code"]
-                        report_source_progress(
-                            "moodle",
-                            processed=processed,
-                            completed=completed,
-                            failed=len(failures),
-                            detail=f"Moodle 课程资料 · {code}",
-                        )
-                        entry = available_by_code.get(code)
-                        if entry is None:
-                            failures.append(
-                                {
-                                    "course_code": code,
-                                    "error": "Moodle 中未找到与当前 enrolment 对应的课程",
-                                }
-                            )
-                        else:
-                            try:
-                                service.sync_course(entry.course_id)
-                            except Exception as exc:
-                                failures.append(
-                                    {
-                                        "course_code": code,
-                                        "error": f"{type(exc).__name__}: {str(exc)[:240]}",
-                                    }
-                                )
-                            else:
-                                completed += 1
-                        processed += 1
-                        report_source_progress(
-                            "moodle",
-                            processed=processed,
-                            completed=completed,
-                            failed=len(failures),
-                            detail=f"Moodle 课程资料 · {processed}/{len(courses)}",
-                        )
-                    return {"completed": completed, "failures": failures}
-
-                def synchronize_sis(profile_dir: Path):
-                    moodle_catalog_ready.wait()
-                    courses_with_moodle_identity = []
-                    for course in selected_sis_courses:
-                        entry = available_by_code.get(course["course_code"])
-                        courses_with_moodle_identity.append(
-                            {
-                                **course,
-                                "moodle_course_id": entry.course_id if entry else "",
-                                "moodle_title": (
-                                    entry.title if entry else course["moodle_title"]
-                                ),
-                            }
-                        )
-                    service = _sis_course_info_service(
-                        self.resources_dir,
-                        profile_dir=profile_dir,
-                    )
-
-                    def report_sis_progress(value: dict[str, object]) -> None:
-                        processed = int(value.get("completed", 0))
-                        report_source_progress(
-                            "sis_course_info",
-                            processed=processed,
-                            completed=processed,
-                            failed=0,
-                            detail=f"SIS 课程信息 · {value.get('course_code', '')}",
-                        )
-
-                    result = service.sync(
-                        timeout_seconds=30,
-                        selected_courses=courses_with_moodle_identity,
-                        progress_callback=report_sis_progress,
-                        cancel_requested=self.sync_cancel_event.is_set,
-                    )
-                    failed = len(result.failures)
+                def report_unified_progress(values: dict[str, object]) -> None:
+                    stage = str(values["stage"])
                     report_source_progress(
-                        "sis_course_info",
-                        processed=len(courses),
-                        completed=len(courses) - failed,
-                        failed=failed,
-                        detail=f"SIS 课程信息 · {len(courses)}/{len(courses)}",
+                        stage,
+                        processed=int(values.get("processed", 0)),
+                        completed=int(values.get("completed", 0)),
+                        failed=int(values.get("failed", 0)),
+                        detail=str(values.get("detail") or _workflow_stage_label(stage)),
                     )
-                    return result
-
-                def synchronize_timetable(profile_dir: Path):
-                    service = _class_planner_service(
-                        self.resources_dir,
-                        profile_dir=profile_dir,
-                    )
-                    result = service.sync()
-                    report_source_progress(
-                        "timetable",
-                        processed=1,
-                        completed=1,
-                        failed=0,
-                        detail="官方课表已完成",
-                    )
-                    return result
 
                 report(
                     {
@@ -1158,35 +1038,14 @@ class DashboardService:
                         "cards": [],
                     }
                 )
-                profile_source = hku_portal_profile_dir(self.resources_dir)
-                with TemporaryDirectory(
-                    prefix="hiqs-sync-",
-                    dir=self.resources_dir.parent,
-                ) as temporary_directory:
-                    temporary_root = Path(temporary_directory)
-                    temporary_root.chmod(0o700)
-                    profiles = {
-                        source: _copy_authenticated_profile(
-                            profile_source,
-                            temporary_root / source,
-                        )
-                        for source in ("moodle", "sis", "class-planner")
-                    }
-
-                    async def synchronize_sources():
-                        return await asyncio.gather(
-                            asyncio.to_thread(synchronize_moodle, profiles["moodle"]),
-                            asyncio.to_thread(synchronize_sis, profiles["sis"]),
-                            asyncio.to_thread(
-                                synchronize_timetable,
-                                profiles["class-planner"],
-                            ),
-                            return_exceptions=True,
-                        )
-
-                    moodle_result, sis_result, planner_result = asyncio.run(
-                        synchronize_sources()
+                unified_result = asyncio.run(
+                    _unified_course_sync_service(self.resources_dir).synchronize(
+                        courses,
+                        progress_callback=report_unified_progress,
+                        cancel_requested=self.sync_cancel_event.is_set,
                     )
+                )
+                moodle_result, sis_result, planner_result = unified_result.values
 
                 if self.sync_cancel_event.is_set() or any(
                     isinstance(result, _WorkflowCancelled)
@@ -1474,6 +1333,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/inbox/apply",
             "/api/courses/add",
             "/api/courses/delete",
+            "/api/courses/delete-many",
         }:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
             return
@@ -1501,6 +1361,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.add_course(payload)
             elif path == "/api/courses/delete":
                 result = self.server.dashboard_service.delete_course(payload)
+            elif path == "/api/courses/delete-many":
+                result = self.server.dashboard_service.delete_courses(payload)
             else:
                 result = self.server.dashboard_service.apply_personal_inbox(payload)
         except DashboardError as exc:
@@ -1622,6 +1484,16 @@ def _course_service(
         profile_dir=profile_dir or hku_portal_profile_dir(resources_dir),
     )
     return CourseSynchronizationService(MoodleCourseGateway(settings))
+
+
+def _unified_course_sync_service(resources_dir: Path) -> UnifiedCourseSyncService:
+    settings = Settings.load(
+        output_dir=resources_dir,
+        profile_dir=hku_portal_profile_dir(resources_dir),
+    )
+    return UnifiedCourseSyncService(
+        BrowserSessionBroker(resources_dir=resources_dir, settings=settings)
+    )
 
 
 def _class_planner_service(

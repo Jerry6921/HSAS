@@ -97,6 +97,37 @@ def test_incremental_download_reuses_unchanged_file_and_path(tmp_path: Path) -> 
     assert list(destination.iterdir()) == [path]
 
 
+def test_staged_previous_file_does_not_force_numeric_suffix(tmp_path: Path) -> None:
+    body = b"%PDF- current"
+    destination = tmp_path / "courses/1/files/10-slides"
+    path = destination / "slides.pdf"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"%PDF- copied previous snapshot")
+    activity = CourseActivity(
+        module_id="10",
+        name="Slides",
+        category="resource",
+        module="resource",
+    )
+
+    stored = asyncio.run(
+        _save_response(
+            FakeResponse(body),
+            activity=activity,
+            index=1,
+            destination_dir=destination,
+            storage_root=tmp_path,
+            max_download_bytes=1024,
+            claimed_paths=set(),
+        )
+    )
+
+    assert stored is not None
+    assert stored.relative_path == path.relative_to(tmp_path).as_posix()
+    assert path.read_bytes() == body
+    assert not (destination / "slides-1.pdf").exists()
+
+
 def test_conditional_get_reuses_local_file_on_http_304(tmp_path: Path) -> None:
     body = b"%PDF- cached"
     destination = tmp_path / "courses/1/files/10-slides"

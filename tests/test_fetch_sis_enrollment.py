@@ -22,7 +22,7 @@ def test_parse_enrollment_text_extracts_unique_current_courses() -> None:
         Enrollment Status
         2026-27 Semester 1
         BMED 2206 - Engineering in Biology and Medicine    Enrolled
-        ENGG1300 Computer Programming I | 6 Units
+        ENGG1300 Computer Programming I    Enrolled
         BMED2206 - Engineering in Biology and Medicine
         """
     )
@@ -41,6 +41,86 @@ def test_parse_enrollment_text_extracts_unique_current_courses() -> None:
             "catalogue_number": "1300",
             "title": "Computer Programming I",
         },
+    ]
+
+
+def test_parse_enrollment_text_prefers_current_schedule_over_enrollment_history() -> None:
+    term, courses = parse_enrollment_text(
+        """
+        This Week's Schedule
+        Class Schedule
+        BMED 2206-1A
+        LEC (3159)
+        CCHU 9051-1A
+        LEC (2691)
+
+        Student Enrollment
+        Term Class Schedule Action
+        Row
+        1
+        2026-27 Sem 1
+        BMED 2206-1A LEC (3159)
+        Approved
+        Row
+        2
+        2026-27 Sem 1
+        CCHU 9045-1A LEC (2577)
+        Not Approved
+        Row
+        3
+        2026-27 Sem 1
+        CCHU 9022-1A LEC (1732)
+        Dropped
+        Row
+        4
+        2026-27 Sem 2
+        CHEM 1011-2A LEC (4801)
+        Approved
+        Weekly Schedule
+        """
+    )
+
+    assert term == "2026-27 Sem 1"
+    assert [course["course_code"] for course in courses] == ["BMED2206", "CCHU9051"]
+    assert all(course["title"] == course["course_code"] for course in courses)
+
+
+def test_parse_enrollment_text_fallback_filters_status_and_term() -> None:
+    term, courses = parse_enrollment_text(
+        """
+        Student Enrollment
+        Row
+        1
+        2026-27 Semester 1
+        BMED 2206 - Engineering in Biology and Medicine
+        Approved
+        Row
+        2
+        2026-27 Semester 1
+        CCHU 9045 - The Last Course
+        Not Approved
+        Row
+        3
+        2026-27 Semester 1
+        CCHU 9022 - Humanity
+        Dropped
+        Row
+        4
+        2026-27 Semester 2
+        CHEM 1011 - Foundations of Chemistry
+        Approved
+        Weekly Schedule
+        """
+    )
+
+    assert term == "2026-27 Semester 1"
+    assert courses == [
+        {
+            "course_code": "BMED2206",
+            "subject_area": "BMED",
+            "catalogue_number": "2206",
+            "title": "Engineering in Biology and Medicine",
+        }
     ]
 
 
@@ -134,7 +214,10 @@ def test_enrollment_sync_opens_shared_sis_login_after_short_probe(
         timeouts.append(timeout_seconds)
         if len(timeouts) == 1:
             raise module.SisEnrollmentAuthenticationError("login required")
-        return "Enrollment Status\n2026-27 Semester 1\nBMED2206 Engineering in Biology"
+        return (
+            "Enrollment Status\n2026-27 Semester 1\n"
+            "BMED2206 Engineering in Biology    Enrolled"
+        )
 
     async def fake_save(_context, path):
         assert path.name == "sis-session.json"

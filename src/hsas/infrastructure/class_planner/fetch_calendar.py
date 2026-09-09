@@ -125,6 +125,24 @@ async def capture_calendar_response(
         raise ValueError("Class Planner timeout must be between 10 and 900 seconds")
 
     async with class_planner_context(profile_dir, headless=headless) as context:
+        return await capture_calendar_response_in_context(
+            context,
+            headless=headless,
+            timeout_seconds=timeout_seconds,
+        )
+
+
+async def capture_calendar_response_in_context(
+    context: BrowserContext,
+    *,
+    headless: bool = True,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    """Capture the calendar through a broker-owned browser context."""
+    if timeout_seconds < 10 or timeout_seconds > 900:
+        raise ValueError("Class Planner timeout must be between 10 and 900 seconds")
+    page = await context.new_page()
+    try:
         loop = asyncio.get_running_loop()
         payload_future: asyncio.Future[dict[str, Any]] = loop.create_future()
 
@@ -153,7 +171,6 @@ async def capture_calendar_response(
             asyncio.create_task(consume(response))
 
         context.on("response", schedule)
-        page = context.pages[0] if context.pages else await context.new_page()
         await page.goto(APP_URL, wait_until="domcontentloaded")
         try:
             if headless:
@@ -172,3 +189,7 @@ async def capture_calendar_response(
             raise ClassPlannerAuthenticationError(
                 f"No authenticated Class Planner calendar response was received. {action}."
             ) from exc
+        finally:
+            context.remove_listener("response", schedule)
+    finally:
+        await page.close()

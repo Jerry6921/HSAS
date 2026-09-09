@@ -361,37 +361,39 @@ def login_until_ready(
     return result
 
 
-def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
-    """Return login status, available Moodle courses, and downloaded courses."""
-    active_settings = settings or _settings()
+async def list_courses_in_context(
+    context: BrowserContext,
+    settings: Settings,
+) -> CourseCatalogResult:
+    """Read the Moodle catalogue through a broker-owned browser context."""
+    downloaded = _downloaded_courses(settings)
+    available = []
+    login_status = "not logged in"
+    login_error: str | None = None
+    page = await context.new_page()
+    try:
+        await page.goto(str(settings.dashboard_url), wait_until="domcontentloaded")
+        selectors = settings.selectors()
+        available = await discover_courses(
+            page,
+            dashboard_url=str(settings.dashboard_url),
+            selectors=selectors,
+        )
+        dashboard_found = any(
+            [await page.locator(css).count() for css in selectors.dashboard_ready]
+        )
+        redirected_to_login = page.url.startswith(str(settings.login_url))
+        if not redirected_to_login and (dashboard_found or available):
+            login_status = "logged in"
+    except Exception as exc:
+        login_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+    finally:
+        await page.close()
 
-    async def run() -> CourseCatalogResult:
-        downloaded = _downloaded_courses(active_settings)
-        available = []
-        login_status = "not logged in"
-        login_error: str | None = None
-
-        try:
-            async with persistent_context(active_settings) as context:
-                page = await open_page(context, str(active_settings.dashboard_url))
-                selectors = active_settings.selectors()
-                available = await discover_courses(
-                    page,
-                    dashboard_url=str(active_settings.dashboard_url),
-                    selectors=selectors,
-                )
-                dashboard_found = False
-                for css in selectors.dashboard_ready:
-                    if await page.locator(css).count():
-                        dashboard_found = True
-                        break
-                redirected_to_login = page.url.startswith(str(active_settings.login_url))
-                if not redirected_to_login and (dashboard_found or available):
-                    login_status = "logged in"
-        except Exception as exc:
-            login_error = f"{type(exc).__name__}: {str(exc)[:300]}"
-
-        available_entries = tuple(
+    return CourseCatalogResult(
+        login_status=login_status,
+        login_error=login_error,
+        available=tuple(
             CourseCatalogEntry(
                 course_id=course.course_id or "unknown",
                 title=course.title,
@@ -399,8 +401,8 @@ def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
                 downloaded=bool(course.course_id and course.course_id in downloaded),
             )
             for course in available
-        )
-        downloaded_entries = tuple(
+        ),
+        downloaded=tuple(
             CourseCatalogEntry(
                 course_id=course_id,
                 title=title,
@@ -408,15 +410,58 @@ def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
                 downloaded=True,
             )
             for course_id, title in downloaded.items()
-        )
-        return CourseCatalogResult(
-            login_status=login_status,
-            login_error=login_error,
-            available=available_entries,
-            downloaded=downloaded_entries,
-        )
+        ),
+    )
+
+
+def list_courses(settings: Settings | None = None) -> CourseCatalogResult:
+    """Return login status, available Moodle courses, and downloaded courses."""
+    active_settings = settings or _settings()
+
+    async def run() -> CourseCatalogResult:
+        async with persistent_context(active_settings) as context:
+            return await list_courses_in_context(context, active_settings)
 
     return asyncio.run(run())
+
+
+async def sync_course_in_context(
+    context: BrowserContext,
+    course: str,
+    settings: Settings,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> SyncCourseResult:
+    """Synchronize one Moodle course through a broker-owned context."""
+    course_id, course_url = _resolve_course_target(course, str(settings.base_url))
+    page = await context.new_page()
+    try:
+        await page.goto(course_url, wait_until="domcontentloaded")
+        if urlparse(page.url).netloc != urlparse(str(settings.base_url)).netloc:
+            raise RuntimeError("Session expired or SSO redirected. Run `hsas login`.")
+        title = extract_course_title(await page.content(), settings.selectors())
+        state = await fetch_course_state(
+            context,
+            page,
+            base_url=str(settings.base_url),
+            course_id=course_id,
+        )
+        archive, changes, output_path = await _persist_course(
+            context,
+            settings,
+            course_id=course_id,
+            course_title=title,
+            state=state,
+            cancel_requested=cancel_requested,
+        )
+    finally:
+        await page.close()
+    return SyncCourseResult(
+        course_id=course_id,
+        course_title=archive.course.title,
+        change_count=len(changes.changes),
+        output_path=output_path,
+    )
 
 
 def sync_course(
@@ -751,8 +796,28 @@ class MoodleCourseGateway:
     def list_courses(self) -> CourseCatalogResult:
         return list_courses(self.settings)
 
+    async def list_courses_in_context(
+        self,
+        context: BrowserContext,
+    ) -> CourseCatalogResult:
+        return await list_courses_in_context(context, self.settings)
+
     def sync_course(self, course: str) -> SyncCourseResult:
         return sync_course(course, self.settings)
+
+    async def sync_course_in_context(
+        self,
+        context: BrowserContext,
+        course: str,
+        *,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> SyncCourseResult:
+        return await sync_course_in_context(
+            context,
+            course,
+            self.settings,
+            cancel_requested=cancel_requested,
+        )
 
     def sync_all(
         self,

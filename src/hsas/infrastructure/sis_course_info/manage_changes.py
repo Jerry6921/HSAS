@@ -49,7 +49,7 @@ def collect_sis_course_info_changes(resources_dir: Path) -> dict[str, Any]:
     return {
         "schema_version": "1.0",
         "source": "HKU SIS Course Information",
-        "authority": "highest",
+        "authority": "supporting",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "batch_id": batch_id,
         "acknowledged_through": acknowledged,

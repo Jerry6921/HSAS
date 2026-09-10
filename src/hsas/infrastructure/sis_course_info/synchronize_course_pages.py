@@ -31,7 +31,7 @@ from .fetch_course_pages import (
 
 
 SOURCE_NAME = "HKU SIS Course Information"
-AUTHORITY = "highest"
+AUTHORITY = "supporting"
 COURSE_CODE_PATTERN = re.compile(r"(?<![A-Z0-9])([A-Z]{4})\s*[_-]?(\d{4})(?!\d)", re.I)
 
 

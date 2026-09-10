@@ -15,7 +15,7 @@ uncertainty visible.
 ### 1. Conflicting deadlines
 
 - Given: Moodle and the syllabus list different DDLs.
-- Expected: retain both sources, mark the item tentative, state the conflict.
+- Expected: use the current Moodle-supported DDL, retain both sources, and state the conflict in a warning.
 
 ### 2. Pending deadline
 

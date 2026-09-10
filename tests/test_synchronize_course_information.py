@@ -127,7 +127,7 @@ def test_sis_review_batch_tracks_and_acknowledges_latest_course_page(tmp_path: P
             {
                 "action": "added",
                 "course_code": "BMED2206",
-                "authority": "highest",
+                "authority": "supporting",
                 "text_relative_path": "sis-course-info/courses/BMED2206/latest.txt",
             }
         ],
@@ -138,6 +138,6 @@ def test_sis_review_batch_tracks_and_acknowledges_latest_course_page(tmp_path: P
     batch = collect_sis_course_info_changes(tmp_path)
 
     assert batch["pending_change_count"] == 1
-    assert batch["authority"] == "highest"
+    assert batch["authority"] == "supporting"
     acknowledge_sis_course_info_changes(tmp_path, batch, confirmed=True)
     assert collect_sis_course_info_changes(tmp_path)["pending_change_count"] == 0

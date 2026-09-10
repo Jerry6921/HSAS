@@ -52,9 +52,8 @@ verification date.
 Use claim-specific authority:
 
 ```text
-live Moodle activity metadata  → current open and due times
-official syllabus/course file  → weight, format, requirements, policy
-official timetable/announcement → class and tutorial changes
+current Moodle activity metadata, pages, announcements and course files → highest authority
+HKU SIS Course Information and Class Planner → fill facts Moodle does not state
 user-confirmed AI conversation → personal tutorial group or extra reminder
 AI inference                   → suggestion or tentative interpretation
 ```
@@ -62,9 +61,9 @@ AI inference                   → suggestion or tentative interpretation
 When sources conflict:
 
 - retain both source references;
-- use `date_status: tentative`;
-- explain the conflict in `warnings`;
-- explain the basis for any operational date selection.
+- use the value supported by the current Moodle source;
+- explain the conflicting value and Moodle basis in `warnings`;
+- set `date_status` from the selected Moodle evidence rather than making a confirmed Moodle date tentative solely because a lower-priority source differs.
 
 ## 6. Calendar timing
 
@@ -136,7 +135,7 @@ Keep unconfirmed drafts in the Inbox until the user has reviewed them.
 | Date pending | Keep the item under “date to verify” |
 | Weight pending | Keep it `null` |
 | Course reference pending | Fix the course record before applying |
-| Source conflict | Mark tentative, retain evidence and warning |
+| Source conflict | Use the Moodle-supported value; retain both sources and a warning |
 
 ## 10. Response contracts
 

@@ -32,8 +32,9 @@ HKU Portal 登录并建立来源会话，再从 HKU SIS Student Center 取得当
 
 Student Center 课程名单直接提供课程代码，例如把 `BMED2206` 拆为 Subject Area `BMED`
 与 Catalogue Number `2206`。系统逐门取得 SIS 课程页面，保存经过清洗的可读副本与
-内容哈希；AI 以该官方页面作为重叠课程事实的最高优先级来源。SIS 与 Class Planner 共享
-HKU Portal 浏览器 profile，SIS 登录窗口同时承接可能出现的一次图形验证。
+内容哈希。AI 以 Moodle 当前页面、活动元数据、公告与课程资料作为最高优先级来源，SIS 与
+Class Planner 补充 Moodle 未陈述的事实；冲突时采用 Moodle 支持的值并保留双方证据。
+SIS 与 Class Planner 共享 HKU Portal 浏览器 profile，SIS 登录窗口同时承接可能出现的一次图形验证。
 
 课程数、信息事项、本月日程、待确认日期和待 AI 整理数量构成首页摘要。资料状态进一步汇总
 OCR、Google 授权与来源冲突；本地搜索、个人补充信息 Inbox 和更新记录分别承担资料检索、
@@ -79,7 +80,7 @@ HKU SIS Student Center
   ↓
 `BrowserSessionBroker` 打开一个认证 context，并发运行三个独立来源页面
   ├─ Moodle：按课程同步文件与文本副本
-  ├─ SIS Course Information：按课程同步最高优先级官方页面
+  ├─ SIS Course Information：按课程同步官方课程页面作为补充来源
   └─ HKU Class Planner：同步上课时间、班别和地点
   ↓
 各来源生成独立增量审阅队列
@@ -257,7 +258,7 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 - 各来源在流程运行时检查会话状态，并在需要认证时打开对应官方登录页；
 - 新增 HKU SIS Course Information 登录与同步，从 Student Center 课程代码拆分 Subject Area 和 Catalogue Number；
 - 官方课程页保存为经过清洗的本地文本与 HTML 副本，并通过内容哈希形成独立增量审阅队列；
-- AI 写入流程支持 SIS checkpoint，并将明确重叠的 SIS 课程事实设为最高来源优先级；
+- AI 写入流程支持 SIS checkpoint；Moodle 课程资料作为最高优先级来源，冲突时保留双方证据并采用 Moodle 支持的值；
 - 首页同步工作台新增来源状态、同步摘要与待整理差异；
 - 侧栏新增课程数据库管理，可添加课程或删除课程、关联事项与本地课程文件；
 - 动态质感扩展至首页、日历、资料条目与管理窗口；课程概览保留环境光并使用稳定的平面交互。

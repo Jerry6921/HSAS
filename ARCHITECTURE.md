@@ -154,8 +154,9 @@ checkpoint 在信息写入成功后推进。信息已保存而游标确认失败
 安全重试。审查确认课程事实保持一致时，使用带双重确认的独立 acknowledge。
 
 HKU SIS 页面使用 `sis-course-info/history/` 和 `review-checkpoint.json` 维护独立增量队列。
-AI 先阅读变更记录指向的 `text_relative_path`，并以 `source_type: sis_course_info` 引用来源；
-SIS 明确陈述的重叠课程事实拥有最高优先级。
+AI 先阅读变更记录指向的 `text_relative_path`，并以 `source_type: sis_course_info` 引用来源。
+Moodle 当前页面、活动元数据、公告与课程资料拥有最高优先级；SIS 和 Class Planner 补充
+Moodle 未陈述的事实。来源冲突时采用 Moodle 支持的值，同时保留双方证据与警告。
 
 ## Information Store
 

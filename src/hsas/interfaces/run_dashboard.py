@@ -47,6 +47,7 @@ from hsas.infrastructure.fetch_sis_enrollment import SisEnrollmentBrowserGateway
 from hsas.infrastructure.manage_sis_enrollment import collect_sis_enrollment_changes
 from hsas.infrastructure.sis_course_info import (
     SisCourseInfoBrowserGateway,
+    course_identity,
     sis_course_info_status,
 )
 from hsas.infrastructure.sis_course_info.manage_changes import (
@@ -64,7 +65,7 @@ from hsas.infrastructure.storage import (
     JsonInformationRepository,
     JsonPersonalInboxRepository,
 )
-from hsas.infrastructure.storage.persist_data import read_json
+from hsas.infrastructure.storage.persist_data import read_json, write_json
 
 
 ASSET_ROOT = Path(__file__).with_name("web")
@@ -142,6 +143,7 @@ class DashboardService:
                 )
             except PersonalInboxError as exc:
                 raise DashboardError(str(exc)) from exc
+            material_status = self._material_status(store, pending)
             return {
                 "available": False,
                 "schema_version": "1.0",
@@ -157,7 +159,9 @@ class DashboardService:
                     "unknown_date_count": 0,
                 },
                 "pending_review": _pending_summary(pending),
-                "material_status": self._material_status(store, pending),
+                "material_status": material_status,
+                "review_closure": self._review_closure(store, pending, material_status),
+                "course_reconciliation": self._course_reconciliation(store),
                 "personal_inbox": inbox,
                 "sis_enrollment": self._sis_enrollment_status(),
                 "class_planner": self._class_planner_status(),
@@ -195,6 +199,7 @@ class DashboardService:
             )
         except PersonalInboxError as exc:
             raise DashboardError(str(exc)) from exc
+        material_status = self._material_status(store, pending)
         return {
             "available": True,
             **payload,
@@ -208,7 +213,9 @@ class DashboardService:
                 ),
             },
             "pending_review": _pending_summary(pending),
-            "material_status": self._material_status(store, pending),
+            "material_status": material_status,
+            "review_closure": self._review_closure(store, pending, material_status),
+            "course_reconciliation": self._course_reconciliation(store),
             "personal_inbox": inbox,
             "sis_enrollment": self._sis_enrollment_status(),
             "class_planner": self._class_planner_status(),
@@ -216,6 +223,149 @@ class DashboardService:
             "moodle_session": load_moodle_session_status(self.resources_dir),
             "updates": _pending_updates(pending),
             "warnings": [],
+        }
+
+    @staticmethod
+    def _course_code(*values: object) -> str | None:
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            identity = course_identity(value)
+            if identity is not None:
+                return identity[0]
+        return None
+
+    def _course_reconciliation(self, store: InformationStore) -> dict[str, Any]:
+        """Compare current enrolment with every local source without merging facts."""
+        enrollment = self._sis_enrollment_status()
+        sis = self._sis_course_info_status()
+        enrolled = {
+            code: value
+            for value in enrollment.get("courses", [])
+            if isinstance(value, dict)
+            and (code := self._course_code(value.get("course_code")))
+        }
+        moodle: dict[str, Any] = {}
+        for index in CHANGE_REPOSITORY.load_archives(self.resources_dir):
+            code = self._course_code(index.archive.course.title)
+            if code:
+                moodle[code] = index.archive
+        sis_courses = {
+            code: value
+            for value in sis.get("courses", [])
+            if isinstance(value, dict)
+            and (code := self._course_code(value.get("course_code")))
+        }
+        planner_courses: dict[str, dict[str, Any]] = {}
+        planner_path = self.resources_dir / "class-planner" / "latest.json"
+        if planner_path.is_file():
+            value = read_json(planner_path)
+            payload = value.get("payload", {}) if isinstance(value, dict) else {}
+            for row in payload.get("mainTable", []) if isinstance(payload, dict) else []:
+                if not isinstance(row, dict):
+                    continue
+                code = self._course_code(
+                    f"{row.get('SUBJECT_AREA', '')}{row.get('CATALOG_NBR', '')}",
+                    row.get("COURSE_SUBCLASS"),
+                )
+                if code:
+                    planner_courses[code] = row
+        information = {
+            code: course
+            for course in store.courses
+            if (code := self._course_code(course.code, course.title))
+        }
+        codes = sorted(set(enrolled) | set(moodle) | set(sis_courses) | set(planner_courses) | set(information))
+        rows = []
+        for code in codes:
+            is_current = code in enrolled
+            sources = {
+                "enrollment": code in enrolled,
+                "moodle": code in moodle,
+                "sis_course_info": code in sis_courses,
+                "class_planner": code in planner_courses,
+                "information": code in information,
+            }
+            missing = [name for name, present in sources.items() if name != "information" and not present]
+            pending_write = is_current and not sources["information"]
+            legacy = not is_current and any(sources.values())
+            state = "legacy" if legacy else "attention" if missing or pending_write else "complete"
+            title = (
+                getattr(information.get(code), "title", None)
+                or (moodle[code].course.title if code in moodle else None)
+                or planner_courses.get(code, {}).get("COURSE_TITLE_LONG")
+                or enrolled.get(code, {}).get("title")
+                or code
+            )
+            rows.append(
+                {
+                    "course_code": code,
+                    "title": title,
+                    "current_enrollment": is_current,
+                    "state": state,
+                    "sources": sources,
+                    "missing_sources": missing,
+                    "pending_information_write": pending_write,
+                }
+            )
+        return {
+            "rows": rows,
+            "counts": {
+                "total": len(rows),
+                "complete": sum(row["state"] == "complete" for row in rows),
+                "attention": sum(row["state"] == "attention" for row in rows),
+                "legacy": sum(row["state"] == "legacy" for row in rows),
+            },
+            "source_labels": {
+                "enrollment": "当前注册",
+                "moodle": "Moodle",
+                "sis_course_info": "SIS 课程信息",
+                "class_planner": "官方课表",
+                "information": "本地信息库",
+            },
+        }
+
+    def _review_closure(
+        self,
+        store: InformationStore,
+        pending: PendingChangeBatch,
+        material_status: dict[str, Any],
+    ) -> dict[str, Any]:
+        counts = material_status["counts"]
+        pending_total = int(counts["ai_review"]) + int(counts["ocr"]) + int(counts["google_authorization"])
+        sync = self.course_sync_status()
+        retry_tasks = list((sync.get("result") or {}).get("retry_tasks") or [])
+        captured = any((self.resources_dir / name / "latest.json").is_file() for name in ("sis-enrollment", "sis-course-info", "class-planner")) or bool(CHANGE_REPOSITORY.load_archives(self.resources_dir))
+        stages = [
+            {"id": "capture", "label": "来源采集", "state": "complete" if captured else "pending"},
+            {"id": "review", "label": "Agent 整理", "state": "complete" if pending_total == 0 else "pending", "count": pending_total},
+            {"id": "write", "label": "校验写入", "state": "complete" if store.courses else "pending"},
+            {"id": "checkpoint", "label": "Checkpoint", "state": "complete" if int(counts["ai_review"]) == 0 else "pending", "count": int(counts["ai_review"])},
+        ]
+        course_lines = [
+            f"- {course.course_title} ({course.course_id})：{course.mode}，{len(course.files)} 个文件，{len(course.changes)} 项变更"
+            for course in pending.courses
+        ] or ["- 当前 Moodle 队列没有待审阅课程"]
+        prompt = "\n".join(
+            [
+                "请处理本机 HIQS 的新增课程资料并完成信息闭环。",
+                f"项目位置：{Path(__file__).resolve().parents[3]}",
+                f"资料目录：{self.resources_dir}",
+                "先完整阅读 src/AI_Skills/SKILL.md，并严格按其中的 validate、apply 与 checkpoint 流程操作。",
+                "只整理待审阅或发生变化的来源；课程事实冲突时以 Moodle 资料为最高优先级。",
+                "同时核对每门课程的完整 Moodle 材料清单，将每份课件写入 courses[].material_sections；栏位名称由你根据课程内容与组织方式自由归纳，不使用程序预设分类。",
+                "待处理课程：",
+                *course_lines,
+                f"另有 SIS/注册来源待整理 {max(0, int(counts['ai_review']) - pending.pending_change_count)} 项，OCR {counts['ocr']} 项，Google 授权 {counts['google_authorization']} 项。",
+                "完成写入后推进相应 checkpoint，再运行 hsas list-status，确认 information.json 可通过校验且待处理数量已经更新。",
+            ]
+        )
+        return {
+            "stages": stages,
+            "pending_total": pending_total,
+            "retry_tasks": retry_tasks,
+            "agent_prompt": prompt,
+            "complete": all(stage["state"] == "complete" for stage in stages) and not retry_tasks,
         }
 
     def _sis_enrollment_status(self) -> dict[str, Any]:
@@ -508,7 +658,24 @@ class DashboardService:
                 self.resources_dir,
                 index,
                 pending_by_course.get(archive.course.course_id) if archive else None,
+                record,
+                course_id=value["course_id"],
+                course_code=value["code"],
+                course_title=value["title"],
             )
+            value["agent_prompts"] = {
+                "recent_lecture_materials": _recent_lecture_materials_prompt(
+                    self.resources_dir,
+                    course_id=value["course_id"],
+                    moodle_course_id=(
+                        archive.course.course_id
+                        if archive
+                        else value.get("moodle_course_id")
+                    ),
+                    course_code=value["code"],
+                    course_title=value["title"],
+                )
+            }
             value["moodle"] = (
                 {
                     "url": str(archive.course.url),
@@ -584,8 +751,14 @@ class DashboardService:
             ]
         except (OSError, ValueError):
             enrollment_pending = 0
+        try:
+            planner_pending = int(
+                self._class_planner_status().get("review", {}).get("pending_change_count", 0)
+            )
+        except (OSError, ValueError, TypeError):
+            planner_pending = 0
         counts = {
-            "ai_review": pending.pending_change_count + sis_pending + enrollment_pending,
+            "ai_review": pending.pending_change_count + sis_pending + enrollment_pending + planner_pending,
             "ocr": len(ocr_queue),
             "google_authorization": len(google_authorization),
             "date_unknown": len(date_unknown),
@@ -797,9 +970,59 @@ class DashboardService:
             self.sync_thread.start()
             return dict(self.sync_job)
 
+    def retry_failed_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Retry only the source/course pairs left by the latest workflow."""
+        if payload.get("confirmed") is not True:
+            raise DashboardError("请先确认重试失败课程或来源。")
+        with self.sync_job_lock:
+            if self.sync_thread is not None and self.sync_thread.is_alive():
+                raise DashboardError("已有课程同步工作流正在进行。")
+            result = self.sync_job.get("result") or self._persisted_sync_result()
+            retry_tasks = list((result or {}).get("retry_tasks") or [])
+            if not retry_tasks:
+                raise DashboardError("最近一次同步没有可重试的失败项目。")
+            job_id = uuid4().hex
+            self.sync_cancel_event = Event()
+            self.sync_job = {
+                "job_id": job_id,
+                "state": "running",
+                "stage": "starting",
+                "detail": f"正在准备重试 {len(retry_tasks)} 个失败项目",
+                "completed": 0,
+                "total": len(retry_tasks),
+                "cancel_requested": False,
+                "result": {"retry_tasks": retry_tasks},
+                "error": None,
+                "cards": [],
+                "phase_summaries": {},
+            }
+            self.sync_thread = Thread(
+                target=self._run_course_sync_job,
+                args=(job_id, retry_tasks),
+                name=f"hiqs-retry-{job_id[:8]}",
+                daemon=True,
+            )
+            self.sync_thread.start()
+            return dict(self.sync_job)
+
     def course_sync_status(self) -> dict[str, Any]:
         with self.sync_job_lock:
-            return dict(self.sync_job)
+            value = dict(self.sync_job)
+            if value.get("state") == "idle":
+                result = self._persisted_sync_result()
+                if result:
+                    value["result"] = result
+            return value
+
+    def _persisted_sync_result(self) -> dict[str, Any] | None:
+        path = self.resources_dir / "sync-workflow" / "latest.json"
+        if not path.is_file():
+            return None
+        try:
+            value = read_json(path)
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
 
     def cancel_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("confirmed") is not True:
@@ -812,7 +1035,11 @@ class DashboardService:
             self.sync_job["detail"] = "正在取消"
             return dict(self.sync_job)
 
-    def _run_course_sync_job(self, job_id: str) -> None:
+    def _run_course_sync_job(
+        self,
+        job_id: str,
+        retry_tasks: list[dict[str, Any]] | None = None,
+    ) -> None:
         def report(values: dict[str, object]) -> None:
             with self.sync_job_lock:
                 if self.sync_job.get("job_id") == job_id:
@@ -930,7 +1157,14 @@ class DashboardService:
                     }
                 )
                 planner_service = _class_planner_service(self.resources_dir)
-                planner_service.login_until_ready()
+                try:
+                    planner_service.login_until_ready(
+                        cancel_requested=self.sync_cancel_event.is_set,
+                    )
+                except InterruptedError:
+                    if self.sync_cancel_event.is_set():
+                        raise _WorkflowCancelled
+                    raise
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
 
@@ -942,39 +1176,86 @@ class DashboardService:
                 )
                 moodle_status = moodle_service.check_login_status()
                 if moodle_status.status != "logged_in":
-                    moodle_service.login_until_ready()
+                    try:
+                        moodle_service.login_until_ready(
+                            cancel_requested=self.sync_cancel_event.is_set,
+                        )
+                    except InterruptedError:
+                        if self.sync_cancel_event.is_set():
+                            raise _WorkflowCancelled
+                        raise
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
 
-                report(
-                    {
-                        "stage": "authentication",
-                        "detail": "正在确认 SIS 会话并读取当前学期课程列表",
-                    }
-                )
-                enrollment = _sis_enrollment_gateway(self.resources_dir).sync(auto_login=True)
-                courses = list(enrollment["courses"])
-                begin_phase("enrollment", courses)
-                for index, course in enumerate(courses, start=1):
-                    update_card(
-                        "enrollment",
-                        course["course_code"],
-                        "completed",
-                        "已确认当前学期注册",
-                        completed=index,
-                        failed=0,
-                        total=len(courses),
+                if retry_tasks is None:
+                    report(
+                        {
+                            "stage": "authentication",
+                            "detail": "正在确认 SIS 会话并读取当前学期课程列表",
+                        }
                     )
+                    try:
+                        enrollment = _sis_enrollment_gateway(self.resources_dir).sync(
+                            auto_login=True,
+                            cancel_requested=self.sync_cancel_event.is_set,
+                        )
+                    except InterruptedError:
+                        if self.sync_cancel_event.is_set():
+                            raise _WorkflowCancelled
+                        raise
+                    courses = list(enrollment["courses"])
+                    begin_phase("enrollment", courses)
+                    for index, course in enumerate(courses, start=1):
+                        update_card(
+                            "enrollment",
+                            course["course_code"],
+                            "completed",
+                            "已确认当前学期注册",
+                            completed=index,
+                            failed=0,
+                            total=len(courses),
+                        )
+                else:
+                    enrollment = _sis_enrollment_gateway(self.resources_dir).status()
+                    courses = list(enrollment.get("courses") or [])
+                    if not courses:
+                        raise DashboardError("没有可用于精确重试的当前学期课程快照。")
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
 
                 if self.sync_cancel_event.is_set():
                     raise _WorkflowCancelled
+                courses_by_code = {course["course_code"]: course for course in courses}
+                if retry_tasks is None:
+                    source_scopes: dict[str, list[dict[str, str]] | None] = {
+                        "moodle": courses,
+                        "sis_course_info": courses,
+                        "timetable": None,
+                    }
+                else:
+                    source_scopes = {}
+                    for task in retry_tasks:
+                        source = str(task.get("source") or "")
+                        if source not in {"moodle", "sis_course_info", "timetable"}:
+                            continue
+                        if source == "timetable":
+                            source_scopes[source] = None
+                            continue
+                        code = str(task.get("course_code") or "")
+                        course = courses_by_code.get(code)
+                        if course is not None:
+                            source_scopes.setdefault(source, []).append(course)  # type: ignore[union-attr]
+                    if not source_scopes:
+                        raise DashboardError("失败清单与当前注册课程不再匹配。")
                 source_progress_lock = Lock()
                 source_progress = {
-                    "moodle": {"processed": 0, "completed": 0, "failed": 0, "total": len(courses)},
-                    "sis_course_info": {"processed": 0, "completed": 0, "failed": 0, "total": len(courses)},
-                    "timetable": {"processed": 0, "completed": 0, "failed": 0, "total": 1},
+                    source: {
+                        "processed": 0,
+                        "completed": 0,
+                        "failed": 0,
+                        "total": 1 if source == "timetable" else len(scope or []),
+                    }
+                    for source, scope in source_scopes.items()
                 }
 
                 def report_source_progress(
@@ -1038,13 +1319,21 @@ class DashboardService:
                         "cards": [],
                     }
                 )
-                unified_result = asyncio.run(
-                    _unified_course_sync_service(self.resources_dir).synchronize(
-                        courses,
-                        progress_callback=report_unified_progress,
-                        cancel_requested=self.sync_cancel_event.is_set,
+                sync_service = _unified_course_sync_service(self.resources_dir)
+                sync_kwargs = {
+                    "progress_callback": report_unified_progress,
+                    "cancel_requested": self.sync_cancel_event.is_set,
+                }
+                if retry_tasks is None:
+                    unified_result = asyncio.run(sync_service.synchronize(courses, **sync_kwargs))
+                else:
+                    unified_result = asyncio.run(
+                        sync_service.synchronize(
+                            courses,
+                            source_scopes=source_scopes,
+                            **sync_kwargs,
+                        )
                     )
-                )
                 moodle_result, sis_result, planner_result = unified_result.values
 
                 if self.sync_cancel_event.is_set() or any(
@@ -1054,19 +1343,31 @@ class DashboardService:
                     raise _WorkflowCancelled
 
                 source_failures: list[dict[str, str]] = []
-                for source, result, total in (
-                    ("moodle", moodle_result, len(courses)),
-                    ("sis_course_info", sis_result, len(courses)),
-                    ("timetable", planner_result, 1),
-                ):
+                result_by_source = {
+                    "moodle": moodle_result,
+                    "sis_course_info": sis_result,
+                    "timetable": planner_result,
+                }
+                retry_remaining: list[dict[str, str | None]] = []
+                for source, scope in source_scopes.items():
+                    result = result_by_source[source]
+                    total = 1 if source == "timetable" else len(scope or [])
                     if not isinstance(result, Exception):
                         continue
+                    error = f"{type(result).__name__}: {str(result)[:300]}"
                     source_failures.append(
                         {
                             "source": source,
-                            "error": f"{type(result).__name__}: {str(result)[:300]}",
+                            "error": error,
                         }
                     )
+                    if source == "timetable":
+                        retry_remaining.append({"source": source, "course_code": None, "error": error})
+                    else:
+                        retry_remaining.extend(
+                            {"source": source, "course_code": course["course_code"], "error": error}
+                            for course in (scope or [])
+                        )
                     report_source_progress(
                         source,
                         processed=total,
@@ -1085,34 +1386,40 @@ class DashboardService:
                     if isinstance(moodle_result, dict)
                     else 0
                 )
-                sis_failures = (
-                    list(sis_result.failures)
-                    if not isinstance(sis_result, Exception)
-                    else []
+                sis_failures = list(getattr(sis_result, "failures", ()) or ())
+                retry_remaining.extend(
+                    {"source": "moodle", "course_code": failure.get("course_code"), "error": failure.get("error", "")}
+                    for failure in moodle_failures
+                )
+                retry_remaining.extend(
+                    {"source": "sis_course_info", "course_code": failure.get("course_code"), "error": failure.get("error", "")}
+                    for failure in sis_failures
                 )
                 failed_course_count = len(moodle_failures) + len(sis_failures)
-                if isinstance(moodle_result, Exception):
-                    failed_course_count += len(courses)
-                if isinstance(sis_result, Exception):
-                    failed_course_count += len(courses)
+                failed_course_count += sum(
+                    1 for value in retry_remaining if value.get("course_code")
+                ) - len(moodle_failures) - len(sis_failures)
             payload = {
                 "discovered_course_count": len(courses),
                 "succeeded_course_count": moodle_completed,
                 "failed_course_count": failed_course_count,
                 "source_failures": source_failures,
+                "retry_tasks": retry_remaining,
+                "retry_mode": retry_tasks is not None,
                 "term": enrollment.get("term"),
                 "pending_review": self._pending_review_summary(
                     _load_information_if_available(self.resources_dir)
                 ),
             }
+            write_json(self.resources_dir / "sync-workflow" / "latest.json", payload).chmod(0o600)
             with self.sync_job_lock:
                 if self.sync_job.get("job_id") == job_id:
                     self.sync_job.update(
                         state="completed",
                         stage="finished",
                         detail=(
-                            f"同步完成，{len(source_failures)} 个来源需要重试"
-                            if source_failures
+                            f"同步完成，{len(retry_remaining)} 个项目需要重试"
+                            if retry_remaining
                             else "同步完成"
                         ),
                         result=payload,
@@ -1324,6 +1631,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/moodle/login",
             "/api/sync",
             "/api/sync/start",
+            "/api/sync/retry",
             "/api/sync/cancel",
             "/api/class-planner/login",
             "/api/class-planner/sync",
@@ -1345,6 +1653,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.synchronize_courses(payload)
             elif path == "/api/sync/start":
                 result = self.server.dashboard_service.start_course_sync(payload)
+            elif path == "/api/sync/retry":
+                result = self.server.dashboard_service.retry_failed_course_sync(payload)
             elif path == "/api/sync/cancel":
                 result = self.server.dashboard_service.cancel_course_sync(payload)
             elif path == "/api/class-planner/login":
@@ -1697,8 +2007,17 @@ def _course_materials(
     resources: Path,
     index: ArchiveIndex | None,
     review: CourseReview | None,
-) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {"learning": [], "information": []}
+    record: CourseRecord | None,
+    *,
+    course_id: str,
+    course_code: str,
+    course_title: str,
+) -> dict[str, Any]:
+    grouped: dict[str, Any] = {
+        "sections": [],
+        "unclassified": [],
+        "all": [],
+    }
     if index is None:
         return grouped
     changed = {
@@ -1715,112 +2034,180 @@ def _course_materials(
     section_titles.update(
         {activity.module_id: "其他" for activity in archive.unassigned_activities}
     )
+    materials: list[dict[str, Any]] = []
     for activity in iter_activities(archive):
         if activity.files:
             for stored_file in activity.files:
-                material_type = _material_type(
-                    activity.name,
-                    stored_file.filename,
-                    activity.category,
-                    section_titles.get(activity.module_id, ""),
-                )
-                bucket = _material_bucket(material_type)
                 path = (resources / stored_file.relative_path).resolve()
-                grouped[bucket].append(
-                    {
-                        "id": f"{activity.module_id}:{stored_file.source_url}",
-                        "title": stored_file.filename,
-                        "activity_name": activity.name,
-                        "section_title": section_titles.get(activity.module_id),
-                        "category": activity.category,
-                        "material_type": material_type,
-                        "relative_path": stored_file.relative_path,
-                        "source_url": str(stored_file.source_url),
-                        "content_type": stored_file.content_type,
-                        "size_bytes": stored_file.size_bytes,
-                        "downloaded_at": stored_file.downloaded_at.isoformat(),
-                        "text_available": bool(
-                            stored_file.analysis
-                            and stored_file.analysis.extracted_text_path
-                        ),
-                        "text_path": (
-                            stored_file.analysis.extracted_text_path
-                            if stored_file.analysis
-                            else None
-                        ),
-                        "exists": path.is_file(),
-                        "change_action": changed.get(stored_file.relative_path),
-                        "download_status": activity.download_status,
-                        "download_error": activity.download_error,
-                    }
-                )
-        else:
-            material_type = _material_type(
-                activity.name,
-                "",
-                activity.category,
-                section_titles.get(activity.module_id, ""),
-            )
-            bucket = _material_bucket(material_type)
-            grouped[bucket].append(
-                {
-                    "id": activity.module_id,
-                    "title": activity.name,
+                material = {
+                    "id": f"{activity.module_id}:{stored_file.source_url}",
+                    "title": stored_file.filename,
                     "activity_name": activity.name,
                     "section_title": section_titles.get(activity.module_id),
                     "category": activity.category,
-                    "material_type": material_type,
-                    "relative_path": None,
-                    "source_url": str(activity.url) if activity.url else None,
-                    "content_type": None,
-                    "size_bytes": None,
-                    "downloaded_at": None,
-                    "text_available": False,
-                    "exists": False,
-                    "change_action": None,
+                    "material_type": None,
+                    "relative_path": stored_file.relative_path,
+                    "source_url": str(stored_file.source_url),
+                    "content_type": stored_file.content_type,
+                    "size_bytes": stored_file.size_bytes,
+                    "downloaded_at": stored_file.downloaded_at.isoformat(),
+                    "text_available": bool(
+                        stored_file.analysis
+                        and stored_file.analysis.extracted_text_path
+                    ),
+                    "text_path": (
+                        stored_file.analysis.extracted_text_path
+                        if stored_file.analysis
+                        else None
+                    ),
+                    "exists": path.is_file(),
+                    "change_action": changed.get(stored_file.relative_path),
                     "download_status": activity.download_status,
                     "download_error": activity.download_error,
                 }
+                material["agent_prompt"] = _material_summary_prompt(
+                    resources,
+                    material,
+                    course_id=course_id,
+                    course_code=course_code,
+                    course_title=course_title,
+                    moodle_course_id=archive.course.course_id,
+                )
+                materials.append(material)
+        else:
+            material = {
+                "id": activity.module_id,
+                "title": activity.name,
+                "activity_name": activity.name,
+                "section_title": section_titles.get(activity.module_id),
+                "category": activity.category,
+                "material_type": None,
+                "relative_path": None,
+                "source_url": str(activity.url) if activity.url else None,
+                "content_type": None,
+                "size_bytes": None,
+                "downloaded_at": None,
+                "text_available": False,
+                "text_path": None,
+                "exists": False,
+                "change_action": None,
+                "download_status": activity.download_status,
+                "download_error": activity.download_error,
+            }
+            material["agent_prompt"] = _material_summary_prompt(
+                resources,
+                material,
+                course_id=course_id,
+                course_code=course_code,
+                course_title=course_title,
+                moodle_course_id=archive.course.course_id,
             )
+            materials.append(material)
+
+    unused = {material["id"]: material for material in materials}
+    for section in record.material_sections if record is not None else []:
+        values: list[dict[str, Any]] = []
+        for reference in section.materials:
+            matched = _match_archive_material(reference, unused.values())
+            if matched is None:
+                continue
+            unused.pop(matched["id"], None)
+            classified = dict(matched)
+            classified["material_section"] = section.title
+            classified["material_type"] = reference.material_type
+            classified["classification_note"] = reference.note
+            values.append(classified)
+        if values:
+            grouped["sections"].append(
+                {
+                    "title": section.title,
+                    "description": section.description,
+                    "materials": values,
+                }
+            )
+    grouped["unclassified"] = list(unused.values())
+    grouped["all"] = materials
     return grouped
 
 
-def _material_type(
-    activity_name: str,
-    filename: str,
-    category: str,
-    section_title: str,
+def _match_archive_material(reference: Any, candidates: Any) -> dict[str, Any] | None:
+    values = list(candidates)
+    if reference.relative_path:
+        match = next(
+            (
+                material
+                for material in values
+                if material.get("relative_path") == reference.relative_path
+            ),
+            None,
+        )
+        if match is not None:
+            return match
+    if reference.url:
+        match = next(
+            (
+                material
+                for material in values
+                if material.get("source_url") == reference.url
+            ),
+            None,
+        )
+        if match is not None:
+            return match
+    title = reference.title.strip().casefold()
+    title_matches = [
+        material
+        for material in values
+        if str(material.get("title") or "").strip().casefold() == title
+    ]
+    return title_matches[0] if len(title_matches) == 1 else None
+
+
+def _recent_lecture_materials_prompt(
+    resources: Path,
+    *,
+    course_id: str,
+    moodle_course_id: str | None,
+    course_code: str,
+    course_title: str,
 ) -> str:
-    value = f"{activity_name} {filename} {section_title}".casefold()
-    if category in {"assignment", "quiz"}:
-        return "assessment"
-    if category in {"announcement", "forum"}:
-        return "announcement"
-    rules = (
-        ("exercises", ("exercise", "problem set", "worksheet", "practice", "习题", "练习")),
-        ("tutorial", ("tutorial", "tut ", "workshop", "导修", "辅导课")),
-        ("notes", ("note", "handout", "summary", "formula sheet", "讲义", "笔记")),
-        ("lecture", ("lecture", "lect ", "slide", "课件", "课堂")),
-        ("reading", ("reading", "article", "paper", "textbook", "阅读", "论文")),
-        (
-            "assessment",
-            ("assessment", "assignment", "quiz", "exam", "project", "report", "评核", "作业", "测验", "考试"),
-        ),
-        (
-            "course_information",
-            ("introduction", "overview", "syllabus", "course outline", "grading", "schedule", "timetable", "welcome", "简介", "介绍", "课程大纲", "评分", "安排"),
-        ),
-        ("announcement", ("announcement", "notice", "公告", "通知")),
+    moodle_scope = moodle_course_id or course_id
+    return "\n".join(
+        [
+            "请定位本机 HIQS 项目并完整阅读 src/AI_Skills/SKILL.md。",
+            f"课程：{course_code} · {course_title}",
+            f"课程记录 ID：{course_id}；Moodle 课程 ID：{moodle_scope}",
+            f"资料目录：{resources}",
+            "以 Asia/Hong_Kong 当前日期为准，从 information.json 的课程活动和重复日程中确定最近一次已经发生的 Lecture；若标题没有使用 Lecture 字样，请结合课程类型、时间和来源判断并说明依据。",
+            f"运行 hsas information show，并运行 hsas materials list --course {moodle_scope}。读取该 Lecture 的主题、周次、说明和来源，再检查相关课件的文本 sidecar 或原文件。",
+            "列出与该 Lecture 最相关的课件，按相关性排序；对每项说明匹配依据、相对路径以及相关页码或 slide。不要仅根据文件名判断，也不要改写 information.json。",
+            "如果无法确认最近 Lecture 或找不到可靠关联，请明确指出缺少的证据。",
+        ]
     )
-    for material_type, markers in rules:
-        if any(marker in value for marker in markers):
-            return material_type
-    if filename.casefold().endswith((".ppt", ".pptx")):
-        return "lecture"
-    return "other"
 
 
-def _material_bucket(material_type: str) -> str:
-    if material_type in {"assessment", "course_information", "announcement"}:
-        return "information"
-    return "learning"
+def _material_summary_prompt(
+    resources: Path,
+    material: dict[str, Any],
+    *,
+    course_id: str,
+    course_code: str,
+    course_title: str,
+    moodle_course_id: str,
+) -> str:
+    locator = material.get("relative_path") or material.get("source_url") or material["id"]
+    text_path = material.get("text_path") or "尚无文本 sidecar，请检查 OCR/解析状态"
+    return "\n".join(
+        [
+            "请定位本机 HIQS 项目并完整阅读 src/AI_Skills/SKILL.md。",
+            f"课程：{course_code} · {course_title}",
+            f"课程记录 ID：{course_id}；Moodle 课程 ID：{moodle_course_id}",
+            f"课件：{material['title']}",
+            f"Moodle 活动：{material.get('activity_name') or '未标明'}",
+            f"课件位置：{locator}",
+            f"文本副本：{text_path}",
+            f"资料目录：{resources}",
+            "请定位并阅读这份课件；必要时检查原文件、文本 sidecar 和 OCR 状态。用中文总结其主题结构、关键概念、公式或要求，并标注相关页码或 slide。",
+            "同时说明它与课程活动或相邻课件的关系。仅根据实际内容总结；证据不足时明确说明，不要改写 information.json。",
+        ]
+    )

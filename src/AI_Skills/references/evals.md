@@ -174,6 +174,23 @@ uncertainty visible.
   and advance the checkpoint only after a successful reviewed information write
   or explicit zero-change acknowledgement.
 
+### 31. Free-form course material sections
+
+- Given: a course archive contains files and links whose useful organization is
+  specific to that course.
+- Expected: read every current material, create concise evidence-derived
+  `courses[].material_sections` titles without selecting from a fixed taxonomy,
+  assign every material exactly once by stable path or URL, and leave uncertain
+  entries visibly pending instead of inferring a category from the filename.
+
+### 32. Prompt-driven material review
+
+- Given: the student copies a course-level recent-Lecture prompt or a prompt next
+  to one material.
+- Expected: resolve the exact course and local file, inspect the canonical
+  schedule plus text sidecars or original content, cite pages or slides, state
+  uncertainty, and avoid information writes unless separately requested.
+
 ### 31. Single meeting exception
 
 - Given: an announcement cancels one class and moves another occurrence to a new

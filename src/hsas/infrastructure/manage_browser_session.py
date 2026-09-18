@@ -43,7 +43,9 @@ class BrowserSyncSession:
     sis: SisCourseInfoBrowserGateway
     planner: ClassPlannerBrowserGateway
     _moodle_catalog_ready: asyncio.Event = field(default_factory=asyncio.Event)
+    _moodle_catalog_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _available_by_code: dict[str, CourseCatalogEntry] = field(default_factory=dict)
+    _moodle_catalog_error: Exception | None = None
 
     @staticmethod
     def _report(
@@ -79,16 +81,7 @@ class BrowserSyncSession:
         course_results: list[dict[str, object]] = []
         completed = 0
         processed = 0
-        try:
-            catalog = await self.moodle.list_courses_in_context(self.context)
-            if catalog.login_status != "logged in":
-                raise RuntimeError(catalog.login_error or "Moodle session is not authenticated")
-            for entry in catalog.available:
-                identity = course_identity(entry.title)
-                if identity is not None and entry.course_id.isdigit():
-                    self._available_by_code.setdefault(identity[0], entry)
-        finally:
-            self._moodle_catalog_ready.set()
+        await self._load_moodle_catalog()
 
         for course in courses:
             if cancel_requested is not None and cancel_requested():
@@ -180,7 +173,7 @@ class BrowserSyncSession:
         progress_callback: ProgressCallback | None,
         cancel_requested: CancelRequested | None,
     ):
-        await self._moodle_catalog_ready.wait()
+        await self._load_moodle_catalog()
         selected = []
         for course in courses:
             entry = self._available_by_code.get(course["course_code"])
@@ -225,6 +218,31 @@ class BrowserSyncSession:
         )
         return result
 
+    async def _load_moodle_catalog(self) -> None:
+        """Load the shared Moodle catalogue once, including for SIS-only retries."""
+        if self._moodle_catalog_ready.is_set():
+            if self._moodle_catalog_error is not None:
+                raise self._moodle_catalog_error
+            return
+        async with self._moodle_catalog_lock:
+            if not self._moodle_catalog_ready.is_set():
+                try:
+                    catalog = await self.moodle.list_courses_in_context(self.context)
+                    if catalog.login_status != "logged in":
+                        raise RuntimeError(
+                            catalog.login_error or "Moodle session is not authenticated"
+                        )
+                    for entry in catalog.available:
+                        identity = course_identity(entry.title)
+                        if identity is not None and entry.course_id.isdigit():
+                            self._available_by_code.setdefault(identity[0], entry)
+                except Exception as exc:
+                    self._moodle_catalog_error = exc
+                finally:
+                    self._moodle_catalog_ready.set()
+        if self._moodle_catalog_error is not None:
+            raise self._moodle_catalog_error
+
     async def sync_timetable(
         self,
         *,
@@ -233,7 +251,10 @@ class BrowserSyncSession:
     ):
         if cancel_requested is not None and cancel_requested():
             return None
-        result = await self.planner.sync_in_context(self.context)
+        result = await self.planner.sync_in_context(
+            self.context,
+            cancel_requested=cancel_requested,
+        )
         self._report(
             progress_callback,
             "timetable",

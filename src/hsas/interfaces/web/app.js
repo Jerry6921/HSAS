@@ -14,30 +14,6 @@ const categoryLabels = {
   other: "其他",
 };
 
-const materialTypeLabels = {
-  lecture: "Lecture",
-  tutorial: "Tutorial",
-  notes: "Notes",
-  exercises: "Exercises",
-  reading: "Reading",
-  assessment: "Assessment",
-  course_information: "Course Information",
-  announcement: "Announcements",
-  other: "Other",
-};
-
-const materialTypeOrder = [
-  "lecture",
-  "tutorial",
-  "notes",
-  "exercises",
-  "reading",
-  "assessment",
-  "course_information",
-  "announcement",
-  "other",
-];
-
 const state = {
   data: null,
   currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -316,10 +292,20 @@ function setView(view) {
   byId("home-view").classList.toggle("hidden", view !== "home");
   byId("calendar-view").classList.toggle("hidden", view !== "calendar");
   byId("course-overview-view").classList.toggle("hidden", view !== "course");
+  byId("reconciliation-view").classList.toggle("hidden", view !== "reconciliation");
   byId("show-home").classList.toggle("active", view === "home");
   byId("show-calendar").classList.toggle("active", view === "calendar");
-  byId("query-controls").classList.toggle("hidden", view === "home");
+  byId("show-reconciliation").classList.toggle("active", view === "reconciliation");
+  byId("query-controls").classList.toggle("hidden", view === "home" || view === "reconciliation");
   renderCourseNavigation();
+}
+
+function showReconciliation() {
+  setView("reconciliation");
+  byId("page-eyebrow").textContent = "SOURCE RECONCILIATION";
+  byId("page-title").textContent = "课程来源对账";
+  byId("data-caption").textContent = "以当前注册课程为基准，查看每个来源与本地信息库的覆盖情况。";
+  renderReconciliation();
 }
 
 function showHome() {
@@ -485,6 +471,65 @@ function renderHomeFocus() {
   byId("next-up-end").textContent = next.endTime ? `— ${next.endTime.slice(0, 5)}` : categoryLabels[next.item.category] || "查看详情";
 }
 
+function renderReviewClosure() {
+  const closure = state.data?.review_closure;
+  if (!closure) return;
+  const stages = byId("closure-stages");
+  stages.replaceChildren();
+  for (const stage of closure.stages || []) {
+    const row = element("div", `closure-stage ${stage.state}`);
+    row.append(
+      element("i", "closure-dot"),
+      element("strong", "", stage.label),
+      element("span", "", stage.state === "complete" ? "已完成" : stage.count ? `${stage.count} 项待处理` : "待处理"),
+    );
+    stages.append(row);
+  }
+  const retryTasks = closure.retry_tasks || [];
+  const retryButton = byId("retry-failures");
+  retryButton.classList.toggle("hidden", retryTasks.length === 0);
+  retryButton.disabled = retryTasks.length === 0;
+  const summary = byId("retry-summary");
+  summary.classList.toggle("hidden", retryTasks.length === 0);
+  summary.textContent = retryTasks.length
+    ? `${retryTasks.length} 个失败项目可精确重试：${retryTasks.map((task) => `${task.source}${task.course_code ? ` · ${task.course_code}` : ""}`).join("、")}`
+    : "";
+}
+
+function renderReconciliation() {
+  const reconciliation = state.data?.course_reconciliation;
+  const container = byId("reconciliation-list");
+  container.replaceChildren();
+  if (!reconciliation) return;
+  const labels = reconciliation.source_labels || {};
+  const attention = reconciliation.counts?.attention || 0;
+  byId("reconciliation-count").textContent = attention ? `${attention} 门待处理` : "来源已对齐";
+  for (const course of reconciliation.rows || []) {
+    const card = element("article", `reconciliation-card ${course.state}`);
+    const heading = element("div", "reconciliation-course");
+    const copy = element("div");
+    copy.append(element("strong", "", course.course_code), element("span", "", course.title));
+    const stateLabel = course.state === "complete" ? "已对齐" : course.state === "legacy" ? "历史资料" : "需要处理";
+    heading.append(copy, element("span", `reconciliation-state ${course.state}`, stateLabel));
+    const sources = element("div", "reconciliation-sources");
+    for (const [key, label] of Object.entries(labels)) {
+      const present = Boolean(course.sources?.[key]);
+      const source = element("div", `source-check ${present ? "present" : "missing"}`);
+      source.append(element("i", ""), element("span", "", label), element("strong", "", present ? "已有" : "缺失"));
+      sources.append(source);
+    }
+    const note = course.state === "legacy"
+      ? "当前注册课程中已不存在；保留为历史资料。"
+      : course.pending_information_write
+        ? "来源已采集，等待 Agent 整理并写入本地信息库。"
+        : course.missing_sources?.length
+          ? `待补来源：${course.missing_sources.map((key) => labels[key] || key).join("、")}`
+          : "各课程来源与本地信息库均有记录。";
+    card.append(heading, sources, element("p", "reconciliation-note", note));
+    container.append(card);
+  }
+}
+
 function appendOverviewList(parent, values, emptyText) {
   if (!values || !values.length) {
     parent.append(element("p", "overview-empty", emptyText));
@@ -524,61 +569,47 @@ function formatBytes(value) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function renderMaterialGroup(parent, title, subtitle, materials) {
-  const section = element("section", "materials-group");
-  const heading = element("div", "materials-heading");
-  const headingCopy = element("div");
-  headingCopy.append(element("h3", "", title), element("p", "", subtitle));
-  heading.append(headingCopy, element("span", "material-count", `${materials.length} 项`));
+function renderMaterialSection(parent, title, description, materials, className = "") {
+  const section = element("section", `material-subgroup ${className}`.trim());
+  const heading = element("div", "material-subgroup-heading");
+  const copy = element("div");
+  copy.append(element("h3", "", title));
+  if (description) copy.append(element("p", "", description));
+  heading.append(copy, element("span", "", `${materials.length} 项`));
   section.append(heading);
-  if (!materials.length) {
-    const list = element("div", "materials-list");
-    list.append(element("p", "overview-empty", "当前 Moodle 快照中没有此类资料。"));
-    section.append(list);
-  }
-  const grouped = new Map();
-  for (const material of materials) {
-    const type = material.material_type || "other";
-    if (!grouped.has(type)) grouped.set(type, []);
-    grouped.get(type).push(material);
-  }
-  for (const type of materialTypeOrder.filter((value) => grouped.has(value))) {
-    const subgroup = element("section", "material-subgroup");
-    const values = grouped.get(type);
-    const subgroupHeading = element("div", "material-subgroup-heading");
-    subgroupHeading.append(
-      element("h4", "", materialTypeLabels[type] || type),
-      element("span", "", `${values.length} 项`),
-    );
-    subgroup.append(subgroupHeading);
-    const list = element("div", "materials-list");
-    for (const material of values) renderMaterialCard(list, material);
-    subgroup.append(list);
-    section.append(subgroup);
-  }
+  const list = element("div", "materials-list");
+  for (const material of materials) renderMaterialCard(list, material);
+  section.append(list);
   parent.append(section);
+}
+
+function allCourseMaterials(course) {
+  const materials = course.materials || {};
+  const classified = (materials.sections || []).flatMap((section) => section.materials || []);
+  return [...classified, ...(materials.unclassified || [])];
 }
 
 function renderMaterialCard(list, material) {
     const hasLocal = Boolean(material.relative_path && material.exists);
     const remoteUrl = safeHttpUrl(material.source_url);
     const canOpen = Boolean(hasLocal || remoteUrl);
-    const card = element(hasLocal ? "button" : remoteUrl ? "a" : "article", "material-card");
+    const card = element("article", "material-card");
+    const main = element(hasLocal ? "button" : remoteUrl ? "a" : "div", "material-card-main");
     if (hasLocal) {
-      card.type = "button";
-      card.addEventListener("click", () => openSourcePreview(material));
+      main.type = "button";
+      main.addEventListener("click", () => openSourcePreview(material));
     } else if (remoteUrl) {
-      card.href = remoteUrl;
-      card.target = "_blank";
-      card.rel = "noopener noreferrer";
+      main.href = remoteUrl;
+      main.target = "_blank";
+      main.rel = "noopener noreferrer";
     }
     const icon = element("span", "material-icon", material.relative_path ? "FILE" : "LINK");
     const copy = element("div", "material-copy");
     const titleLine = element("div", "material-title-line");
-    titleLine.append(
-      element("strong", "", material.title),
-      element("span", "material-type-badge", materialTypeLabels[material.material_type] || "Other"),
-    );
+    titleLine.append(element("strong", "", material.title));
+    if (material.material_type) {
+      titleLine.append(element("span", "material-type-badge", material.material_type));
+    }
     if (material.change_action) {
       const labels = { baseline: "首次待整理", added: "新增", modified: "已更新", removed: "已删除" };
       titleLine.append(element("span", "update-badge", labels[material.change_action] || "有变化"));
@@ -591,7 +622,12 @@ function renderMaterialCard(list, material) {
     ].filter(Boolean).join(" · ");
     copy.append(titleLine, element("small", "", meta || categoryLabels[material.category] || material.category));
     if (material.download_error) copy.append(element("small", "material-error", material.download_error));
-    card.append(icon, copy, element("span", "material-open", canOpen ? "预览" : "—"));
+    main.append(icon, copy, element("span", "material-open", canOpen ? "预览" : "—"));
+    const promptButton = element("button", "material-prompt-copy", "复制 AI 提示词");
+    promptButton.type = "button";
+    promptButton.disabled = !material.agent_prompt;
+    promptButton.addEventListener("click", () => copyText(material.agent_prompt, `“${material.title}”定位与总结提示词已复制。`));
+    card.append(main, promptButton);
     list.append(card);
 }
 
@@ -718,10 +754,34 @@ function renderCourseOverview() {
   const counts = course.moodle
     ? `${course.moodle.downloaded_file_count} 个本地文件 · ${course.moodle.activity_count} 个 Moodle 项目`
     : "尚未同步 Moodle 快照";
-  materialHeading.append(element("span", "archive-summary", counts));
+  const materialActions = element("div", "course-material-actions");
+  materialActions.append(element("span", "archive-summary", counts));
+  const recentPrompt = element("button", "button compact", "复制最近 Lecture 提示词");
+  recentPrompt.type = "button";
+  recentPrompt.disabled = !course.agent_prompts?.recent_lecture_materials;
+  recentPrompt.addEventListener("click", () => copyText(
+    course.agent_prompts?.recent_lecture_materials,
+    `${course.code || course.title} 最近 Lecture 课件提示词已复制。`,
+  ));
+  materialActions.append(recentPrompt);
+  materialHeading.append(materialActions);
   materials.append(materialHeading);
-  renderMaterialGroup(materials, "课程学习材料", "Lecture slides、notes、readings 与其他学习内容", course.materials?.learning || []);
-  renderMaterialGroup(materials, "课程信息", "Introduction、assessment、课程安排与公告", course.materials?.information || []);
+  for (const section of course.materials?.sections || []) {
+    renderMaterialSection(materials, section.title, section.description, section.materials || []);
+  }
+  const unclassified = course.materials?.unclassified || [];
+  if (unclassified.length) {
+    renderMaterialSection(
+      materials,
+      "待 AI 分类",
+      "这些资料尚未写入 AI 自由命名的课程栏位。",
+      unclassified,
+      "material-unclassified",
+    );
+  }
+  if (!allCourseMaterials(course).length) {
+    materials.append(element("p", "overview-empty", "当前 Moodle 快照中没有课程资料。"));
+  }
   container.append(materials);
 }
 
@@ -1120,7 +1180,9 @@ function renderDetail(item, occurrenceKey = null) {
     block.append(element("h3", "", "相关学习材料"));
     for (const material of item.materials) {
       const card = sourcePreviewButton(material);
-      card.prepend(element("span", "material-type-badge", materialTypeLabels[material.material_type] || "Other"));
+      if (material.material_type) {
+        card.prepend(element("span", "material-type-badge", material.material_type));
+      }
       block.append(card);
     }
     panel.append(block);
@@ -1286,11 +1348,11 @@ function localSearchRecords() {
     });
   }
   for (const course of state.data.courses) {
-    for (const material of [...(course.materials?.learning || []), ...(course.materials?.information || [])]) {
+    for (const material of allCourseMaterials(course)) {
       records.push({
         kind: "material",
         title: material.title,
-        subtitle: `${course.code || course.title} · ${materialTypeLabels[material.material_type] || material.material_type}`,
+        subtitle: `${course.code || course.title} · ${material.material_section || "待 AI 分类"}`,
         searchable: [material.title, material.activity_name, material.section_title, course.code, course.title].filter(Boolean).join(" "),
         value: material,
       });
@@ -1350,11 +1412,48 @@ function renderDataViews() {
   renderUnscheduled();
   renderUpdates();
   renderHomeSearch();
+  renderReviewClosure();
+  renderReconciliation();
   if (state.selectedItemId) {
     const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
     if (selected) renderDetail(selected, state.selectedDateKey);
   }
   if (state.view === "course") renderCourseOverview();
+}
+
+async function copyText(value, successMessage) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_error) {
+    const input = document.createElement("textarea");
+    input.value = value;
+    document.body.append(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
+  }
+  setOperationState(false, successMessage);
+}
+
+async function copyAgentPrompt() {
+  const prompt = state.data?.review_closure?.agent_prompt;
+  await copyText(prompt, "Agent 整理指令已复制。同步完成后可直接粘贴给 Agent。 ");
+}
+
+async function retryFailures() {
+  const tasks = state.data?.review_closure?.retry_tasks || [];
+  if (!tasks.length) return;
+  const confirmed = window.confirm(`只重试最近失败的 ${tasks.length} 个课程或来源；已成功项目不会重复同步。继续吗？`);
+  if (!confirmed) return;
+  const job = await runLocalMutation(
+    "/api/sync/retry",
+    { confirmed: true },
+    "正在准备精确重试…",
+  );
+  if (!job) return;
+  renderSyncProgress(job);
+  await pollCourseSync(job.job_id);
 }
 
 async function loadInformation() {
@@ -1502,8 +1601,11 @@ async function pollCourseSync(jobId = null, options = {}) {
       const result = job.result || {};
       const pending = result.pending_review?.change_count || 0;
       const sourceFailures = Array.isArray(result.source_failures) ? result.source_failures.length : 0;
+      const retryTasks = Array.isArray(result.retry_tasks) ? result.retry_tasks.length : 0;
       const message = job.state === "completed"
-        ? `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门 Moodle 课程成功。${sourceFailures ? `${sourceFailures} 个来源需要重试。` : ""}待 AI 整理 ${pending} 项。`
+        ? result.retry_mode
+          ? `精确重试完成。${retryTasks ? `仍有 ${retryTasks} 个失败项目。` : "全部失败项目已恢复。"}待 AI 整理 ${pending} 项。`
+          : `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门 Moodle 课程成功。${retryTasks ? `${retryTasks} 个项目需要重试。` : sourceFailures ? `${sourceFailures} 个来源需要重试。` : ""}待 AI 整理 ${pending} 项。`
         : job.state === "cancelled"
           ? `同步已取消；已完成 ${result.succeeded_course_count || 0} 门课程，已发布资料已保留。`
           : `同步失败：${job.error || "上一份有效资料已保留"}`;
@@ -1663,10 +1765,13 @@ byId("next-up-card").addEventListener("click", () => {
   if (item) renderDetail(item, card.dataset.dateKey || null);
 });
 byId("show-calendar").addEventListener("click", showCalendar);
+byId("show-reconciliation").addEventListener("click", showReconciliation);
 byId("reload-data").addEventListener("click", async () => {
   await loadInformation();
 });
 byId("start-workflow").addEventListener("click", startWorkflow);
+byId("retry-failures").addEventListener("click", retryFailures);
+byId("copy-agent-prompt").addEventListener("click", copyAgentPrompt);
 byId("cancel-sync").addEventListener("click", cancelCourseSync);
 byId("run-ocr").addEventListener("click", processOcrQueue);
 byId("close-preview").addEventListener("click", closeSourcePreview);

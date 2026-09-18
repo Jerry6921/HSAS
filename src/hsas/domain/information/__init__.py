@@ -1,6 +1,7 @@
 """Validated course-information contracts for AI-authored data."""
 
 from .define_information import (
+    CourseMaterialSection,
     CourseRecord,
     InformationItem,
     InformationStore,
@@ -14,6 +15,7 @@ from .define_inbox import PersonalInbox, PersonalInboxEntry
 
 __all__ = [
     "CourseRecord",
+    "CourseMaterialSection",
     "InformationItem",
     "InformationStore",
     "InformationUpdate",

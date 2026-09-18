@@ -85,6 +85,12 @@ directly belongs to its week, topic, Moodle activity, or documented section.
 Keep `sources` for evidence supporting the structured fact and `materials` for
 resources the student can open while viewing the activity.
 
+Use `courses[].material_sections` for the complete course archive. Read the
+current material manifest and choose concise section titles from the actual
+course organization and content. Do not start from a fixed list of material
+types. Place each current material in exactly one section using its stable
+`relative_path` or `url`; leave uncertain material pending rather than guessing.
+
 If a tutorial time applies only to one group, identify the group in the title or
 description. Add the student's selected group to their personal calendar; use a
 full course timetable view when the user requests every available group.

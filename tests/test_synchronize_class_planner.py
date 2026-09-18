@@ -1,10 +1,17 @@
+import asyncio
 from pathlib import Path
 
 from hsas.infrastructure.class_planner.fetch_calendar import (
+    _calendar_payload_from_app,
+    _is_authenticated_portal_page,
+    _is_calendar_url,
+    _is_class_planner_app,
     _is_portal_bridge,
     _is_portal_resume_page,
+    _resume_after_portal_login,
 )
 from hsas.infrastructure.class_planner.synchronize_calendar import (
+    ClassPlannerBrowserGateway,
     _diff,
     _sanitize,
     _summary,
@@ -46,6 +53,90 @@ def test_only_official_hku_portal_aad_bridge_triggers_resume() -> None:
     assert _is_portal_bridge("https://example.invalid/cas/aad") is False
 
 
+def test_current_and_legacy_calendar_api_urls_are_recognized() -> None:
+    assert _is_calendar_url(
+        "https://api.hku.hk/sis/app/cspa/calendar?email=user%40connect.hku.hk&strm=4261"
+    )
+    assert _is_calendar_url(
+        "https://class-planner.hku.hk/api/calendar?email=user%40connect.hku.hk&strm=4261"
+    )
+    assert not _is_calendar_url("https://api.hku.hk/sis/app/cspa/subclasses/terms")
+    assert not _is_calendar_url("https://example.invalid/sis/app/cspa/calendar")
+
+
+def test_authenticated_class_planner_app_is_not_a_portal_resume_page() -> None:
+    assert _is_class_planner_app("https://class-planner.hku.hk/app") is True
+    assert _is_class_planner_app("https://class-planner.hku.hk/app/") is True
+    assert _is_class_planner_app("https://class-planner.hku.hk/api/calendar") is False
+    assert _is_class_planner_app("https://hkuportal.hku.hk/app") is False
+
+
+def test_calendar_payload_is_recovered_inside_authenticated_app() -> None:
+    class Page:
+        url = "https://class-planner.hku.hk/app"
+        evaluated_script = ""
+
+        async def evaluate(self, script: str) -> dict:
+            self.evaluated_script = script
+            return payload()
+
+    page = Page()
+    result = asyncio.run(_calendar_payload_from_app(page))
+    assert result == payload()
+    assert "/api/calendar" in page.evaluated_script
+    assert "credentials: \"include\"" in page.evaluated_script
+
+
+def test_calendar_payload_recovery_ignores_non_app_pages() -> None:
+    class Page:
+        url = "https://hkuportal.hku.hk/login.html"
+
+        async def evaluate(self, _script: str) -> dict:
+            raise AssertionError("non-app pages must not be inspected")
+
+    assert asyncio.run(_calendar_payload_from_app(Page())) is None
+
+
+def test_authenticated_app_reloads_only_once_to_retrigger_calendar(
+    monkeypatch,
+) -> None:
+    class Page:
+        url = "https://class-planner.hku.hk/app"
+        reload_count = 0
+
+        async def reload(self, **_kwargs) -> None:
+            self.reload_count += 1
+            if not future.done():
+                future.set_result(payload())
+
+    class Context:
+        def __init__(self, page: Page) -> None:
+            self.pages = [page]
+
+        async def cookies(self, *_args) -> list:
+            return []
+
+    async def run() -> tuple[dict, int]:
+        nonlocal future
+        future = asyncio.get_running_loop().create_future()
+        page = Page()
+        result = await _resume_after_portal_login(
+            Context(page),
+            future,
+            timeout_seconds=1,
+        )
+        return result, page.reload_count
+
+    future = None
+    monkeypatch.setattr(
+        "hsas.infrastructure.class_planner.fetch_calendar.APP_RETRY_DELAY_SECONDS",
+        0,
+    )
+    result, reload_count = asyncio.run(run())
+    assert result == payload()
+    assert reload_count == 1
+
+
 def test_authenticated_portal_pages_return_to_class_planner() -> None:
     assert _is_portal_resume_page("https://hkuportal.hku.hk/cas/aad") is True
     assert _is_portal_resume_page("https://hkuportal.hku.hk/") is True
@@ -53,6 +144,46 @@ def test_authenticated_portal_pages_return_to_class_planner() -> None:
     assert _is_portal_resume_page("https://hkuportal.hku.hk/login.html") is False
     assert _is_portal_resume_page("https://hkuportal.hku.hk/cas/signin") is False
     assert _is_portal_resume_page("https://login.microsoftonline.com/") is False
+
+
+def test_authenticated_portal_login_url_can_resume_after_login() -> None:
+    class Locator:
+        def __init__(self, selector: str) -> None:
+            self.selector = selector
+
+        async def count(self) -> int:
+            return 0
+
+        async def inner_text(self, **_kwargs) -> str:
+            return "Welcome to HKU Portal · My Favourites · Log out"
+
+    class Page:
+        url = "https://hkuportal.hku.hk/login.html"
+
+        def locator(self, selector: str) -> Locator:
+            return Locator(selector)
+
+    assert asyncio.run(_is_authenticated_portal_page(Page())) is True
+
+
+def test_portal_login_persists_captured_calendar_before_closing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    async def capture(*_args, **_kwargs):
+        return payload()
+
+    monkeypatch.setattr(
+        "hsas.infrastructure.class_planner.synchronize_calendar.capture_calendar_response",
+        capture,
+    )
+
+    result = ClassPlannerBrowserGateway(tmp_path).login_until_ready()
+
+    assert result.status == "logged_in"
+    assert result.course_count == 1
+    assert (tmp_path / "class-planner" / "latest.json").is_file()
+    assert class_planner_status(tmp_path)["meeting_count"] == 1
 
 
 def test_class_planner_snapshot_is_summarized_and_sanitized() -> None:

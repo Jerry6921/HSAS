@@ -37,17 +37,6 @@ ItemCategory = Literal[
     "other",
 ]
 DateStatus = Literal["confirmed", "tentative", "unknown"]
-RelatedMaterialType = Literal[
-    "lecture",
-    "tutorial",
-    "notes",
-    "exercises",
-    "reading",
-    "assessment",
-    "course_information",
-    "announcement",
-    "other",
-]
 RecurrenceExceptionStatus = Literal["cancelled", "changed"]
 
 
@@ -86,7 +75,12 @@ class RelatedMaterial(StrictModel):
     """A locally previewable learning resource attached to a calendar item."""
 
     title: str = Field(min_length=1)
-    material_type: RelatedMaterialType = "other"
+    material_type: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        description="Optional AI-authored free-text role; no fixed taxonomy",
+    )
     url: str | None = None
     relative_path: str | None = None
     page_numbers: list[int] = Field(default_factory=list)
@@ -98,6 +92,14 @@ class RelatedMaterial(StrictModel):
         if any(page < 1 for page in value):
             raise ValueError("page_numbers must use one-based positive integers")
         return list(dict.fromkeys(value))
+
+
+class CourseMaterialSection(StrictModel):
+    """An AI-authored, freely named shelf in a course's material archive."""
+
+    title: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    materials: list[RelatedMaterial] = Field(default_factory=list)
 
 
 class CourseRecord(StrictModel):
@@ -133,6 +135,13 @@ class CourseRecord(StrictModel):
     policies: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     sources: list[SourceReference] = Field(default_factory=list)
+    material_sections: list[CourseMaterialSection] = Field(
+        default_factory=list,
+        description=(
+            "AI-authored free-form material shelves. Section titles are inferred "
+            "from course evidence rather than selected from a fixed list."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_teaching_period(self) -> "CourseRecord":
@@ -142,6 +151,22 @@ class CourseRecord(StrictModel):
             and self.ends_on < self.starts_on
         ):
             raise ValueError("ends_on must not be earlier than starts_on")
+        section_titles = [section.title.strip().casefold() for section in self.material_sections]
+        if len(section_titles) != len(set(section_titles)):
+            raise ValueError("material section titles must be unique within a course")
+        seen_materials: set[str] = set()
+        for section in self.material_sections:
+            for material in section.materials:
+                identity = (
+                    material.relative_path
+                    or material.url
+                    or f"title:{material.title.strip().casefold()}"
+                )
+                if identity in seen_materials:
+                    raise ValueError(
+                        "a course material cannot appear in more than one material section"
+                    )
+                seen_materials.add(identity)
         return self
 
 

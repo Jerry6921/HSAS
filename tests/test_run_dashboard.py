@@ -21,7 +21,6 @@ from hsas.interfaces.run_dashboard import (
     DashboardError,
     DashboardRequestHandler,
     DashboardService,
-    _material_type,
     _load_dashboard_assets,
     build_dashboard_server,
 )
@@ -59,6 +58,10 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="course-overview-view"' in loaded["/"][0]
     assert b'id="course-navigation"' in loaded["/"][0]
     assert b'id="show-home"' in loaded["/"][0]
+    assert b'id="show-reconciliation"' in loaded["/"][0]
+    assert b'id="reconciliation-view"' in loaded["/"][0]
+    assert b'id="copy-agent-prompt"' in loaded["/"][0]
+    assert b'id="retry-failures"' in loaded["/"][0]
     assert b'id="updates-list"' in loaded["/"][0]
     assert b'id="source-preview"' in loaded["/"][0]
     assert b'id="item-detail-dialog"' in loaded["/"][0]
@@ -74,6 +77,7 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'"/api/sync/start"' in loaded["/assets/app.js"][0]
     assert b'"/api/sync/status"' in loaded["/assets/app.js"][0]
     assert b'"/api/sync/cancel"' in loaded["/assets/app.js"][0]
+    assert b'"/api/sync/retry"' in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("hidden", !running)' in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("cancelling", cancelling)' in loaded["/assets/app.js"][0]
     assert b'"/api/moodle/status"' not in loaded["/assets/app.js"][0]
@@ -86,11 +90,13 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="course-manager-select-all"' in loaded["/"][0]
     assert b'id="delete-selected-courses"' in loaded["/"][0]
     assert b"overflow-y: auto" in loaded["/assets/styles.css"][0]
-    assert b"materialTypeLabels" in loaded["/assets/app.js"][0]
+    assert "复制最近 Lecture 提示词".encode() in loaded["/assets/app.js"][0]
+    assert "复制 AI 提示词".encode() in loaded["/assets/app.js"][0]
+    assert "待 AI 分类".encode() in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
     assert b"closeItemDetail" in loaded["/assets/app.js"][0]
     assert b'window.open(url, "_blank", "noopener,noreferrer")' in loaded["/assets/app.js"][0]
-    assert b'card.target = "_blank"' in loaded["/assets/app.js"][0]
+    assert b'main.target = "_blank"' in loaded["/assets/app.js"][0]
     assert "本轮 ${changeCount} 项差异".encode() not in loaded["/assets/app.js"][0]
     assert b"createRipple" in loaded["/assets/ripple.js"][0]
     assert b"CanvasUIRipple" in loaded["/assets/ripple.js"][0]
@@ -140,6 +146,8 @@ def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path)
     assert snapshot["personal_inbox"]["pending_count"] == 0
     assert snapshot["class_planner"]["available"] is False
     assert snapshot["moodle_session"]["login_status"] == "login_required"
+    assert snapshot["review_closure"]["agent_prompt"].startswith("请处理本机 HIQS")
+    assert snapshot["course_reconciliation"]["counts"]["legacy"] == 1
 
 
 def test_course_management_adds_and_deletes_canonical_course_data(tmp_path: Path) -> None:
@@ -399,7 +407,7 @@ def test_course_workflow_reports_progress_and_can_cancel(
     monkeypatch,
 ) -> None:
     class EnrollmentGateway:
-        def sync(self, *, auto_login):
+        def sync(self, *, auto_login, **_kwargs):
             time.sleep(0.02)
             return {
                 "term": "2026-27 Semester 1",
@@ -414,8 +422,10 @@ def test_course_workflow_reports_progress_and_can_cancel(
             }
 
     class PlannerService:
-        def login_until_ready(self):
-            time.sleep(0.02)
+        def login_until_ready(self, *, cancel_requested):
+            while not cancel_requested():
+                time.sleep(0.005)
+            raise InterruptedError("cancelled")
 
     monkeypatch.setattr(
         "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
@@ -428,6 +438,7 @@ def test_course_workflow_reports_progress_and_can_cancel(
     service = DashboardService(tmp_path)
     started = service.start_course_sync({"confirmed": True})
     assert started["state"] == "running"
+    cancelled_at = time.monotonic()
     cancelled = service.cancel_course_sync({"confirmed": True})
     assert cancelled["cancel_requested"] is True
     assert cancelled["detail"] == "正在取消"
@@ -439,6 +450,7 @@ def test_course_workflow_reports_progress_and_can_cancel(
     assert status["state"] == "cancelled"
     assert status["detail"] == "同步已取消"
     assert status["cards"] == []
+    assert time.monotonic() - cancelled_at < 0.5
 
 
 def test_course_workflow_collects_authenticated_sources_concurrently(
@@ -446,7 +458,7 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
     monkeypatch,
 ) -> None:
     class EnrollmentGateway:
-        def sync(self, *, auto_login):
+        def sync(self, *, auto_login, **_kwargs):
             assert auto_login is True
             return {
                 "term": "2026-27 Semester 1",
@@ -465,7 +477,7 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
             return SimpleNamespace(status="logged_in")
 
     class PlannerService:
-        def login_until_ready(self):
+        def login_until_ready(self, **_kwargs):
             return SimpleNamespace(status="logged_in")
 
     class UnifiedService:
@@ -521,6 +533,78 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
         time.sleep(0.005)
 
     assert status["state"] == "completed"
+
+
+def test_course_workflow_retries_only_failed_source_course(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    course = {
+        "course_code": "BMED2206",
+        "subject_area": "BMED",
+        "catalogue_number": "2206",
+        "title": "Engineering in Biology and Medicine",
+    }
+
+    class EnrollmentGateway:
+        def status(self):
+            return {"term": "2026-27 Semester 1", "courses": [course]}
+
+    class MoodleService:
+        def check_login_status(self):
+            return SimpleNamespace(status="logged_in")
+
+    class PlannerService:
+        def login_until_ready(self, **_kwargs):
+            return SimpleNamespace(status="logged_in")
+
+    class UnifiedService:
+        async def synchronize(self, courses, *, source_scopes, **_kwargs):
+            assert courses == [course]
+            assert source_scopes == {"sis_course_info": [course]}
+            return UnifiedCourseSyncResult(
+                None,
+                SimpleNamespace(failures=()),
+                None,
+            )
+
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
+        lambda _resources: EnrollmentGateway(),
+    )
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._course_service",
+        lambda _resources, *, profile_dir=None: MoodleService(),
+    )
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._class_planner_service",
+        lambda _resources, *, profile_dir=None: PlannerService(),
+    )
+    monkeypatch.setattr(
+        "hsas.interfaces.run_dashboard._unified_course_sync_service",
+        lambda _resources: UnifiedService(),
+    )
+
+    service = DashboardService(tmp_path)
+    service.sync_job["result"] = {
+        "retry_tasks": [
+            {
+                "source": "sis_course_info",
+                "course_code": "BMED2206",
+                "error": "timeout",
+            }
+        ]
+    }
+    service.retry_failed_course_sync({"confirmed": True})
+    for _ in range(200):
+        status = service.course_sync_status()
+        if status["state"] != "running":
+            break
+        time.sleep(0.005)
+
+    assert status["state"] == "completed"
+    assert status["result"]["retry_mode"] is True
+    assert status["result"]["retry_tasks"] == []
     assert status["detail"] == "同步完成"
     assert status["result"]["source_failures"] == []
 
@@ -618,9 +702,13 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
     before_ai = DashboardService(tmp_path).information_snapshot()
     assert before_ai["available"] is False
     assert before_ai["courses"][0]["moodle_course_id"] == "138907"
-    assert before_ai["courses"][0]["materials"]["learning"]
+    assert before_ai["courses"][0]["materials"]["unclassified"]
     assert (
-        before_ai["courses"][0]["materials"]["learning"][0]["change_action"]
+        next(
+            material
+            for material in before_ai["courses"][0]["materials"]["unclassified"]
+            if material["title"] == "lecture-1.pptx"
+        )["change_action"]
         == "baseline"
     )
     assert before_ai["updates"]["courses"][0]["mode"] == "full"
@@ -635,6 +723,19 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
                     "title": "Demo Course",
                     "overview": "A concise official overview.",
                     "objectives": ["Understand the core methods"],
+                    "material_sections": [
+                        {
+                            "title": "Foundations and limit arguments",
+                            "description": "Core concepts selected from this course.",
+                            "materials": [
+                                {
+                                    "title": "lecture-1.pptx",
+                                    "relative_path": stored_file.relative_path,
+                                    "material_type": "Concept deck",
+                                }
+                            ],
+                        }
+                    ],
                 }
             ],
             "items": [
@@ -661,9 +762,14 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
     assert course["overview"] == "A concise official overview."
     assert course["objectives"] == ["Understand the core methods"]
     assert course["grade_distribution"][0]["item_id"] == "demo-assignment"
-    assert course["materials"]["learning"][0]["title"] == "lecture-1.pptx"
-    assert course["materials"]["learning"][0]["material_type"] == "lecture"
-    assert course["materials"]["information"]
+    assert course["materials"]["sections"][0]["title"] == "Foundations and limit arguments"
+    classified = course["materials"]["sections"][0]["materials"][0]
+    assert classified["title"] == "lecture-1.pptx"
+    assert classified["material_type"] == "Concept deck"
+    assert "定位并阅读这份课件" in classified["agent_prompt"]
+    assert stored_file.relative_path in classified["agent_prompt"]
+    assert "最近一次已经发生的 Lecture" in course["agent_prompts"]["recent_lecture_materials"]
+    assert course["materials"]["unclassified"]
     assert service.material_file(stored_file.relative_path)[0] == material_path
     preview = service.source_preview(stored_file.relative_path, [2])
     assert preview["preview_kind"] == "text"
@@ -673,25 +779,3 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
         service.material_file("information.json")
     with pytest.raises(DashboardError, match="当前课程快照"):
         service.source_preview("information.json")
-
-
-@pytest.mark.parametrize(
-    ("activity_name", "filename", "category", "section", "expected"),
-    [
-        ("Lecture 3", "slides.pdf", "resource", "Week 3", "lecture"),
-        ("Tutorial 2", "tutorial.pdf", "resource", "Week 2", "tutorial"),
-        ("Week 4 notes", "notes.docx", "resource", "Week 4", "notes"),
-        ("Problem Set 1", "questions.pdf", "resource", "Practice", "exercises"),
-        ("Course syllabus", "syllabus.pdf", "resource", "General", "course_information"),
-        ("Assignment 1", "brief.pdf", "assignment", "Assessment", "assessment"),
-        ("Research paper", "reading.pdf", "assignment", "Week 5", "assessment"),
-    ],
-)
-def test_material_type_uses_moodle_context(
-    activity_name: str,
-    filename: str,
-    category: str,
-    section: str,
-    expected: str,
-) -> None:
-    assert _material_type(activity_name, filename, category, section) == expected

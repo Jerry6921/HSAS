@@ -63,26 +63,38 @@ class UnifiedCourseSyncService:
         *,
         progress_callback: ProgressCallback | None = None,
         cancel_requested: CancelRequested | None = None,
+        source_scopes: dict[str, list[dict[str, str]] | None] | None = None,
     ) -> UnifiedCourseSyncResult:
+        scopes = source_scopes or {
+            "moodle": courses,
+            "sis_course_info": courses,
+            "timetable": None,
+        }
         async with self.broker.open() as session:
-            results = await asyncio.gather(
-                session.sync_moodle(
-                    courses,
+            tasks: dict[str, object] = {}
+            if "moodle" in scopes:
+                tasks["moodle"] = session.sync_moodle(
+                    scopes["moodle"] or [],
                     progress_callback=progress_callback,
                     cancel_requested=cancel_requested,
-                ),
-                session.sync_sis_course_info(
-                    courses,
+                )
+            if "sis_course_info" in scopes:
+                tasks["sis_course_info"] = session.sync_sis_course_info(
+                    scopes["sis_course_info"] or [],
                     progress_callback=progress_callback,
                     cancel_requested=cancel_requested,
-                ),
-                session.sync_timetable(
+                )
+            if "timetable" in scopes:
+                tasks["timetable"] = session.sync_timetable(
                     progress_callback=progress_callback,
                     cancel_requested=cancel_requested,
-                ),
-                return_exceptions=True,
-            )
-        moodle, sis_course_info, timetable = results
+                )
+            names = list(tasks)
+            results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        values = dict(zip(names, results, strict=True))
+        moodle = values.get("moodle")
+        sis_course_info = values.get("sis_course_info")
+        timetable = values.get("timetable")
         return UnifiedCourseSyncResult(moodle, sis_course_info, timetable)
 
 

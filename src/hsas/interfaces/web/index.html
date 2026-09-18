@@ -33,6 +33,9 @@
           <button id="show-calendar" class="view-link" type="button">
             <span>日历</span><small>全部课程事项</small>
           </button>
+          <button id="show-reconciliation" class="view-link" type="button">
+            <span>课程对账</span><small>核对各来源覆盖情况</small>
+          </button>
           <div class="nav-section-heading">
             <p class="nav-label">课程概览</p>
             <button id="manage-courses" type="button" aria-label="添加或删除课程">管理</button>
@@ -111,6 +114,20 @@
               <progress id="sync-progress-bar" value="0" max="1"></progress>
               <button id="cancel-sync" class="button compact" type="button">取消同步</button>
             </div>
+            </section>
+            <section id="review-closure" class="review-closure" aria-labelledby="review-closure-title">
+              <div class="review-closure-heading">
+                <div>
+                  <p class="eyebrow">INFORMATION CLOSURE</p>
+                  <h3 id="review-closure-title">资料闭环</h3>
+                </div>
+                <div class="review-closure-actions">
+                  <button id="retry-failures" class="button compact hidden" type="button">只重试失败项</button>
+                  <button id="copy-agent-prompt" class="button compact" type="button">复制 Agent 整理指令</button>
+                </div>
+              </div>
+              <div id="closure-stages" class="closure-stages"></div>
+              <div id="retry-summary" class="retry-summary hidden"></div>
             </section>
             <section class="metrics" aria-label="信息库摘要">
             <article><span>课程</span><strong id="metric-courses">—</strong><small>统一课程目录</small></article>
@@ -222,6 +239,18 @@
 
         <section id="course-overview-view" class="course-overview-view hidden" aria-live="polite">
           <div id="course-overview"></div>
+        </section>
+
+        <section id="reconciliation-view" class="reconciliation-view hidden" aria-live="polite">
+          <div class="section-heading reconciliation-heading">
+            <div>
+              <p class="eyebrow">SOURCE RECONCILIATION</p>
+              <h2>课程来源对账</h2>
+              <p class="section-note">以当前注册课程为基准，对照 Moodle、SIS 课程信息、官方课表与本地信息库。</p>
+            </div>
+            <span id="reconciliation-count">0 门待处理</span>
+          </div>
+          <div id="reconciliation-list" class="reconciliation-list"></div>
         </section>
       </main>
     </div>

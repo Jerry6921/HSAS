@@ -306,6 +306,7 @@ def login_until_ready(
     settings: Settings | None = None,
     *,
     timeout_seconds: int = 300,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> MoodleSessionResult:
     """Open visible Moodle login and wait for the user-completed SSO flow."""
     active_settings = settings or _settings()
@@ -318,6 +319,8 @@ def login_until_ready(
             moodle_host = urlparse(str(active_settings.base_url)).netloc
             deadline = asyncio.get_running_loop().time() + timeout_seconds
             while asyncio.get_running_loop().time() < deadline:
+                if cancel_requested is not None and cancel_requested():
+                    raise InterruptedError("Moodle login was cancelled")
                 moodle_pages = [
                     candidate
                     for candidate in context.pages
@@ -790,8 +793,17 @@ class MoodleCourseGateway:
     def check_login_status(self) -> MoodleSessionResult:
         return check_login_status(self.settings)
 
-    def login_until_ready(self, *, timeout_seconds: int = 300) -> MoodleSessionResult:
-        return login_until_ready(self.settings, timeout_seconds=timeout_seconds)
+    def login_until_ready(
+        self,
+        *,
+        timeout_seconds: int = 300,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> MoodleSessionResult:
+        return login_until_ready(
+            self.settings,
+            timeout_seconds=timeout_seconds,
+            cancel_requested=cancel_requested,
+        )
 
     def list_courses(self) -> CourseCatalogResult:
         return list_courses(self.settings)

@@ -125,6 +125,18 @@ def build_information_template() -> InformationUpdate:
                     "policies": [],
                     "notes": [],
                     "sources": [],
+                    "material_sections": [
+                        {
+                            "title": "Replace with an evidence-derived section name",
+                            "description": "AI chooses the grouping from this course's materials.",
+                            "materials": [
+                                {
+                                    "title": "Replace with a downloaded course material",
+                                    "relative_path": "courses/replace-with-downloaded-file.pdf",
+                                }
+                            ],
+                        }
+                    ],
                 }
             ],
             "items": [

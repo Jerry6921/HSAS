@@ -6,7 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from urllib.parse import urlencode, urlparse
 
 from playwright.async_api import BrowserContext, Frame, Page, async_playwright
@@ -157,6 +157,7 @@ async def open_login_until_authenticated(
     *,
     login_url: str = LOGIN_URL,
     timeout_seconds: int,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> Page:
     """Stay on SIS sign-on until the user-managed login has completed."""
     page = context.pages[0] if context.pages else await context.new_page()
@@ -165,6 +166,8 @@ async def open_login_until_authenticated(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
     while loop.time() < deadline:
+        if cancel_requested is not None and cancel_requested():
+            raise InterruptedError("HKU SIS login was cancelled")
         for candidate in context.pages:
             if _looks_authenticated_sis_page(candidate):
                 return candidate

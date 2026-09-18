@@ -55,7 +55,12 @@ class CourseGateway(Protocol):
 
     def check_login_status(self) -> MoodleSessionResult: ...
 
-    def login_until_ready(self, *, timeout_seconds: int = 300) -> MoodleSessionResult: ...
+    def login_until_ready(
+        self,
+        *,
+        timeout_seconds: int = 300,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> MoodleSessionResult: ...
 
     def list_courses(self) -> CourseCatalogResult: ...
 
@@ -96,7 +101,10 @@ class ClassPlannerGateway(Protocol):
     """Authenticated HKU Class Planner operations required by HIQS."""
 
     def login_until_ready(
-        self, *, timeout_seconds: int = 300
+        self,
+        *,
+        timeout_seconds: int = 300,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> ClassPlannerSessionResult: ...
 
     def sync(self, *, timeout_seconds: int = 90) -> ClassPlannerSyncResult: ...

@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from playwright.async_api import BrowserContext
 
@@ -238,7 +238,10 @@ class ClassPlannerBrowserGateway:
         )
 
     def login_until_ready(
-        self, *, timeout_seconds: int = 300
+        self,
+        *,
+        timeout_seconds: int = 300,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> ClassPlannerSessionResult:
         try:
             payload = asyncio.run(
@@ -246,18 +249,18 @@ class ClassPlannerBrowserGateway:
                     self.profile_dir,
                     headless=False,
                     timeout_seconds=timeout_seconds,
+                    cancel_requested=cancel_requested,
                 )
             )
         except Exception:
             _write_session_status(self.resources_dir, "login_required")
             raise
-        summary = _summary(payload)
-        _write_session_status(self.resources_dir, "logged_in")
+        synced = self._persist_payload(_sanitize(payload))
         return ClassPlannerSessionResult(
             status="logged_in",
-            checked_at=datetime.now(timezone.utc).isoformat(),
-            course_count=summary["course_count"],
-            term_ids=tuple(summary["term_ids"]),
+            checked_at=synced.synced_at,
+            course_count=synced.course_count,
+            term_ids=synced.term_ids,
         )
 
     def sync(self, *, timeout_seconds: int = 90) -> ClassPlannerSyncResult:
@@ -281,6 +284,7 @@ class ClassPlannerBrowserGateway:
         context: BrowserContext,
         *,
         timeout_seconds: int = 90,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> ClassPlannerSyncResult:
         """Synchronize the timetable through a broker-owned browser context."""
         try:
@@ -288,6 +292,7 @@ class ClassPlannerBrowserGateway:
                 await capture_calendar_response_in_context(
                     context,
                     timeout_seconds=timeout_seconds,
+                    cancel_requested=cancel_requested,
                 )
             )
         except ClassPlannerAuthenticationError:
@@ -316,7 +321,7 @@ class ClassPlannerBrowserGateway:
         envelope = {
             "schema_version": "1.0",
             "source": "HKU Class Planner",
-            "source_url": "https://class-planner.hku.hk/api/calendar",
+            "source_url": "https://api.hku.hk/sis/app/cspa/calendar",
             "synced_at": synced_at,
             "summary": summary,
             "changes": changes,

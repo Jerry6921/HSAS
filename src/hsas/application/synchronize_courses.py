@@ -24,8 +24,18 @@ class CourseSynchronizationService:
     def check_login_status(self) -> MoodleSessionResult:
         return self.gateway.check_login_status()
 
-    def login_until_ready(self, *, timeout_seconds: int = 300) -> MoodleSessionResult:
-        return self.gateway.login_until_ready(timeout_seconds=timeout_seconds)
+    def login_until_ready(
+        self,
+        *,
+        timeout_seconds: int = 300,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> MoodleSessionResult:
+        if cancel_requested is None:
+            return self.gateway.login_until_ready(timeout_seconds=timeout_seconds)
+        return self.gateway.login_until_ready(
+            timeout_seconds=timeout_seconds,
+            cancel_requested=cancel_requested,
+        )
 
     def list_courses(self) -> CourseCatalogResult:
         return self.gateway.list_courses()

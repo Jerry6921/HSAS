@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -152,7 +152,12 @@ def _clean_course_title(raw_title: str | None, code: str) -> str:
     return title or code
 
 
-async def _student_center_text(context, *, timeout_seconds: int) -> str:
+async def _student_center_text(
+    context,
+    *,
+    timeout_seconds: int,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> str:
     page = context.pages[0] if context.pages else await context.new_page()
     await page.goto(
         STUDENT_CENTER_URL,
@@ -161,6 +166,8 @@ async def _student_center_text(context, *, timeout_seconds: int) -> str:
     )
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while asyncio.get_running_loop().time() < deadline:
+        if cancel_requested is not None and cancel_requested():
+            raise InterruptedError("Student Center synchronization was cancelled")
         best_match = ""
         for frame in page.frames:
             if urlparse(frame.url).netloc != SIS_HOST:
@@ -188,7 +195,13 @@ class SisEnrollmentBrowserGateway:
         self.profile_dir = hku_portal_profile_dir(self.resources_dir)
         self.session_state_path = self.profile_dir / "sis-session.json"
 
-    def sync(self, *, timeout_seconds: int = 90, auto_login: bool = True) -> dict[str, Any]:
+    def sync(
+        self,
+        *,
+        timeout_seconds: int = 90,
+        auto_login: bool = True,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         async def capture(
             headless: bool,
             target_url: str,
@@ -201,15 +214,17 @@ class SisEnrollmentBrowserGateway:
                 session_state_path=self.session_state_path,
             ) as context:
                 if target_url == LOGIN_URL:
-                    await open_login_until_authenticated(
-                        context,
-                        login_url=LOGIN_URL,
-                        timeout_seconds=capture_timeout_seconds,
-                    )
-                text = await _student_center_text(
-                    context,
-                    timeout_seconds=capture_timeout_seconds,
-                )
+                    login_kwargs = {
+                        "login_url": LOGIN_URL,
+                        "timeout_seconds": capture_timeout_seconds,
+                    }
+                    if cancel_requested is not None:
+                        login_kwargs["cancel_requested"] = cancel_requested
+                    await open_login_until_authenticated(context, **login_kwargs)
+                text_kwargs = {"timeout_seconds": capture_timeout_seconds}
+                if cancel_requested is not None:
+                    text_kwargs["cancel_requested"] = cancel_requested
+                text = await _student_center_text(context, **text_kwargs)
                 await save_sis_session(context, self.session_state_path)
                 return text
 

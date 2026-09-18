@@ -31,6 +31,18 @@ def _update_payload() -> dict:
                 "ends_on": "2026-11-30",
                 "overview": "An introduction to programming.",
                 "objectives": ["Write small Python programs"],
+                "material_sections": [
+                    {
+                        "title": "Python foundations",
+                        "materials": [
+                            {
+                                "title": "Lecture 1",
+                                "material_type": "Core syntax",
+                                "relative_path": "courses/100/files/lecture-1.pdf",
+                            }
+                        ],
+                    }
+                ],
             }
         ],
         "items": [
@@ -100,7 +112,28 @@ def test_information_apply_requires_confirmation_and_writes_atomically(
         "Write small Python programs"
     ]
     assert REPOSITORY.load(path).courses[0].starts_on.isoformat() == "2026-09-01"
+    assert REPOSITORY.load(path).courses[0].material_sections[0].title == "Python foundations"
+    assert (
+        REPOSITORY.load(path).courses[0].material_sections[0].materials[0].material_type
+        == "Core syntax"
+    )
     assert REPOSITORY.load(path).items[0].materials[0].page_numbers == [1, 3]
+
+
+def test_course_material_sections_reject_duplicate_membership(tmp_path: Path) -> None:
+    payload = _update_payload()
+    duplicate = payload["courses"][0]["material_sections"][0]["materials"][0].copy()
+    payload["courses"][0]["material_sections"].append(
+        {"title": "A different AI-authored shelf", "materials": [duplicate]}
+    )
+
+    with pytest.raises(InformationServiceError, match="cannot appear in more than one"):
+        apply_information_update(
+            tmp_path / "information.json",
+            payload,
+            confirmed=True,
+            repository=REPOSITORY,
+        )
 
 
 def test_information_rejects_reversed_course_teaching_period(tmp_path: Path) -> None:

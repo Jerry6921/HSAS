@@ -79,6 +79,41 @@ def test_unified_sync_returns_source_errors_without_cancelling_other_sources() -
     assert result.timetable == "timetable"
 
 
+def test_unified_sync_runs_only_selected_failed_source_and_course() -> None:
+    calls: list[tuple[str, list[dict[str, str]] | None]] = []
+
+    class Session:
+        async def sync_moodle(self, courses, **_kwargs):
+            calls.append(("moodle", courses))
+            return {"completed": len(courses), "failures": []}
+
+        async def sync_sis_course_info(self, courses, **_kwargs):
+            calls.append(("sis_course_info", courses))
+            return "sis"
+
+        async def sync_timetable(self, **_kwargs):
+            calls.append(("timetable", None))
+            return "timetable"
+
+    class Broker:
+        @asynccontextmanager
+        async def open(self):
+            yield Session()
+
+    failed_course = [{"course_code": "BMED2206"}]
+    result = asyncio.run(
+        UnifiedCourseSyncService(Broker()).synchronize(
+            failed_course,
+            source_scopes={"sis_course_info": failed_course},
+        )
+    )
+
+    assert calls == [("sis_course_info", failed_course)]
+    assert result.moodle is None
+    assert result.sis_course_info == "sis"
+    assert result.timetable is None
+
+
 def test_browser_broker_restores_and_saves_one_shared_context(
     tmp_path: Path,
     monkeypatch,

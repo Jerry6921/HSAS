@@ -46,7 +46,7 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 5. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
 6. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`. Read every changed HKU SIS `text_relative_path`; it is a cleaned, inert rendering of the official course page rather than a fact parser.
 7. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
-8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
+8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. For every reviewed course, reconcile the full current `hsas materials list --course <MOODLE_COURSE_ID>` manifest with `courses[].material_sections`: place every current material in exactly one freely named, evidence-derived section, preserve stable relative paths or URLs, and do not choose from a predefined taxonomy. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
 9. Preserve pending fields as `unknown`. When sources conflict, write the value supported by current Moodle course materials or activity metadata and retain the conflicting evidence in `warnings` and `sources`.
 10. Run `hsas information validate <UPDATE.json>`.
 11. When authorized, run `hsas information apply <UPDATE.json> --sis-enrollment-changes <ENROLLMENT_CHANGES.json> --changes <CHANGES.json> --class-planner-changes <PLANNER_CHANGES.json> --sis-course-info-changes <SIS_CHANGES.json> --confirmed`, omitting batch options for sources outside the review.
@@ -83,7 +83,7 @@ confirms that preview.
 
 `<RESOURCES_DIR>/information.json` contains:
 
-- `courses`: course identity, semester teaching period (`starts_on`, `ends_on`), AI-summarized overview/objectives, links, instructors, policies, notes, and sources;
+- `courses`: course identity, semester teaching period (`starts_on`, `ends_on`), AI-summarized overview/objectives, links, instructors, policies, notes, sources, and freely named `material_sections` covering the current Moodle archive;
 - `items`: classes, tutorials, labs, office hours, assignments, quizzes, exams,
   presentations, projects, reports, readings, deadlines, and other dated or
   undated course facts;
@@ -121,6 +121,7 @@ CLI, where schema and cross-course validation preserve the last valid database.
 - Store deadlines, class times, tutorial groups, locations, requirements, weights, and policies with supporting evidence.
 - Give current Moodle course pages, activity metadata, announcements, and downloaded course materials the highest authority. When another source conflicts with Moodle, use the Moodle-supported value and retain both sources plus a concise conflict warning. Use HKU SIS Course Information and Class Planner to fill facts Moodle does not state, preserving their observation/version dates.
 - Attach slides, notes, tutorial sheets, exercises, and readings to an item when an official week, topic, activity, or section reference supports the relationship.
+- Organize every current Moodle material into exactly one `courses[].material_sections[]` entry. Infer section titles from that course's structure and content; the schema intentionally provides no fixed section types. Keep unmatched materials visible as pending classification rather than guessing.
 - Summaries paraphrase available course evidence; evidence-limited overview or objective fields remain empty.
 - Preserve pending dates and weights as `null` or `unknown`.
 - Calculate grading totals according to the official assessment structure.

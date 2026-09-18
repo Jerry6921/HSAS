@@ -5,141 +5,89 @@
 课程时间、DDL、评分方式和 Tutorial 安排通常分布在 timetable、Moodle、syllabus 与课程
 公告中。查询一个事项可能需要交叉核对多个页面和文件。
 
-HIQS 将这些资料统一保存到本地。程序负责下载、数据结构、校验和可视化；AI 负责阅读资料
-并归纳课程信息。系统保留信息来源、待补字段和 Moodle 内容变化记录。
+HIQS 提供一个统一界面，让学生同步课程资料、查看重要日程、按主题查找课件，并直接调用
+AI 查阅本地课程内容。重要信息同时保留来源与待确认状态，方便随时核对。
+
+## 核心功能
+
+- **一键集中课程资料**：在首页同步 Moodle、Student Center、SIS Course Information 与
+  Class Planner，不再逐个网页查找课程信息。
+
+- **跨课程可视化日历**：集中查看 Lecture、Tutorial、Lab、Assessment、DDL、地点、占分
+  与提交要求，并以月历和每日议程掌握近期安排。
+
+- **AI 课件智能分区**：按每门课程的周次、主题、Assessment 或学习用途整理课件，快速
+  找到讲义、阅读、练习和复习材料。
+
+- **一键复制 AI 提示词**：从首页、课程页或资料卡复制提示词，让 AI 查阅本地课件、回答
+  问题、定位页码或 slide，并提供复习说明与学习指导。
 
 ![HIQS 首页：并发课程同步、聚合进度与资料状态](docs/images/ui/home-sync-workflow.png)
 
 ## 目录
 
+- [核心功能](#核心功能)
 - [UI 页面功能](#ui-页面功能)
 - [快速开始](#快速开始)
 - [使用方式](#使用方式)
 
 ## UI 页面功能
 
-HIQS 的界面由首页、日历、课程来源对账和课程概览组成，并将课程资料、结构化事实与原始来源连接在同一套
-本地视图中。
+HIQS 将课程资料、重要日程、课件目录与原始来源集中在同一套本地界面中。
 
 ### 首页
 
-首页集中呈现近期事项、外部课程来源和本地信息库状态。Next Up 卡片显示下一项课程活动或
-DDL 的时间、地点与倒计时；同步工作台通过一个“开始同步”入口运行完整课程数据流程，并
-通过进度条、loading 标识和当前课程名称显示运行状态。流程先用统一浏览器 profile 完成
-HKU Portal 登录并建立来源会话，再从 HKU SIS Student Center 取得当前学期注册课程，按课程
-确定采集范围。随后 Moodle 文件、SIS Course Information 与 HKU Class Planner 课表并发同步，
-首页以一条聚合进度显示三个来源的完成情况。
-
-同步完成后，资料闭环显示来源采集、Agent 整理、校验写入与 checkpoint 四个阶段。界面可
-复制包含项目位置、资料目录和待处理范围的 Agent 指令；同步失败时保留“来源 × 课程”清单，
-可只重试失败课程或失败来源，已完成的采集步骤保持不变。
-
-Student Center 课程名单直接提供课程代码，例如把 `BMED2206` 拆为 Subject Area `BMED`
-与 Catalogue Number `2206`。系统逐门取得 SIS 课程页面，保存经过清洗的可读副本与
-内容哈希。AI 以 Moodle 当前页面、活动元数据、公告与课程资料作为最高优先级来源，SIS 与
-Class Planner 补充 Moodle 未陈述的事实；冲突时采用 Moodle 支持的值并保留双方证据。
-SIS 与 Class Planner 共享 HKU Portal 浏览器 profile，SIS 登录窗口同时承接可能出现的一次图形验证。
-
-课程数、信息事项、本月日程、待确认日期和待 AI 整理数量构成首页摘要。资料状态进一步汇总
-OCR、Google 授权与来源冲突；本地搜索、个人补充信息 Inbox 和更新记录分别承担资料检索、
-补充信息预览以及 Moodle 变化审阅。
-
-侧栏课程管理可直接向 `information.json` 添加课程，也可删除课程、关联事项与本地课程文件。
-删除的文件先转移到本机回收目录；再次同步 Moodle 时仍可重新取得可访问的课程资料。
+- **Next Up**：显示下一项课程、Assessment 或 DDL 的时间、地点与倒计时。
+- **开始同步**：从一个入口更新当前学期课程、Moodle 课件、官方课程资料与课表。
+- **同步进度**：显示整体进度、当前课程、失败来源与可重试项目。
+- **资料闭环**：查看哪些资料已同步、待 AI 整理、已写入或仍需确认。
+- **复制 Agent 指令**：一键复制当前待处理课程和资料范围。
+- **状态摘要**：查看课程数、本月日程、待确认日期、OCR、Google 授权与来源冲突。
+- **搜索与 Inbox**：搜索本地资料，并预览个人补充信息的写入变化。
+- **课程管理**：添加或移除课程，并管理对应的日程和本地文件。
 
 ### 日历页
 
-日历页提供月视图与 Apple Calendar 风格的每日议程，统一呈现课程、Tutorial、Lab、Office
-hour、Assessment 与 DDL。课程筛选和侧栏搜索控制可见范围；事项详情以半透明窗口展示日期
-状态、地点、课业形式、提交方式、字数、占分、要求、警告、相关材料与证据来源。
-
-每日议程按照开始与结束时间布置活动，并为日期型事项保留全天区域。每周课程支持假期与
-Reading Week 排除、补课日期，以及单次取消、改时、改教室和标题变更。月视图、每日议程与
-ICS 导出共用同一组课程例外，可导入 Apple Calendar 等支持 iCalendar 的应用。
+- **月历与每日议程**：统一显示课程、Tutorial、Lab、Office Hour、Assessment 与 DDL。
+- **课程筛选**：按课程或关键字缩小日程范围。
+- **事项详情**：查看时间、地点、提交方式、字数、占分、要求、相关课件与证据来源。
+- **课程变更**：显示假期、Reading Week、补课、取消、改时和教室变更。
+- **导出 ICS**：将当前日程导入 Apple Calendar 等日历应用。
 
 ### 课程来源对账页
 
-课程来源对账页以 Student Center 的当前注册课程为基准，逐门对照 Moodle、SIS Course
-Information、HKU Class Planner 与 `information.json`。页面区分来源齐全、需要补采或等待
-Agent 写入，以及已不在当前注册列表中的历史资料，便于在日历缺项前定位数据链路所在阶段。
+- **注册课程对照**：核对 Student Center、Moodle、官方课程资料与 Class Planner。
+- **缺项提示**：标出尚未取得、等待 AI 整理或仍需确认的课程资料。
+- **历史课程识别**：区分当前注册课程与本地保留的旧课程资料。
 
 ### 课程概览页
 
-课程概览页按课程组织名称、学期、教学起止日期、教师、课程综述与课程目的。成绩构成区域
-展示已确认的 Assessment、占分及父子结构；课件区域汇总对应课程的全部 Moodle 学习材料和
-课程信息。
+- **课程资料**：查看学期、教师、教学日期、课程综述与学习目标。
+- **成绩构成**：汇总已确认的 Assessment、占分和子项目。
+- **重要事项**：集中查看本课程的课堂、作业、Quiz、考试与 DDL。
+- **课件入口**：直接进入该课程的完整课件目录。
 
 ### 课件目录
 
-课件目录使用 AI 根据每门课程的实际结构与内容自由命名栏位，不采用固定分类表。每份当前
-Moodle 材料只属于一个栏位；尚未整理的资料集中显示为“待 AI 分类”。资料卡保留 Moodle
-section、activity、文件大小、文本副本状态和本轮变化标记。
-
-课程页可以复制“最近 Lecture 相关课件”提示词，让 Agent 从日历与课程内容中定位最近一次
-Lecture，并按相关性找出课件。每张资料卡也提供独立提示词，用于定位本地原文或文本副本，
-总结主题结构、关键概念、公式与要求，并标注相关页码或 slide。
+- **AI 智能分区**：按课程自己的周次、主题、Assessment 或学习用途整理材料。
+- **完整课件清单**：每份当前 Moodle 材料只出现一次，未分类资料会明确标示。
+- **资料状态**：查看文件大小、文本副本、来源位置和本轮变化。
+- **最近 Lecture 课件**：复制提示词，让 AI 找出最近课堂最相关的材料。
+- **单份课件问答**：复制资料卡提示词，让 AI 总结内容并定位页码或 slide。
 
 ### 来源预览器
 
-来源预览器在 Dashboard 内显示 PDF、图片以及 DOCX/PPTX 的文本副本。事项中的“相关学习
-材料”和“证据来源”共用这一视图。预览底部保留本地原文件与 Moodle 来源链接，使结构化
-事实能够追溯到具体页面、页码或 slide。
+- **站内预览**：直接查看 PDF、图片及 DOCX/PPTX 的文本内容。
+- **事实回溯**：从日程或课程信息打开对应证据和相关课件。
+- **打开原文件**：继续访问本地原件或 Moodle 来源页面。
 
-### 同步与整理工作流
+### 典型使用流程
 
-```text
-HKU SIS Student Center
-  ↓
-取得当前学期注册课程，保存原始可读文本与课程名单快照
-  ↓
-`BrowserSessionBroker` 打开一个认证 context，并发运行三个独立来源页面
-  ├─ Moodle：按课程同步文件与文本副本
-  ├─ SIS Course Information：按课程同步官方课程页面作为补充来源
-  └─ HKU Class Planner：同步上课时间、班别和地点
-  ↓
-各来源生成独立增量审阅队列
-  ↓
-AI 阅读本轮新增或变化资料
-  ↓
-HIQS 校验并增量写入 information.json，同时推进对应 checkpoint
-  ↓
-Dashboard 映射为日历、课程概览与课件目录
-
-Moodle
-  ↓
-Collector 下载文件、保存来源并生成文本副本
-  ↓
-Change Queue 标出首次全量或后续增量变化
-  ↓
-OCR Queue 识别扫描 PDF 与图片型 PPT
-  ↓
-AI 阅读待处理文件，归纳课程事实与课程综述
-  ↓
-HIQS 校验并增量写入 information.json
-  ↓
-Dashboard 映射为日历、课程概览与课件目录
-
-HKU Class Planner
-  ↓
-隐私过滤的官方课表快照与独立差异队列
-  ↓
-AI 核对班别、时间、地点和单次课表例外
-  ↓
-经校验写入 information.json 后推进 Class Planner checkpoint
-
-Student Center 课程代码
-  ↓
-HKU SIS Course Information 读取官方课程页面
-  ↓
-清洗可见正文、保存哈希并生成独立差异队列
-  ↓
-AI 优先核对课程概述、目标、评分、政策与推荐阅读
-  ↓
-经校验写入 information.json 后推进 SIS checkpoint
-```
-
-Collector 记录资料取得、同步异常与内容变化，课件内容由 AI 读取。所有可查询事实由 AI
-或用户依据来源写入，并通过 Schema 校验。
+1. 在首页选择 **开始同步**。
+2. 同步完成后选择 **复制 Agent 整理指令**。
+3. 让 Agent 整理新增或变化的课程资料。
+4. 回到日历、课程概览和课件目录查看结果。
+5. 需要深入学习时，从课程页或资料卡复制 AI 提示词继续提问。
 
 ## 快速开始
 
@@ -163,35 +111,25 @@ HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由�
 
 ### 让 Agent 整理新增信息
 
-每次在首页完成课程同步后，可以直接告诉 Agent：“请整理 HIQS 本次新增或变化的课程资料。”
-也可以在首页的资料闭环中选择“复制 Agent 整理指令”，一键复制已经包含当前项目位置、
-资料目录和待处理范围的提示词，再直接粘贴给能够访问本机项目的 Agent。
-
-Agent 会读取 Student Center、Moodle、官方课程信息和课表的待审阅队列与 checkpoint：首次整理覆盖该课程的全部资料，
-后续只阅读新增、修改或删除的项目及相关课程索引，并在需要时先处理 OCR 队列。
-
-Agent 会把有来源支持的新课程事实、日历事项和材料关联整理成更新预览。确认写入后，HIQS
-完成 Schema 与课程引用校验、原子更新本地信息库，并推进对应 checkpoint；没有产生新事实的
-已审阅批次也会被记录，下一次无需重复阅读。
+- 在首页完成课程同步。
+- 选择 **复制 Agent 整理指令**。
+- 将提示词粘贴给能够访问本机项目的 Agent。
+- Agent 只整理本轮新增或变化的资料，并保留日期、占分、要求与来源。
+- 完成后回到 HIQS 查看更新后的日历、课程概览与课件目录。
 
 ### 在 Agent 中向课程资料提问
 
-启动 HIQS 后，直接在 Agent 对话中提出自然语言问题，例如询问某次考试的日期、占分、
-范围与相关课件。Agent 会按照项目 Skill 检索本地 `information.json` 和课程文本副本，
-组合结构化事实与相关材料，并在答案中标明来源、待确认字段和冲突信息。
-
-需要查找当前课程最近一次 Lecture 的相关课件时，可以在课程页面选择“复制最近 Lecture
-提示词”，再把提示词粘贴给 Agent。需要阅读单份材料时，可以选择该课件旁的“复制 AI
-提示词”，让 Agent 按提示词中的本地原文、文本副本和课程标识定位并总结内容。提示词中的
-路径由 HIQS 按当前用户的实际资料目录动态生成。
-
-学生也可以请 Agent 比较已经确认的 DDL 与课程时间，在对话中自行调整学习安排。
+- **课程问答**：询问考试日期、占分、范围、提交方式或相关课件。
+- **最近 Lecture**：在课程页复制提示词，查找最近课堂最相关的材料。
+- **单份课件阅读**：从资料卡复制提示词，总结重点、公式、要求与页码。
+- **复习与学习指导**：让 Agent 解释概念、比较课程负担或整理复习方向。
+- **来源核对**：答案保留相关来源，并明确待确认或互相冲突的信息。
 
 ### 在 Agent 中写入额外信息
 
-把 Tutorial group、临时教室、个人提醒或其他补充信息直接告诉 Agent。Agent 会将内容整理
-为待写入草稿，并在 Inbox 中展示记录动作与逐字段变化。用户确认预览后，HIQS 再通过同一套
-Schema、课程引用和时间规则完成校验，并原子更新本地信息库。
+- 将 Tutorial group、临时教室、个人提醒等信息告诉 Agent。
+- 在 Inbox 查看新增或修改内容的预览。
+- 确认后再写入课程信息和日历。
 
 ### 导出到 Apple Calendar
 
@@ -211,38 +149,13 @@ Google Workspace 返回登录页或权限页时，项目会标记为 external �
 
 ## 数据与增量更新
 
-默认数据位于平台应用数据目录。macOS 沿用旧版路径，以保持升级前后的资料连续性：
+- **本地保存**：macOS 默认位于 `~/Library/Application Support/HSAS/`。
+- **增量整理**：首次整理完整课程，之后只处理新增、修改或移除的资料。
+- **保留旧资料**：更新失败时继续使用上一份有效课程资料。
+- **明确确认**：个人补充信息和删除操作都需要用户确认。
+- **可追溯**：重要日期、地点、占分与要求保留对应来源。
 
-```text
-~/Library/Application Support/HSAS/
-├── browser-profile/  # Moodle、HKU Portal、SIS 与 Class Planner 共享会话
-├── resources/
-│   ├── information.json
-│   ├── ai-state/change-checkpoint.json
-│   ├── ai-state/personal-inbox.json
-│   ├── sis-enrollment/latest.json
-│   ├── sis-enrollment/latest.txt
-│   ├── sis-enrollment/review-checkpoint.json
-│   ├── class-planner/latest.json
-│   ├── class-planner/review-checkpoint.json
-│   ├── sis-course-info/latest.json
-│   ├── sis-course-info/review-checkpoint.json
-│   ├── sis-course-info/courses/COURSE_CODE/latest.txt
-│   └── courses/COURSE_ID/
-│       ├── course.json
-│       ├── files/
-│       ├── analysis/text/
-│       ├── changes/history/
-│       └── raw/
-└── state/
-```
-
-`information.json` 是日历与课程概览的唯一结构化事实来源。写入采用增量 upsert：相同
-`course_id` 或 `item_id` 被完整更新，新 ID 被追加，未出现在本次更新中的记录会保留。
-上一份有效数据库会在校验失败时继续保留；删除操作始终需要显式流程。
-
-升级产生的旧 change history 会在读取时经过兼容适配。旧版 `assessment` 与 `weight` 变化
-会作为通用 activity 变化信号参与 checkpoint 筛选，历史 JSON 文件保持原样。
+实现细节与数据结构见[架构与数据流](ARCHITECTURE.md)。
 
 ## 隐私与可靠性
 

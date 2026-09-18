@@ -211,6 +211,14 @@ uncertainty visible.
 - Expected: export a valid local ICS projection with matching event times and
   recurrence behavior.
 
+### 34. Partial source coverage
+
+- Given: Moodle states an assignment deadline, SIS states the course objective,
+  and Class Planner states the room; none of the three repeats all fields.
+- Expected: write each supported field from its available source without waiting
+  for cross-source agreement, without treating omissions as conflicts, and use
+  the normal authority rule only if two available sources actually disagree.
+
 ## Regression use
 
 Add a scenario only for a distinct ownership, safety, evidence or data-loss risk.

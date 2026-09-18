@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hku-information-query-system"
-version = "2.5.0"
+version = "2.7.0"
 description = "Local, AI-authored HKU course information database and calendar"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
   "beautifulsoup4>=4.12,<5",
+  "mcp>=2,<3",
   "playwright>=1.48,<2",
   "platformdirs>=4.3,<5",
   "pydantic>=2.9,<3",
@@ -42,6 +43,7 @@ macos-build = [
 
 [project.scripts]
 hsas = "hsas.interfaces.run_cli:app"
+hiqs-mcp = "hsas.mcp.run_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hsas"]

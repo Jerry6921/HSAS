@@ -58,6 +58,12 @@ user-confirmed AI conversation → personal tutorial group or extra reminder
 AI inference                   → suggestion or tentative interpretation
 ```
 
+Evaluate each field independently. A fact does not need to appear in Moodle,
+SIS and Class Planner simultaneously before it can be written. Use any available
+appropriate source, and leave a field unknown only when none of the collected
+sources supports it. Missing coverage from another source is ignored rather than
+treated as disagreement, deletion evidence, or a reason to withhold the fact.
+
 When sources conflict:
 
 - retain both source references;

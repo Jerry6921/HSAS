@@ -24,6 +24,7 @@ from hsas.interfaces.run_dashboard import (
     _load_dashboard_assets,
     build_dashboard_server,
 )
+from hsas.ui.run_dashboard import _material_content_security_policy
 
 
 def test_dashboard_assets_include_application_calendar_and_source_preview() -> None:
@@ -67,6 +68,10 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="item-detail-dialog"' in loaded["/"][0]
     assert b'id="close-item-detail"' in loaded["/"][0]
     assert b'id="canvas-effect-toggle"' in loaded["/"][0]
+    assert b'id="app-update"' in loaded["/"][0]
+    assert loaded["/"][0].index(b'id="app-update"') < loaded["/"][0].index(
+        b'id="canvas-effect-toggle"'
+    )
     assert b'id="canvas-ui-output"' in loaded["/"][0]
     assert b'id="next-up-card"' in loaded["/"][0]
     assert b'id="next-up-course"' in loaded["/"][0]
@@ -74,10 +79,13 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'window.location.protocol === "file:"' in loaded["/assets/app.js"][0]
     assert b"/api/information" in loaded["/assets/app.js"][0]
     assert b"/api/source-preview" in loaded["/assets/app.js"][0]
+    assert "PDF 预览为空？查看已提取文本".encode() in loaded["/assets/app.js"][0]
     assert b'"/api/sync/start"' in loaded["/assets/app.js"][0]
     assert b'"/api/sync/status"' in loaded["/assets/app.js"][0]
     assert b'"/api/sync/cancel"' in loaded["/assets/app.js"][0]
     assert b'"/api/sync/retry"' in loaded["/assets/app.js"][0]
+    assert b'"/api/update/status"' in loaded["/assets/app.js"][0]
+    assert b'"/api/update/apply"' in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("hidden", !running)' in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("cancelling", cancelling)' in loaded["/assets/app.js"][0]
     assert b'"/api/moodle/status"' not in loaded["/assets/app.js"][0]
@@ -112,6 +120,41 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"flex-wrap: nowrap" in loaded["/assets/styles.css"][0]
     assert "相关学习材料".encode() in loaded["/assets/app.js"][0]
     assert "由 AI 根据已下载课程资料归纳".encode() in loaded["/assets/app.js"][0]
+
+
+def test_material_preview_csp_keeps_native_pdf_viewer_out_of_sandbox() -> None:
+    pdf_policy = _material_content_security_policy("application/pdf")
+    image_policy = _material_content_security_policy("image/png")
+    document_policy = _material_content_security_policy(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    assert "sandbox" not in pdf_policy
+    assert "sandbox" not in image_policy
+    assert document_policy.startswith("sandbox;")
+    assert "frame-ancestors 'self'" in pdf_policy
+
+
+def test_application_update_delegates_to_safe_update_service(tmp_path: Path) -> None:
+    class FakeUpdateService:
+        def status(self) -> dict[str, object]:
+            return {
+                "status": "current",
+                "current_version": "2.7.0",
+                "latest_version": "2.7.0",
+            }
+
+        def apply(self, *, confirmed: bool) -> dict[str, object]:
+            assert confirmed is True
+            return {"status": "updated", "current_version": "2.8.0"}
+
+    service = DashboardService(tmp_path, update_service=FakeUpdateService())  # type: ignore[arg-type]
+
+    assert service.application_update_status()["status"] == "current"
+    assert service.apply_application_update({"confirmed": True})["status"] == "updated"
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.apply_application_update({"confirmed": False})
 
 
 def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path) -> None:
@@ -282,7 +325,7 @@ def test_ocr_action_requires_confirmation_and_reports_results(
             "failures": [],
         }
 
-    monkeypatch.setattr("hsas.interfaces.run_dashboard.run_ocr_queue", run)
+    monkeypatch.setattr("hsas.core.implement_port.run_ocr_queue", run)
     service = DashboardService(tmp_path)
 
     with pytest.raises(DashboardError, match="确认"):
@@ -331,7 +374,7 @@ def test_moodle_actions_require_confirmation_and_report_results(
             )
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._course_service",
+        "hsas.core.implement_port._course_service",
         lambda _resources: Service(),
     )
     service = DashboardService(tmp_path)
@@ -382,7 +425,7 @@ def test_class_planner_actions_require_confirmation_and_report_differences(
             )
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._class_planner_service",
+        "hsas.core.implement_port._class_planner_service",
         lambda _resources: Service(),
     )
     service = DashboardService(tmp_path)
@@ -428,11 +471,11 @@ def test_course_workflow_reports_progress_and_can_cancel(
             raise InterruptedError("cancelled")
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
+        "hsas.core.implement_port._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._class_planner_service",
+        "hsas.core.implement_port._class_planner_service",
         lambda _resources: PlannerService(),
     )
     service = DashboardService(tmp_path)
@@ -508,19 +551,19 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
             )
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
+        "hsas.core.implement_port._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._course_service",
+        "hsas.core.implement_port._course_service",
         lambda _resources, *, profile_dir=None: MoodleService(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._class_planner_service",
+        "hsas.core.implement_port._class_planner_service",
         lambda _resources, *, profile_dir=None: PlannerService(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._unified_course_sync_service",
+        "hsas.core.implement_port._unified_course_sync_service",
         lambda _resources: UnifiedService(),
     )
 
@@ -569,19 +612,19 @@ def test_course_workflow_retries_only_failed_source_course(
             )
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._sis_enrollment_gateway",
+        "hsas.core.implement_port._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._course_service",
+        "hsas.core.implement_port._course_service",
         lambda _resources, *, profile_dir=None: MoodleService(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._class_planner_service",
+        "hsas.core.implement_port._class_planner_service",
         lambda _resources, *, profile_dir=None: PlannerService(),
     )
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._unified_course_sync_service",
+        "hsas.core.implement_port._unified_course_sync_service",
         lambda _resources: UnifiedService(),
     )
 
@@ -621,7 +664,7 @@ def test_moodle_session_verification_replaces_stale_logged_in_state(
             return SimpleNamespace(status="logged_out", error=None)
 
     monkeypatch.setattr(
-        "hsas.interfaces.run_dashboard._course_service",
+        "hsas.core.implement_port._course_service",
         lambda _resources: Service(),
     )
 

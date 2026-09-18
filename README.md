@@ -22,6 +22,9 @@ AI 查阅本地课程内容。重要信息同时保留来源与待确认状态�
 - **一键复制 AI 提示词**：从首页、课程页或资料卡复制提示词，让 AI 查阅本地课件、回答
   问题、定位页码或 slide，并提供复习说明与学习指导。
 
+- **启动时检查更新**：对照 GitHub 与本机版本显示更新状态，在源码工作树安全时直接
+  fast-forward 更新并重建本地 App。
+
 ![HIQS 首页：并发课程同步、聚合进度与资料状态](docs/images/ui/home-sync-workflow.png)
 
 ## 目录
@@ -45,6 +48,7 @@ HIQS 将课程资料、重要日程、课件目录与原始来源集中在同一
 - **状态摘要**：查看课程数、本月日程、待确认日期、OCR、Google 授权与来源冲突。
 - **搜索与 Inbox**：搜索本地资料，并预览个人补充信息的写入变化。
 - **课程管理**：添加或移除课程，并管理对应的日程和本地文件。
+- **版本更新**：顶部按钮在每次启动时检查 GitHub；显示可更新、已是最新版本或检查失败。
 
 ### 日历页
 
@@ -100,12 +104,34 @@ HIQS 将课程资料、重要日程、课件目录与原始来源集中在同一
 定位包含 pyproject.toml 且项目名为 hku-information-query-system 的根目录，完整阅读
 AGENTS.md 与 src/AI_Skills/SKILL.md，并遵循其中的项目边界。检查 Python 版本与系统依赖，
 创建项目专用的 .venv，按照 requirements.lock 安装项目依赖，再安装匹配的 Playwright
-Chromium。运行项目测试或必要的启动检查，确认环境可用后启动 `hsas ui`，让 Dashboard
-自动在本机打开，并向我报告安装位置、运行状态与访问地址。
+Chromium。运行项目测试或必要的启动检查；如果当前系统是 macOS，运行
+`./scripts/build_macos_app.sh` 并打开 `dist/HIQS.app`；其他系统启动 `hsas ui`。向我报告
+安装位置、运行状态与访问方式。
 
 HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由我在官方页面亲自完成；
 请勿索取、读取或输出密码、验证码、Cookie、sesskey 或访问令牌。
 ```
+
+### macOS 独立应用
+
+完成源码安装后，在项目根目录运行：
+
+```bash
+./scripts/build_macos_app.sh
+open dist/HIQS.app
+```
+
+生成的 `HIQS.app` 使用原生 macOS 窗口显示 Dashboard，不含浏览器地址栏，也无需输入本地
+IP。应用会自动启动随机回环端口上的 HIQS 后端，并在退出时停止由它启动的进程；Moodle、
+HKU Portal 与 SIS 登录仍会在官方浏览器窗口中完成。
+
+这个轻量 App 绑定构建时的项目目录和 `.venv`，课程资料仍保存在当前用户的 Application
+Support 目录。移动或重装源码环境后，重新运行构建脚本即可。构建过程仅产生本机 ad-hoc
+签名的 `.app`，不会生成需要公开签名与 notarization 的 DMG。
+
+App 每次启动会比较 GitHub `main` 与本机版本。自动更新只接受官方 `origin`、干净工作树
+和 fast-forward；检测到未提交修改或分叉时会停止并提示交给 Agent 处理。更新源码和必要
+依赖后会重建 `HIQS.app`，课程文件与 `information.json` 不在 Git 更新范围内。
 
 ## 使用方式
 
@@ -124,6 +150,18 @@ HIQS 只绑定本机回环地址。Moodle、HKU Portal、SSO 与 MFA 登录由�
 - **单份课件阅读**：从资料卡复制提示词，总结重点、公式、要求与页码。
 - **复习与学习指导**：让 Agent 解释概念、比较课程负担或整理复习方向。
 - **来源核对**：答案保留相关来源，并明确待确认或互相冲突的信息。
+
+### 连接支持 MCP 的 AI
+
+HIQS 提供本地 stdio MCP Server。安装项目后运行：
+
+```bash
+hiqs-mcp
+```
+
+MCP 暴露经过统一 `HIQSPort` 的课程信息、ICS 日历、同步状态、同步控制、OCR 和 Personal
+Inbox 工具。MCP 与浏览器 UI 不直接访问 Moodle、Repository 或 JSON 文件；二者都调用同一
+CORE Port，因此来源优先级、确认要求和数据校验不会在不同入口中重复实现。
 
 ### 在 Agent 中写入额外信息
 
@@ -183,6 +221,14 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 本节只记录功能与界面版本，文档措辞和演示图片调整不单独列项。
+
+### 2.7.0 · 2026-09-18
+
+- 新增源码驱动的原生 macOS `HIQS.app`，使用独立 WKWebView 窗口显示 Dashboard；
+- App 自动启动和停止本地后端，外部课程来源与认证页面继续交给系统浏览器；
+- 新增轻量本机构建脚本，不生成 DMG，也不需要把用户路径提交到仓库。
+- 顶栏新增版本状态与安全更新按钮，启动时自动检查 GitHub 版本；
+- AI 信息整理改为逐字段使用现有来源，缺少来源不阻塞写入，实际冲突才按 Moodle 优先级处理。
 
 ### 2.6.0 · 2026-09-18
 

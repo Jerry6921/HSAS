@@ -47,33 +47,31 @@ flowchart LR
 - Calendar：只读投影，展开重复时间并显示具体项目；
 - 用户：授权资料范围，并可通过 AI 对话确认额外事实或更正。
 
-## 四层代码结构
+## CORE、MCP、UI 与 PORT
 
 ```text
 src/hsas/
-├── interfaces/       CLI、本地 HTTP API、HTML/CSS/JavaScript
-├── application/      信息 upsert、资料检索与课程同步用例
-├── domain/
-│   ├── information/  information.json 与 update 的严格模型
-│   └── courses/      Moodle 归档、文件与文本分析模型
-└── infrastructure/
-    ├── moodle/       登录、发现、下载和快照事务
-    ├── sis_course_info/ HKU SIS 登录、课程页面采集与独立 checkpoint
-    ├── documents/    PDF、DOCX、PPTX 文本提取与本地 OCR
-    ├── storage/      原子 JSON/文件持久化
-    └── runtime/      本地数据目录
+├── core/             业务模块及唯一公开 HIQSPort
+├── mcp/              面向 AI 的 MCP tools
+├── ui/               面向用户的 HTTP API、HTML/CSS/JavaScript
+├── domain/           CORE 内部纯模型与规则
+├── application/      CORE 内部用例
+├── infrastructure/   CORE 内部来源、存储和运行时适配器
+└── interfaces/       旧导入路径与 CLI 兼容层
 ```
 
-依赖方向保持：
+`HIQSPort` 是 CORE 对外的稳定用例契约。MCP 与 UI 接受注入的 Port，不导入
+domain、application、infrastructure 或彼此的实现：
 
 ```text
-interfaces ──> application ──> domain
-     │
-     └───────> infrastructure ──> application ports + domain
+domain ← application ← infrastructure/composition ← CORE implements HIQSPort
+                                                    ↑               ↑
+                                                   MCP              UI
 ```
 
-领域层保持纯模型与规则。应用层通过
-`InformationRepository` 端口保存信息库，基础设施层提供 JSON 实现。
+领域层保持纯模型与规则。内部应用用例通过 repository/gateway ports 使用外部系统，
+基础设施提供实现；这些内部对象不会穿过 `HIQSPort`。旧 `interfaces` 包仅保留 CLI 与
+兼容 import，新增 AI 和用户入口必须分别放入 `mcp` 与 `ui`。
 
 ## Moodle Collector
 
@@ -233,11 +231,21 @@ AI 关联的学习材料和来源。`GET /api/source-preview` 只接受当前课
 ## macOS App 与发布包
 
 `HIQS.app` 使用 Swift/AppKit 创建原生窗口，并以 WKWebView 承载 Dashboard。App 启动时从
-Bundle Resources 运行 PyInstaller 冻结的 `hiqs-backend`，令其绑定随机回环端口；从后端
-启动输出取得地址后加载页面。窗口不提供地址栏，HTTP 服务继续限制在 `127.0.0.1`。
+源码构建配置指向当前项目的 `.venv/bin/hsas`；完整发布构建则从 Bundle Resources 运行
+PyInstaller 冻结的 `hiqs-backend`。两种模式都会绑定随机回环端口，并从后端启动输出取得
+地址后加载页面。窗口不提供地址栏，HTTP 服务继续限制在 `127.0.0.1`。
 
 WKNavigationDelegate 允许回环页面导航，并把 Moodle 等外部 HTTP(S) 链接交给系统浏览器。
-App 退出时终止后端子进程。DMG 构建脚本同时打包匹配的 Playwright Chromium，并通过
+App 退出时终止它启动的后端子进程。源码构建使用现有项目环境和 Playwright 安装：
+`scripts/build_macos_app.sh` 只编译 Swift Launcher、写入构建者自己的项目位置并生成 ad-hoc
+签名的 `dist/HIQS.app`，本机路径不会进入 Git。
+
+Dashboard 启动后通过固定的 GitHub raw version URL 只读比较版本。自动更新仅对官方
+`origin` 的 Git 源码安装开放，并要求工作树干净、当前 HEAD 是 `origin/main` 的祖先；随后
+使用 `git merge --ff-only`，仅在依赖文件变化时更新 `.venv` 与 Playwright，最后重建
+`HIQS.app`。用户课程资料位于 Application Support，不参与源码更新。
+
+DMG 构建脚本同时打包匹配的 Playwright Chromium，并通过
 `PLAYWRIGHT_BROWSERS_PATH` 指向 Bundle 内浏览器，因此登录和同步不依赖额外安装步骤。
 
 `scripts/build_macos_dmg.sh` 固定执行 Python 冻结、Swift 编译、Bundle 组装、ad-hoc 签名、

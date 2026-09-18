@@ -27,6 +27,7 @@ const state = {
   view: "home",
   query: "",
   homeQuery: "",
+  applicationUpdate: null,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -676,6 +677,16 @@ async function openSourcePreview(source) {
     original.classList.remove("hidden");
     body.replaceChildren();
     if (payload.preview_kind === "pdf") {
+      if (payload.text) {
+        const fallback = element("details", "preview-text-fallback");
+        fallback.append(
+          element("summary", "", "PDF 预览为空？查看已提取文本"),
+          element("pre", "preview-text", payload.text),
+        );
+        body.append(fallback);
+      } else {
+        body.append(element("p", "preview-pdf-help", "若 PDF 未显示，请使用下方的“打开原文”。"));
+      }
       const page = payload.page_numbers.length ? `#page=${payload.page_numbers[0]}` : "";
       const frame = element("iframe", "preview-frame");
       frame.src = `${localUrl}${page}`;
@@ -1494,6 +1505,79 @@ async function loadInformation() {
   }
 }
 
+function renderApplicationUpdate(value) {
+  const button = byId("app-update");
+  state.applicationUpdate = value;
+  button.dataset.status = value.status;
+  button.title = value.message || "";
+  button.disabled = value.status === "checking" || value.status === "updating" || value.status === "updated";
+  if (value.status === "available") {
+    button.textContent = value.can_apply
+      ? `更新至 ${value.latest_version}`
+      : `发现更新 ${value.latest_version}`;
+  } else if (value.status === "current") {
+    button.textContent = "已是最新版本";
+  } else if (value.status === "ahead") {
+    button.textContent = "本机版本较新";
+  } else if (value.status === "updated") {
+    button.textContent = "更新完成 · 请重启";
+  } else if (value.status === "updating") {
+    button.textContent = "正在更新…";
+  } else if (value.status === "error") {
+    button.textContent = "检查更新";
+  } else {
+    button.textContent = "正在检查更新…";
+  }
+}
+
+async function checkApplicationUpdate() {
+  if (window.location.protocol === "file:") return;
+  renderApplicationUpdate({ status: "checking", message: "正在检查 GitHub 版本。" });
+  try {
+    const response = await fetch("/api/update/status", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "无法检查更新");
+    renderApplicationUpdate(payload);
+  } catch (error) {
+    renderApplicationUpdate({ status: "error", message: error.message });
+  }
+}
+
+async function applyApplicationUpdate() {
+  const update = state.applicationUpdate;
+  if (!update || update.status !== "available") {
+    await checkApplicationUpdate();
+    return;
+  }
+  if (!update.can_apply) {
+    const alert = byId("global-error");
+    alert.textContent = update.message || "当前源码目录无法自动更新。";
+    alert.classList.remove("hidden");
+    return;
+  }
+  const confirmed = window.confirm(
+    `将从官方 GitHub main 更新 HIQS ${update.current_version} → ${update.latest_version}。更新仅在工作树干净且可以 fast-forward 时执行；课程资料不会改变。继续吗？`,
+  );
+  if (!confirmed) return;
+  renderApplicationUpdate({ ...update, status: "updating", message: "正在更新 HIQS。" });
+  const result = await runLocalMutation(
+    "/api/update/apply",
+    { confirmed: true },
+    "正在从 GitHub 更新 HIQS；请保持应用打开…",
+  );
+  if (!result) {
+    await checkApplicationUpdate();
+    return;
+  }
+  renderApplicationUpdate({
+    status: result.restart_required ? "updated" : "current",
+    current_version: result.current_version,
+    latest_version: result.current_version,
+    message: result.message,
+  });
+  setOperationState(false, result.message);
+}
+
 function setOperationState(running, message = "") {
   const reloadButton = byId("reload-data");
   const ocrButton = byId("run-ocr");
@@ -1769,6 +1853,7 @@ byId("show-reconciliation").addEventListener("click", showReconciliation);
 byId("reload-data").addEventListener("click", async () => {
   await loadInformation();
 });
+byId("app-update").addEventListener("click", applyApplicationUpdate);
 byId("start-workflow").addEventListener("click", startWorkflow);
 byId("retry-failures").addEventListener("click", retryFailures);
 byId("copy-agent-prompt").addEventListener("click", copyAgentPrompt);
@@ -1804,3 +1889,4 @@ byId("delete-selected-courses").addEventListener("click", deleteSelectedCourses)
 
 loadInformation();
 pollCourseSync();
+checkApplicationUpdate();

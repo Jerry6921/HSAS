@@ -2,18 +2,29 @@ import AppKit
 import Foundation
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDownloadDelegate {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var backend: Process?
     private var outputPipe: Pipe?
     private var outputBuffer = Data()
     private var backendURL: URL?
+    private var backendLog: FileHandle?
+    private var terminationSignal: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installTerminationHandler()
         createWindow()
         startBackend()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func installTerminationHandler() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminationSignal = source
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -22,9 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         outputPipe?.fileHandleForReading.readabilityHandler = nil
+        try? backendLog?.close()
         if let process = backend, process.isRunning {
             process.terminate()
-            process.waitUntilExit()
         }
     }
 
@@ -60,17 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             showStartupError("应用资源目录不存在。")
             return
         }
-        let executable = resources.appendingPathComponent("backend/hiqs-backend")
+        guard let launch = backendLaunch(resources: resources) else { return }
         let browserRoot = resources.appendingPathComponent("playwright-browsers")
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            showStartupError("HIQS 后端文件不存在或无法执行。")
-            return
-        }
 
         let process = Process()
         let pipe = Pipe()
-        process.executableURL = executable
+        process.executableURL = launch.executable
         process.arguments = ["ui", "--port", "0", "--no-open"]
+        process.currentDirectoryURL = launch.workingDirectory
         process.standardOutput = pipe
         process.standardError = pipe
         var environment = ProcessInfo.processInfo.environment
@@ -92,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             }
         }
         do {
+            backendLog = openLog()
             try process.run()
             backend = process
             outputPipe = pipe
@@ -101,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     private func consumeBackendOutput(_ data: Data) {
+        try? backendLog?.write(contentsOf: data)
         outputBuffer.append(data)
         guard let text = String(data: outputBuffer, encoding: .utf8) else { return }
         for line in text.split(separator: "\n") {
@@ -111,6 +121,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             webView?.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
             return
         }
+    }
+
+    private func backendLaunch(resources: URL) -> (executable: URL, workingDirectory: URL?)? {
+        let bundled = resources.appendingPathComponent("backend/hiqs-backend")
+        if FileManager.default.isExecutableFile(atPath: bundled.path) {
+            return (bundled, nil)
+        }
+
+        guard let rootPath = Bundle.main.object(forInfoDictionaryKey: "HIQSProjectRoot") as? String,
+              !rootPath.isEmpty else {
+            showStartupError("应用没有绑定 HIQS 项目。请在源码目录重新运行构建脚本。")
+            return nil
+        }
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+        let executable = root.appendingPathComponent(".venv/bin/hsas")
+        let project = root.appendingPathComponent("pyproject.toml")
+        guard FileManager.default.fileExists(atPath: project.path),
+              FileManager.default.isExecutableFile(atPath: executable.path) else {
+            showStartupError("找不到项目环境。请保留源码目录和 .venv，或重新构建 HIQS.app。")
+            return nil
+        }
+        return (executable, root)
+    }
+
+    private func openLog() -> FileHandle? {
+        let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/HSAS", isDirectory: true)
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let path = logs.appendingPathComponent("desktop.log")
+        if !FileManager.default.fileExists(atPath: path.path) {
+            FileManager.default.createFile(atPath: path.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: path) else { return nil }
+        _ = try? handle.seekToEnd()
+        return handle
     }
 
     private func showStartupError(_ message: String) {
@@ -131,7 +176,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             decisionHandler(.cancel)
             return
         }
-        if url.host == "127.0.0.1" || url.scheme == "about" {
+        if url.scheme == "about" ||
+            (url.host == backendURL?.host && url.port == backendURL?.port) {
+            if navigationAction.shouldPerformDownload {
+                decisionHandler(.download)
+                return
+            }
+            if navigationAction.targetFrame == nil {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
             decisionHandler(.allow)
             return
         }
@@ -139,6 +194,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             NSWorkspace.shared.open(url)
         }
         decisionHandler(.cancel)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        download.delegate = self
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let safeName = URL(fileURLWithPath: suggestedFilename).lastPathComponent.isEmpty
+            ? "HIQS-download"
+            : URL(fileURLWithPath: suggestedFilename).lastPathComponent
+        let safeURL = URL(fileURLWithPath: safeName)
+        let stem = safeURL.deletingPathExtension().lastPathComponent
+        let fileExtension = safeURL.pathExtension
+        var destination = downloads.appendingPathComponent(safeName)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: destination.path) {
+            let nextName = fileExtension.isEmpty
+                ? "\(stem)-\(suffix)"
+                : "\(stem)-\(suffix).\(fileExtension)"
+            destination = downloads.appendingPathComponent(nextName)
+            suffix += 1
+        }
+        completionHandler(destination)
     }
 }
 

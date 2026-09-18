@@ -16,6 +16,9 @@ facts. `information.json` is the canonical database consumed by the calendar.
 5. Use stable IDs. Reuse the same `course_id` and `item_id` when correcting an existing fact.
    Set `moodle_course_id` from the matching local archive when it differs from the information ID.
 6. Preserve pending dates, weights, locations, or requirements as `null`, empty, or `date_status: unknown`. Fill fields from cited evidence.
+   Do not require the same field to appear in every synchronized source. One
+   appropriate available source is sufficient; ignore missing coverage in other
+   sources and use `unknown` only when no available evidence supplies the field.
 7. Attach a human-checkable `sources` entry to every important deadline, weight, requirement, policy, or timetable rule when evidence is available. Attach directly related courseware in the item's `materials` array.
 8. Run `hsas information validate <UPDATE.json>` and fix every validation error.
 9. Review conflicts and tentative values. Apply only when authorized: `hsas information apply <UPDATE.json> --sis-enrollment-changes <ENROLLMENT_CHANGES.json> --changes <CHANGES.json> --confirmed`.
@@ -62,6 +65,7 @@ An upsert record contains the complete reviewed state of that record.
   keep its announcement or timetable evidence in the exception `sources`.
 - `date_status: confirmed` requires an actual date or recurrence.
 - When another source conflicts with current Moodle evidence, write the Moodle-supported value and describe both values in `warnings` and `sources`. Derive status from the Moodle evidence; a lower-priority contradiction alone does not make an otherwise explicit Moodle date tentative.
+- Absence is not conflict: a source that omits a date, room, weight or requirement does not invalidate a supported value from another source and does not need a warning by itself.
 
 ## Related learning materials
 

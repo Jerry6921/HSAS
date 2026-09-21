@@ -8,8 +8,7 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.retrieve_materials import search_materials
-from hsas.domain.courses import ArchiveIndex, iter_files
+from hsas.application.retrieve_materials import list_materials, search_materials
 from hsas.infrastructure.runtime import get_runtime_paths
 
 
@@ -29,47 +28,16 @@ def materials_list(
 ) -> None:
     """Print a machine-readable manifest of every locally downloaded file."""
     resources = _resources(ctx)
-    selected = set(course_ids or [])
-    documents: list[dict] = []
     try:
-        for archive_path in sorted((resources / "courses").glob("*/course.json")):
-            index = ArchiveIndex.from_json(archive_path)
-            course_id = index.archive.course.course_id
-            if selected and course_id not in selected:
-                continue
-            for activity, stored_file in iter_files(index.archive):
-                analysis = stored_file.analysis
-                documents.append(
-                    {
-                        "course_id": course_id,
-                        "course_title": index.archive.course.title,
-                        "activity_id": activity.module_id,
-                        "activity_name": activity.name,
-                        "filename": stored_file.filename,
-                        "relative_path": stored_file.relative_path,
-                        "local_path": str((resources / stored_file.relative_path).resolve()),
-                        "content_type": stored_file.content_type,
-                        "size_bytes": stored_file.size_bytes,
-                        "sha256": stored_file.sha256,
-                        "downloaded_at": stored_file.downloaded_at.isoformat(),
-                        "text_path": (
-                            str((resources / analysis.extracted_text_path).resolve())
-                            if analysis and analysis.extracted_text_path
-                            else None
-                        ),
-                        "analysis_status": analysis.status if analysis else None,
-                        "analysis_warnings": analysis.warnings if analysis else [],
-                    }
-                )
+        payload = list_materials(
+            resources,
+            course_ids=set(course_ids) if course_ids else None,
+        )
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
         json.dumps(
-            {
-                "resources_dir": str(resources.resolve()),
-                "document_count": len(documents),
-                "documents": documents,
-            },
+            payload,
             ensure_ascii=False,
             indent=2,
         )

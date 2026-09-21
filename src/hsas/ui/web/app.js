@@ -14,6 +14,40 @@ const categoryLabels = {
   other: "其他",
 };
 
+const categoryColors = {
+  class: "#4f7df3",
+  tutorial: "#8b5cf6",
+  lab: "#10a36f",
+  office_hour: "#64748b",
+  assignment: "#d97706",
+  quiz: "#ca8a04",
+  exam: "#dc3545",
+  presentation: "#db3f8d",
+  project: "#9a6700",
+  report: "#ea580c",
+  reading: "#168aad",
+  deadline: "#c92a2a",
+  other: "#64748b",
+};
+
+const categoryOrder = [
+  "assignment", "quiz", "exam", "project", "report", "presentation",
+  "class", "tutorial", "lab", "office_hour", "reading", "deadline", "other",
+];
+
+const timeGridStartHour = 7;
+const timeGridHourHeight = 34;
+
+function timeGridOffset(minutes) {
+  return Math.max(0, minutes - timeGridStartHour * 60) / 60 * timeGridHourHeight;
+}
+
+function timeGridEventHeight(startMinutes, endMinutes) {
+  const visibleStart = Math.max(startMinutes, timeGridStartHour * 60);
+  const visibleEnd = Math.max(visibleStart, endMinutes);
+  return Math.max(20, (visibleEnd - visibleStart) / 60 * timeGridHourHeight);
+}
+
 const state = {
   data: null,
   currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -23,12 +57,17 @@ const state = {
   selectedItemId: null,
   selectedDateKey: null,
   selectedOverviewCourseId: null,
+  courseContentMode: "materials",
   managerSelectedCourseIds: new Set(),
   view: "home",
   query: "",
   homeQuery: "",
   applicationUpdate: null,
 };
+
+function categoryColor(item) {
+  return categoryColors[item.category] || categoryColors.other;
+}
 
 const byId = (id) => document.getElementById(id);
 
@@ -66,8 +105,12 @@ function mondayIndex(date) {
 }
 
 function visibleRange() {
+  if (state.calendarMode === "week") {
+    const start = addDays(state.selectedDay, -state.selectedDay.getDay());
+    return { start, end: addDays(start, 6) };
+  }
   const first = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth(), 1);
-  const start = addDays(first, -mondayIndex(first));
+  const start = addDays(first, -first.getDay());
   return { start, end: addDays(start, 41) };
 }
 
@@ -503,6 +546,9 @@ function renderReconciliation() {
   container.replaceChildren();
   if (!reconciliation) return;
   const labels = reconciliation.source_labels || {};
+  const sourceOrder = reconciliation.source_order || Object.keys(labels);
+  byId("reconciliation-authority").textContent = reconciliation.authority_note
+    || "课程事实以 Moodle 为最高优先级；SIS 与官方课表补充 Moodle 未说明的字段。";
   const attention = reconciliation.counts?.attention || 0;
   byId("reconciliation-count").textContent = attention ? `${attention} 门待处理` : "来源已对齐";
   for (const course of reconciliation.rows || []) {
@@ -513,7 +559,8 @@ function renderReconciliation() {
     const stateLabel = course.state === "complete" ? "已对齐" : course.state === "legacy" ? "历史资料" : "需要处理";
     heading.append(copy, element("span", `reconciliation-state ${course.state}`, stateLabel));
     const sources = element("div", "reconciliation-sources");
-    for (const [key, label] of Object.entries(labels)) {
+    for (const key of sourceOrder) {
+      const label = labels[key] || key;
       const present = Boolean(course.sources?.[key]);
       const source = element("div", `source-check ${present ? "present" : "missing"}`);
       source.append(element("i", ""), element("span", "", label), element("strong", "", present ? "已有" : "缺失"));
@@ -608,14 +655,12 @@ function renderMaterialCard(list, material) {
     const copy = element("div", "material-copy");
     const titleLine = element("div", "material-title-line");
     titleLine.append(element("strong", "", material.title));
-    if (material.material_type) {
-      titleLine.append(element("span", "material-type-badge", material.material_type));
-    }
     if (material.change_action) {
       const labels = { baseline: "首次待整理", added: "新增", modified: "已更新", removed: "已删除" };
       titleLine.append(element("span", "update-badge", labels[material.change_action] || "有变化"));
     }
     const meta = [
+      material.material_type,
       material.section_title,
       material.activity_name !== material.title ? material.activity_name : null,
       formatBytes(material.size_bytes),
@@ -707,6 +752,97 @@ async function openSourcePreview(source) {
   }
 }
 
+function courseItemsFor(course) {
+  return state.data.items
+    .filter((item) => item.course_id === course.course_id)
+    .sort((left, right) => {
+      const leftDate = primaryDateKey(left) || left.recurrence?.valid_from || "9999-12-31";
+      const rightDate = primaryDateKey(right) || right.recurrence?.valid_from || "9999-12-31";
+      return leftDate.localeCompare(rightDate)
+        || categoryOrder.indexOf(left.category) - categoryOrder.indexOf(right.category)
+        || left.title.localeCompare(right.title);
+    });
+}
+
+function courseItemDateLabel(item) {
+  const due = formatDateTime(item.due_at) || item.due_on;
+  if (due) return `截止 ${due}`;
+  const scheduled = formatDateTime(item.starts_at) || item.scheduled_on;
+  if (scheduled) return `安排 ${scheduled}`;
+  if (item.recurrence) {
+    const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+    const days = item.recurrence.weekdays.map((value) => `周${weekdays[value]}`).join("、");
+    return `${days} ${item.recurrence.start_time.slice(0, 5)}–${item.recurrence.end_time.slice(0, 5)}`;
+  }
+  const opens = formatDateTime(item.opens_at);
+  return opens ? `开放 ${opens}` : "日期待确认";
+}
+
+function renderCourseItemCard(list, item) {
+  const card = element("article", "material-card course-item-row");
+  card.style.setProperty("--item-color", categoryColor(item));
+  const main = element("button", "material-card-main course-item-main");
+  main.type = "button";
+  const icon = element("span", "material-icon course-item-icon", "◆");
+  const copy = element("div", "material-copy course-item-copy");
+  const titleLine = element("div", "material-title-line course-item-title-line");
+  titleLine.append(
+    element("h4", "", item.title),
+    element(
+      "span",
+      `date-state ${item.date_status}`,
+      item.date_status === "confirmed" ? "已确认" : item.date_status === "tentative" ? "待核实" : "日期未知",
+    ),
+  );
+  const meta = [
+    categoryLabels[item.category] || item.category,
+    courseItemDateLabel(item),
+    item.location,
+    item.weight_percent === null || item.weight_percent === undefined ? null : `占分 ${item.weight_percent}%`,
+    (item.materials || []).length ? `${item.materials.length} 份相关资料` : null,
+  ].filter(Boolean).join(" · ");
+  copy.append(titleLine, element("small", "course-item-meta", meta));
+  if (item.description) copy.append(element("small", "course-item-description", item.description));
+  main.append(icon, copy, element("span", "material-open", "详情"));
+  main.addEventListener("click", () => {
+    state.selectedItemId = item.item_id;
+    state.selectedDateKey = primaryDateKey(item);
+    renderDetail(item, state.selectedDateKey);
+  });
+  const promptButton = element("button", "material-prompt-copy course-item-prompt-copy", "复制 AI 提示词");
+  promptButton.type = "button";
+  promptButton.disabled = !item.agent_prompt;
+  promptButton.addEventListener("click", () => copyText(
+    item.agent_prompt,
+    `“${item.title}”活动查询提示词已复制。`,
+  ));
+  card.append(main, promptButton);
+  list.append(card);
+}
+
+function renderCourseItems(parent, course) {
+  const items = courseItemsFor(course);
+  if (!items.length) {
+    parent.append(element("p", "overview-empty", "当前课程还没有结构化活动。"));
+    return;
+  }
+  for (const category of categoryOrder) {
+    const values = items.filter((item) => item.category === category);
+    if (!values.length) continue;
+    const group = element("section", "course-item-group");
+    group.style.setProperty("--item-color", categoryColors[category] || categoryColors.other);
+    const heading = element("div", "course-item-group-heading");
+    heading.append(
+      element("h3", "", categoryLabels[category] || category),
+      element("span", "", `${values.length} 项`),
+    );
+    const list = element("div", "course-item-list");
+    for (const item of values) renderCourseItemCard(list, item);
+    group.append(heading, list);
+    parent.append(group);
+  }
+}
+
 function renderCourseOverview() {
   const course = state.data.courses.find((value) => value.course_id === state.selectedOverviewCourseId);
   const container = byId("course-overview");
@@ -758,15 +894,33 @@ function renderCourseOverview() {
   upper.append(summary, grades);
   container.append(upper);
 
-  const materials = element("section", "course-materials-card");
+  const materials = element("section", "course-materials-card course-content-card");
   const materialHeading = element("div", "course-materials-title");
   materialHeading.append(element("div", "", null));
-  materialHeading.firstChild.append(element("p", "eyebrow", "MOODLE ARCHIVE"), element("h2", "", "全部课件"));
+  const showingMaterials = state.courseContentMode === "materials";
+  materialHeading.firstChild.append(
+    element("p", "eyebrow", "COURSE CONTENT"),
+    element("h2", "", showingMaterials ? "全部课件" : "课程活动"),
+  );
   const counts = course.moodle
     ? `${course.moodle.downloaded_file_count} 个本地文件 · ${course.moodle.activity_count} 个 Moodle 项目`
     : "尚未同步 Moodle 快照";
   const materialActions = element("div", "course-material-actions");
-  materialActions.append(element("span", "archive-summary", counts));
+  const switcher = element("div", "course-content-switch");
+  switcher.setAttribute("role", "group");
+  switcher.setAttribute("aria-label", "课程内容类型");
+  for (const [mode, label] of [["materials", "课件"], ["activities", "活动"]]) {
+    const button = element("button", `course-content-option ${state.courseContentMode === mode ? "active" : ""}`, label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(state.courseContentMode === mode));
+    button.addEventListener("click", () => {
+      state.courseContentMode = mode;
+      renderCourseOverview();
+    });
+    switcher.append(button);
+  }
+  materialActions.append(switcher);
+  materialActions.append(element("span", "archive-summary", showingMaterials ? counts : `${courseItemsFor(course).length} 项结构化活动`));
   const recentPrompt = element("button", "button compact", "复制最近 Lecture 提示词");
   recentPrompt.type = "button";
   recentPrompt.disabled = !course.agent_prompts?.recent_lecture_materials;
@@ -774,24 +928,28 @@ function renderCourseOverview() {
     course.agent_prompts?.recent_lecture_materials,
     `${course.code || course.title} 最近 Lecture 课件提示词已复制。`,
   ));
-  materialActions.append(recentPrompt);
+  if (showingMaterials) materialActions.append(recentPrompt);
   materialHeading.append(materialActions);
   materials.append(materialHeading);
-  for (const section of course.materials?.sections || []) {
-    renderMaterialSection(materials, section.title, section.description, section.materials || []);
-  }
-  const unclassified = course.materials?.unclassified || [];
-  if (unclassified.length) {
-    renderMaterialSection(
-      materials,
-      "待 AI 分类",
-      "这些资料尚未写入 AI 自由命名的课程栏位。",
-      unclassified,
-      "material-unclassified",
-    );
-  }
-  if (!allCourseMaterials(course).length) {
-    materials.append(element("p", "overview-empty", "当前 Moodle 快照中没有课程资料。"));
+  if (showingMaterials) {
+    for (const section of course.materials?.sections || []) {
+      renderMaterialSection(materials, section.title, section.description, section.materials || []);
+    }
+    const unclassified = course.materials?.unclassified || [];
+    if (unclassified.length) {
+      renderMaterialSection(
+        materials,
+        "待 AI 分类",
+        "这些资料尚未写入 AI 自由命名的课程栏位。",
+        unclassified,
+        "material-unclassified",
+      );
+    }
+    if (!allCourseMaterials(course).length) {
+      materials.append(element("p", "overview-empty", "当前 Moodle 快照中没有课程资料。"));
+    }
+  } else {
+    renderCourseItems(materials, course);
   }
   container.append(materials);
 }
@@ -930,17 +1088,24 @@ function renderCalendar(occurrences) {
   const grid = byId("calendar-grid");
   grid.replaceChildren();
   const isMonth = state.calendarMode === "month";
+  const isWeek = state.calendarMode === "week";
   byId("weekday-row").classList.toggle("hidden", !isMonth);
   grid.classList.toggle("hidden", !isMonth);
-  byId("daily-agenda").classList.toggle("hidden", isMonth);
+  byId("weekly-agenda").classList.toggle("hidden", !isWeek);
+  byId("daily-agenda").classList.toggle("hidden", state.calendarMode !== "day");
   byId("month-view-button").classList.toggle("active", isMonth);
-  byId("day-view-button").classList.toggle("active", !isMonth);
-  byId("calendar-title").textContent = isMonth ? "课程日历" : "每日议程";
+  byId("week-view-button").classList.toggle("active", isWeek);
+  byId("day-view-button").classList.toggle("active", state.calendarMode === "day");
+  byId("calendar-title").textContent = isMonth ? "课程日历" : isWeek ? "每周日历" : "每日议程";
   const label = new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long" }).format(state.currentMonth);
-  byId("calendar-label").textContent = isMonth
-    ? label
-    : new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(state.selectedDay);
-  if (!isMonth) {
+  if (isWeek) {
+    const { start, end } = visibleRange();
+    byId("calendar-label").textContent = `${new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(start)} – ${new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric", year: "numeric" }).format(end)}`;
+    renderWeeklyAgenda(occurrences);
+    return;
+  }
+  byId("calendar-label").textContent = isMonth ? label : new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(state.selectedDay);
+  if (state.calendarMode === "day") {
     renderDailyAgenda(occurrences);
     return;
   }
@@ -969,25 +1134,49 @@ function renderCalendar(occurrences) {
     cell.append(dayButton);
     const list = element("div", "day-events");
     const values = grouped.get(key) || [];
-    for (const occurrence of values.slice(0, 4)) {
+    for (const occurrence of values.slice(0, 3)) {
       const course = courseFor(occurrence.item);
-      const chip = element("button", "event-chip");
-      chip.type = "button";
+      const chip = element("article", "event-chip");
       chip.style.setProperty("--course-color", course.color);
+      chip.style.setProperty("--item-color", categoryColor(occurrence.item));
       if (occurrence.item.date_status !== "confirmed") chip.classList.add("tentative");
       if (state.selectedItemId === occurrence.item.item_id && state.selectedDateKey === key) chip.classList.add("selected");
-      if (occurrence.time) chip.append(element("time", "", occurrence.time));
-      chip.append(document.createTextNode(occurrence.title || occurrence.item.title));
-      chip.title = `${course.code} · ${occurrence.title || occurrence.item.title}`;
-      chip.addEventListener("click", () => {
+      const main = element("button", "event-chip-main");
+      main.type = "button";
+      const heading = element("span", "event-card-heading");
+      heading.append(
+        element("strong", "event-card-title", occurrence.title || occurrence.item.title),
+        element("time", "", occurrence.time || ""),
+      );
+      const courseLine = element("span", "event-course", `🎓 ${course.code || course.title}`);
+      const tags = element("span", "event-tags");
+      tags.append(
+        element("span", "event-category", categoryLabels[occurrence.item.category] || occurrence.item.category),
+        element(
+          "span",
+          `event-date-status ${occurrence.item.date_status}`,
+          occurrence.item.date_status === "confirmed" ? "confirmed" : occurrence.item.date_status === "tentative" ? "tentative" : "unknown",
+        ),
+      );
+      main.append(heading, courseLine, tags);
+      main.title = `${course.code} · ${occurrence.title || occurrence.item.title}`;
+      main.addEventListener("click", () => {
         state.selectedItemId = occurrence.item.item_id;
         state.selectedDateKey = key;
         renderDetail(occurrence.item, key);
         renderCalendar(occurrences);
       });
+      const prompt = element("button", "event-prompt-copy", "复制 AI 提示词");
+      prompt.type = "button";
+      prompt.disabled = !occurrence.item.agent_prompt;
+      prompt.addEventListener("click", () => copyText(
+        occurrence.item.agent_prompt,
+        `“${occurrence.item.title}”活动查询提示词已复制。`,
+      ));
+      chip.append(main, prompt);
       list.append(chip);
     }
-    if (values.length > 4) list.append(element("span", "more-count", `另有 ${values.length - 4} 项`));
+    if (values.length > 3) list.append(element("span", "more-count", `另有 ${values.length - 3} 项`));
     cell.append(list);
     grid.append(cell);
   }
@@ -1025,7 +1214,7 @@ function renderDailyAgenda(occurrences) {
 
   const scroll = element("div", "agenda-scroll");
   const timeline = element("div", "agenda-timeline");
-  for (let hour = 0; hour < 24; hour += 1) {
+  for (let hour = timeGridStartHour; hour < 24; hour += 1) {
     const row = element("div", "agenda-hour");
     row.append(element("time", "agenda-hour-label", `${String(hour).padStart(2, "0")}:00`));
     timeline.append(row);
@@ -1037,8 +1226,8 @@ function renderDailyAgenda(occurrences) {
     const endMinutes = endValue ? timeMinutes(endValue) : startMinutes + 50;
     const duration = Math.max(30, endMinutes > startMinutes ? endMinutes - startMinutes : 50);
     const event = buildAgendaEvent(occurrence, key, values, false);
-    event.style.setProperty("--event-top", `${startMinutes / 60 * 58}px`);
-    event.style.setProperty("--event-height", `${Math.max(36, duration / 60 * 58)}px`);
+    event.style.setProperty("--event-top", `${timeGridOffset(startMinutes)}px`);
+    event.style.setProperty("--event-height", `${timeGridEventHeight(startMinutes, startMinutes + duration)}px`);
     eventLayer.append(event);
   }
   timeline.append(eventLayer);
@@ -1046,13 +1235,152 @@ function renderDailyAgenda(occurrences) {
   const now = new Date();
   if (dateKey(now) === key) {
     const marker = element("div", "agenda-now-line");
-    marker.style.setProperty("--now-top", `${(now.getHours() * 60 + now.getMinutes()) / 60 * 58}px`);
+    marker.style.setProperty("--now-top", `${timeGridOffset(now.getHours() * 60 + now.getMinutes())}px`);
     timeline.append(marker);
   }
   scroll.append(timeline);
   container.append(scroll);
   const earliest = timed.length ? Math.min(...timed.map((occurrence) => timeMinutes(occurrence.time))) : 8 * 60;
-  scroll.scrollTop = Math.max(0, earliest / 60 * 58 - 58);
+  scroll.scrollTop = Math.max(0, timeGridOffset(earliest) - timeGridHourHeight);
+}
+
+function renderWeeklyAgenda(occurrences) {
+  const container = byId("weekly-agenda");
+  container.replaceChildren();
+  const { start } = visibleRange();
+  const days = Array.from({ length: 7 }, (_, index) => addDays(start, index));
+  const today = dateKey(new Date());
+  const grouped = new Map(days.map((day) => [dateKey(day), []]));
+  for (const occurrence of occurrences) {
+    if (grouped.has(occurrence.key)) grouped.get(occurrence.key).push(occurrence);
+  }
+
+  const header = element("div", "week-header");
+  header.append(element("div", "week-header-spacer"));
+  for (const day of days) {
+    const heading = element("button", `week-day-heading ${dateKey(day) === today ? "today" : ""}`.trim());
+    heading.type = "button";
+    heading.append(
+      element("span", "", new Intl.DateTimeFormat("zh-HK", { weekday: "short" }).format(day)),
+      element("strong", "", day.getDate()),
+    );
+    heading.addEventListener("click", () => {
+      state.selectedDay = day;
+      state.currentMonth = new Date(day.getFullYear(), day.getMonth(), 1);
+      state.calendarMode = "day";
+      renderDataViews();
+    });
+    header.append(heading);
+  }
+  container.append(header);
+
+  const allDay = element("div", "week-all-day");
+  allDay.append(element("span", "week-all-day-label", "全天"));
+  for (const day of days) {
+    const key = dateKey(day);
+    const cell = element("div", "week-all-day-cell");
+    for (const occurrence of (grouped.get(key) || []).filter((value) => !value.time || value.item.all_day)) {
+      const entry = element("article", "week-all-day-entry");
+      entry.style.setProperty("--item-color", categoryColor(occurrence.item));
+      const open = element("button", "week-all-day-event", occurrence.title || occurrence.item.title);
+      open.type = "button";
+      open.addEventListener("click", () => renderDetail(occurrence.item, key));
+      const copy = element("button", "week-all-day-copy", "AI");
+      copy.type = "button";
+      copy.title = "复制 AI 提示词";
+      copy.disabled = !occurrence.item.agent_prompt;
+      copy.addEventListener("click", () => copyText(occurrence.item.agent_prompt, `“${occurrence.item.title}”活动查询提示词已复制。`));
+      entry.append(open, copy);
+      cell.append(entry);
+    }
+    allDay.append(cell);
+  }
+  container.append(allDay);
+
+  const scroll = element("div", "week-scroll");
+  const timeline = element("div", "week-timeline");
+  const gutter = element("div", "week-time-gutter");
+  for (let hour = timeGridStartHour; hour < 24; hour += 1) {
+    const label = element("time", "week-time-label", `${String(hour).padStart(2, "0")}:00`);
+    label.style.setProperty("--slot", hour - timeGridStartHour);
+    gutter.append(label);
+  }
+  timeline.append(gutter);
+  const timedOccurrences = [];
+  for (const day of days) {
+    const key = dateKey(day);
+    const column = element("div", `week-day-column ${key === today ? "today" : ""}`.trim());
+    const timed = (grouped.get(key) || []).filter((value) => value.time && !value.item.all_day);
+    for (const layout of weekEventLayouts(timed)) {
+      const { occurrence, startMinutes, endMinutes, lane, laneCount } = layout;
+      timedOccurrences.push(occurrence);
+      const endValue = occurrence.endTime || occurrenceEndTime(occurrence.item);
+      const duration = Math.max(30, endMinutes > startMinutes ? endMinutes - startMinutes : 50);
+      const event = element("article", "week-event");
+      event.style.setProperty("--item-color", categoryColor(occurrence.item));
+      event.style.setProperty("--event-top", `${timeGridOffset(startMinutes)}px`);
+      event.style.setProperty("--event-height", `${timeGridEventHeight(startMinutes, startMinutes + duration)}px`);
+      event.style.setProperty("--event-left", `${lane / laneCount * 100}%`);
+      event.style.setProperty("--event-width", `${100 / laneCount}%`);
+      const open = element("button", "week-event-main");
+      open.type = "button";
+      open.append(
+        element("strong", "", occurrence.title || occurrence.item.title),
+        element("time", "", endValue ? `${occurrence.time}–${endValue}` : occurrence.time),
+        element("small", "", occurrence.location || occurrence.item.location || courseFor(occurrence.item).code),
+      );
+      open.addEventListener("click", () => renderDetail(occurrence.item, key));
+      const copy = element("button", "week-event-copy", "AI");
+      copy.type = "button";
+      copy.title = "复制 AI 提示词";
+      copy.disabled = !occurrence.item.agent_prompt;
+      copy.addEventListener("click", () => copyText(occurrence.item.agent_prompt, `“${occurrence.item.title}”活动查询提示词已复制。`));
+      event.append(open, copy);
+      column.append(event);
+    }
+    if (key === today) {
+      const now = new Date();
+      const marker = element("div", "week-now-line");
+      marker.style.setProperty("--now-top", `${timeGridOffset(now.getHours() * 60 + now.getMinutes())}px`);
+      column.append(marker);
+    }
+    timeline.append(column);
+  }
+  scroll.append(timeline);
+  container.append(scroll);
+  const earliest = timedOccurrences.length
+    ? Math.min(...timedOccurrences.map((occurrence) => timeMinutes(occurrence.time)))
+    : 8 * 60;
+  scroll.scrollTop = Math.max(0, timeGridOffset(earliest) - timeGridHourHeight);
+}
+
+function weekEventLayouts(occurrences) {
+  const entries = occurrences.map((occurrence) => {
+    const startMinutes = timeMinutes(occurrence.time);
+    const endValue = occurrence.endTime || occurrenceEndTime(occurrence.item);
+    const endMinutes = endValue ? timeMinutes(endValue) : startMinutes + 50;
+    return { occurrence, startMinutes, endMinutes };
+  }).sort((left, right) => left.startMinutes - right.startMinutes || left.endMinutes - right.endMinutes);
+  const groups = [];
+  for (const entry of entries) {
+    const group = groups.at(-1);
+    if (!group || entry.startMinutes >= group.maxEnd) {
+      groups.push({ maxEnd: entry.endMinutes, entries: [entry] });
+    } else {
+      group.entries.push(entry);
+      group.maxEnd = Math.max(group.maxEnd, entry.endMinutes);
+    }
+  }
+  return groups.flatMap((group) => {
+    const laneEnds = [];
+    const assigned = group.entries.map((entry) => {
+      let lane = laneEnds.findIndex((end) => end <= entry.startMinutes);
+      if (lane < 0) lane = laneEnds.length;
+      laneEnds[lane] = entry.endMinutes;
+      return { ...entry, lane };
+    });
+    return assigned.map((entry) => ({ ...entry, laneCount: laneEnds.length }));
+  });
 }
 
 function timeMinutes(value) {
@@ -1066,13 +1394,15 @@ function buildAgendaEvent(occurrence, key, allOccurrences, compact) {
     const button = element("button", compact ? "agenda-item compact" : "agenda-item");
     button.type = "button";
     button.style.setProperty("--course-color", course.color);
+    button.style.setProperty("--item-color", categoryColor(item));
     if (state.selectedItemId === item.item_id && state.selectedDateKey === key) button.classList.add("selected");
     const start = occurrence.time || (item.all_day ? "全天" : "待定");
     const end = occurrence.endTime || occurrenceEndTime(item);
     const copy = element("span", "agenda-copy");
     copy.append(
+      element("span", "agenda-category", categoryLabels[item.category] || item.category),
       element("strong", "", occurrence.title || item.title),
-      element("small", "", [course.code, categoryLabels[item.category] || item.category, occurrence.location || item.location].filter(Boolean).join(" · ")),
+      element("small", "", [course.code, occurrence.location || item.location].filter(Boolean).join(" · ")),
     );
     const materialCount = (item.materials || []).length;
     button.append(
@@ -1149,10 +1479,12 @@ function renderDetail(item, occurrenceKey = null) {
     : null;
   panel.replaceChildren();
   panel.style.setProperty("--course-color", course.color);
+  panel.style.setProperty("--item-color", categoryColor(item));
   panel.append(element("div", "detail-course", `${course.code} · ${categoryLabels[item.category] || item.category}`));
   panel.append(element("h2", "", exception?.title || item.title));
 
   const pills = element("div", "detail-pills");
+  pills.append(element("span", "pill category-pill", categoryLabels[item.category] || item.category));
   pills.append(element("span", "pill", item.date_status === "confirmed" ? "日期已确认" : item.date_status === "tentative" ? "日期待核实" : "日期未知"));
   if (item.weight_percent !== null && item.weight_percent !== undefined) pills.append(element("span", "pill", `占分 ${item.weight_percent}%`));
   if (item.warnings && item.warnings.length) pills.append(element("span", "pill warning", `${item.warnings.length} 项提醒`));
@@ -1192,7 +1524,7 @@ function renderDetail(item, occurrenceKey = null) {
     for (const material of item.materials) {
       const card = sourcePreviewButton(material);
       if (material.material_type) {
-        card.prepend(element("span", "material-type-badge", material.material_type));
+        card.append(element("small", "material-type-text", material.material_type));
       }
       block.append(card);
     }
@@ -1229,6 +1561,19 @@ function renderDetail(item, occurrenceKey = null) {
     for (const source of exception.sources) block.append(sourcePreviewButton(source));
     panel.append(block);
   }
+  const actions = element("div", "detail-actions");
+  const copyPrompt = element("button", "button compact", "复制 AI 提示词");
+  copyPrompt.type = "button";
+  copyPrompt.disabled = !item.agent_prompt;
+  copyPrompt.addEventListener("click", () => copyText(item.agent_prompt, `“${item.title}”活动查询提示词已复制。`));
+  actions.append(copyPrompt);
+  if (item.user_created) {
+    const remove = element("button", "button compact danger", "删除事件");
+    remove.type = "button";
+    remove.addEventListener("click", () => deleteCalendarEvent(item));
+    actions.append(remove);
+  }
+  panel.append(actions);
   if (!dialog.open) dialog.showModal();
 }
 
@@ -1238,6 +1583,87 @@ function closeItemDetail() {
   const dialog = byId("item-detail-dialog");
   if (dialog.open) dialog.close();
   renderDataViews();
+}
+
+function setEventTimeFieldState() {
+  const allDay = byId("event-all-day").checked;
+  byId("event-start-time").disabled = allDay;
+  byId("event-end-time").disabled = allDay;
+}
+
+function openEventEditor(date = state.selectedDay) {
+  const form = byId("event-editor-form");
+  form.reset();
+  byId("event-start-time").value = "09:00";
+  byId("event-end-time").value = "10:00";
+  byId("event-date").value = dateKey(date);
+  const courseSelect = byId("event-course");
+  courseSelect.replaceChildren();
+  for (const course of state.data?.courses || []) {
+    const option = element("option", "", `${course.code || course.title} · ${course.title}`);
+    option.value = course.course_id;
+    option.selected = course.course_id === state.selectedOverviewCourseId;
+    courseSelect.append(option);
+  }
+  setEventTimeFieldState();
+  const dialog = byId("event-editor-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeEventEditor() {
+  const dialog = byId("event-editor-dialog");
+  if (dialog.open) dialog.close();
+}
+
+function localEventDateTime(date, time) {
+  return new Date(`${date}T${time}:00`).toISOString();
+}
+
+async function addCalendarEvent(event) {
+  event.preventDefault();
+  const allDay = byId("event-all-day").checked;
+  const date = byId("event-date").value;
+  const startTime = byId("event-start-time").value;
+  const endTime = byId("event-end-time").value;
+  if (!allDay && endTime <= startTime) {
+    window.alert("结束时间必须晚于开始时间。");
+    return;
+  }
+  const title = byId("event-title").value.trim();
+  if (!window.confirm(`将“${title}”写入本地课程日历。继续吗？`)) return;
+  const value = {
+    course_id: byId("event-course").value,
+    title,
+    category: byId("event-category").value,
+    all_day: allDay,
+    scheduled_on: allDay ? date : null,
+    starts_at: allDay ? null : localEventDateTime(date, startTime),
+    ends_at: allDay ? null : localEventDateTime(date, endTime),
+    location: byId("event-location").value.trim() || null,
+    description: byId("event-description").value.trim() || null,
+  };
+  const result = await runLocalMutation(
+    "/api/events/add",
+    { confirmed: true, event: value },
+    "正在校验并添加个人事件…",
+  );
+  if (!result) return;
+  closeEventEditor();
+  await loadInformation();
+  setOperationState(false, `事件已添加：${title}`);
+}
+
+async function deleteCalendarEvent(item) {
+  if (!window.confirm(`确认删除个人事件“${item.title}”吗？删除前会在本机 .trash/items 保存恢复副本。`)) return;
+  const result = await runLocalMutation(
+    "/api/events/delete",
+    { confirmed: true, confirmation: item.item_id, item_id: item.item_id },
+    "正在删除个人事件…",
+  );
+  if (!result) return;
+  closeItemDetail();
+  await loadInformation();
+  setOperationState(false, `事件已删除；恢复副本：${result.recoverable_from}`);
 }
 
 function renderUnscheduled() {
@@ -1254,8 +1680,13 @@ function renderUnscheduled() {
     const button = element("button", "unscheduled-item");
     button.type = "button";
     button.style.setProperty("--course-color", course.color);
+    button.style.setProperty("--item-color", categoryColor(item));
     const copy = element("span");
-    copy.append(element("strong", "", item.title), element("small", "", `${course.code} · ${categoryLabels[item.category] || item.category}`));
+    copy.append(
+      element("span", "category-tag", categoryLabels[item.category] || item.category),
+      element("strong", "", item.title),
+      element("small", "", `${course.code} · ${courseItemDateLabel(item)}`),
+    );
     button.append(copy);
     button.addEventListener("click", () => {
       state.selectedItemId = item.item_id;
@@ -1806,6 +2237,9 @@ byId("previous-month").addEventListener("click", () => {
   if (state.calendarMode === "day") {
     state.selectedDay = addDays(state.selectedDay, -1);
     state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
+  } else if (state.calendarMode === "week") {
+    state.selectedDay = addDays(state.selectedDay, -7);
+    state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
   } else {
     state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() - 1, 1);
   }
@@ -1815,13 +2249,27 @@ byId("next-month").addEventListener("click", () => {
   if (state.calendarMode === "day") {
     state.selectedDay = addDays(state.selectedDay, 1);
     state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
+  } else if (state.calendarMode === "week") {
+    state.selectedDay = addDays(state.selectedDay, 7);
+    state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
   } else {
     state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + 1, 1);
   }
   renderDataViews();
 });
+byId("today-button").addEventListener("click", () => {
+  const today = new Date();
+  state.selectedDay = today;
+  state.currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  renderDataViews();
+});
 byId("month-view-button").addEventListener("click", () => {
   state.calendarMode = "month";
+  renderDataViews();
+});
+byId("week-view-button").addEventListener("click", () => {
+  state.calendarMode = "week";
+  state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
   renderDataViews();
 });
 byId("day-view-button").addEventListener("click", () => {
@@ -1850,6 +2298,7 @@ byId("next-up-card").addEventListener("click", () => {
 });
 byId("show-calendar").addEventListener("click", showCalendar);
 byId("show-reconciliation").addEventListener("click", showReconciliation);
+byId("add-event-button").addEventListener("click", () => openEventEditor());
 byId("reload-data").addEventListener("click", async () => {
   await loadInformation();
 });
@@ -1872,6 +2321,13 @@ byId("item-detail-dialog").addEventListener("close", () => {
   state.selectedItemId = null;
   state.selectedDateKey = null;
   renderDataViews();
+});
+byId("close-event-editor").addEventListener("click", closeEventEditor);
+byId("cancel-event-editor").addEventListener("click", closeEventEditor);
+byId("event-all-day").addEventListener("change", setEventTimeFieldState);
+byId("event-editor-form").addEventListener("submit", addCalendarEvent);
+byId("event-editor-dialog").addEventListener("click", (event) => {
+  if (event.target === byId("event-editor-dialog")) closeEventEditor();
 });
 byId("manage-courses").addEventListener("click", openCourseManager);
 byId("close-course-manager").addEventListener("click", closeCourseManager);

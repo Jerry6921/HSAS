@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKDownloadDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var backend: Process?
@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         configuration.websiteDataStore = .default()
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
+        view.uiDelegate = self
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
@@ -194,6 +195,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             NSWorkspace.shared.open(url)
         }
         decisionHandler(.cancel)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "HIQS"
+        alert.informativeText = message
+        alert.addButton(withTitle: "好")
+        present(alert) { _ in completionHandler() }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "请确认"
+        alert.informativeText = message
+        alert.addButton(withTitle: "继续")
+        alert.addButton(withTitle: "取消")
+        present(alert) { response in
+            completionHandler(response == .alertFirstButtonReturn)
+        }
+    }
+
+    private func present(_ alert: NSAlert, completionHandler: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window {
+            alert.beginSheetModal(for: window, completionHandler: completionHandler)
+        } else {
+            completionHandler(alert.runModal())
+        }
     }
 
     func webView(

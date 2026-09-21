@@ -212,8 +212,11 @@
                 <div class="calendar-controls">
                   <div class="calendar-mode-switch" aria-label="日历视图">
                     <button id="month-view-button" class="calendar-mode active" type="button">月</button>
+                    <button id="week-view-button" class="calendar-mode" type="button">周</button>
                     <button id="day-view-button" class="calendar-mode" type="button">日</button>
                   </div>
+                  <button id="add-event-button" class="button compact primary" type="button">＋ 添加事件</button>
+                  <button id="today-button" class="button compact" type="button">今天</button>
                   <button id="previous-month" class="icon-button" type="button" aria-label="上个月">←</button>
                   <button id="next-month" class="icon-button" type="button" aria-label="下个月">→</button>
                   <strong id="calendar-label"></strong>
@@ -221,9 +224,10 @@
                 </div>
               </div>
               <div id="weekday-row" class="weekday-row" aria-hidden="true">
-                <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
               </div>
               <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
+              <div id="weekly-agenda" class="weekly-agenda hidden" aria-live="polite"></div>
               <div id="daily-agenda" class="daily-agenda hidden" aria-live="polite"></div>
             </section>
           </div>
@@ -247,7 +251,7 @@
             <div>
               <p class="eyebrow">SOURCE RECONCILIATION</p>
               <h2>课程来源对账</h2>
-              <p class="section-note">以当前注册课程为基准，对照 Moodle、SIS 课程信息、官方课表与本地信息库。</p>
+              <p id="reconciliation-authority" class="section-note">课程事实以 Moodle 为最高优先级；SIS 与官方课表补充 Moodle 未说明的字段。</p>
             </div>
             <span id="reconciliation-count">0 门待处理</span>
           </div>
@@ -262,6 +266,44 @@
       <button id="close-item-detail" class="icon-button" type="button" aria-label="关闭事项详情">×</button>
     </div>
     <div id="detail-panel" class="detail-panel" aria-live="polite"></div>
+  </dialog>
+  <dialog id="event-editor-dialog" class="event-editor-dialog">
+    <div class="detail-dialog-heading">
+      <div><p class="eyebrow">PERSONAL EVENT</p><h2>添加事件</h2></div>
+      <button id="close-event-editor" class="icon-button" type="button" aria-label="关闭事件编辑器">×</button>
+    </div>
+    <form id="event-editor-form" class="event-editor-form">
+      <label>课程<select id="event-course" required></select></label>
+      <div class="event-form-row">
+        <label>标题<input id="event-title" required maxlength="160" placeholder="例如 小组讨论"></label>
+        <label>分类
+          <select id="event-category">
+            <option value="class">课程</option><option value="tutorial">Tutorial</option>
+            <option value="lab">实验</option><option value="office_hour">Office hour</option>
+            <option value="assignment">Assignment</option><option value="quiz">Quiz</option>
+            <option value="exam">考试</option><option value="presentation">汇报</option>
+            <option value="project">项目</option><option value="report">报告</option>
+            <option value="reading">阅读</option><option value="deadline">截止时间</option>
+            <option value="other" selected>其他</option>
+          </select>
+        </label>
+      </div>
+      <label class="event-all-day"><input id="event-all-day" type="checkbox"><span>全天事件</span></label>
+      <div class="event-form-row event-time-fields">
+        <label>日期<input id="event-date" type="date" required></label>
+        <label>开始<input id="event-start-time" type="time" value="09:00" required></label>
+        <label>结束<input id="event-end-time" type="time" value="10:00" required></label>
+      </div>
+      <div class="event-form-row">
+        <label>地点<input id="event-location" maxlength="160" placeholder="可选"></label>
+        <label>说明<input id="event-description" maxlength="500" placeholder="可选"></label>
+      </div>
+      <p>新增事件会写入本地 information.json；只有这里创建的个人事件可以从日历删除。</p>
+      <div class="event-editor-actions">
+        <button id="cancel-event-editor" class="button" type="button">取消</button>
+        <button class="button primary" type="submit">确认添加</button>
+      </div>
+    </form>
   </dialog>
   <dialog id="source-preview" class="source-preview">
     <div class="preview-heading">

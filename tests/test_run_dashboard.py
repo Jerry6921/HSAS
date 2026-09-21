@@ -38,7 +38,11 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'id="calendar-grid"' in loaded["/"][0]
     assert b'id="daily-agenda"' in loaded["/"][0]
     assert b'id="day-view-button"' in loaded["/"][0]
-    assert b'id="today-button"' not in loaded["/"][0]
+    assert b'id="week-view-button"' in loaded["/"][0]
+    assert b'id="weekly-agenda"' in loaded["/"][0]
+    assert b'id="add-event-button"' in loaded["/"][0]
+    assert b'id="event-editor-dialog"' in loaded["/"][0]
+    assert b'id="today-button"' in loaded["/"][0]
     assert b'id="start-workflow"' in loaded["/"][0]
     assert b'id="moodle-login-state"' not in loaded["/"][0]
     assert b'id="enrollment-login-state"' not in loaded["/"][0]
@@ -95,6 +99,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'"/api/courses/add"' in loaded["/assets/app.js"][0]
     assert b'"/api/courses/delete"' in loaded["/assets/app.js"][0]
     assert b'"/api/courses/delete-many"' in loaded["/assets/app.js"][0]
+    assert b'"/api/events/add"' in loaded["/assets/app.js"][0]
+    assert b'"/api/events/delete"' in loaded["/assets/app.js"][0]
     assert b'id="course-manager-select-all"' in loaded["/"][0]
     assert b'id="delete-selected-courses"' in loaded["/"][0]
     assert b"overflow-y: auto" in loaded["/assets/styles.css"][0]
@@ -102,6 +108,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert "复制 AI 提示词".encode() in loaded["/assets/app.js"][0]
     assert "待 AI 分类".encode() in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
+    assert b"renderWeeklyAgenda" in loaded["/assets/app.js"][0]
+    assert b".week-timeline" in loaded["/assets/styles.css"][0]
     assert b"closeItemDetail" in loaded["/assets/app.js"][0]
     assert b'window.open(url, "_blank", "noopener,noreferrer")' in loaded["/assets/app.js"][0]
     assert b'main.target = "_blank"' in loaded["/assets/app.js"][0]
@@ -120,6 +128,22 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b"flex-wrap: nowrap" in loaded["/assets/styles.css"][0]
     assert "相关学习材料".encode() in loaded["/assets/app.js"][0]
     assert "由 AI 根据已下载课程资料归纳".encode() in loaded["/assets/app.js"][0]
+    assert b'courseContentMode: "materials"' in loaded["/assets/app.js"][0]
+    assert '[["materials", "课件"], ["activities", "活动"]]'.encode() in loaded[
+        "/assets/app.js"
+    ][0]
+    assert b"renderCourseItems" in loaded["/assets/app.js"][0]
+    assert b"categoryColors" in loaded["/assets/app.js"][0]
+    assert b".course-content-switch" in loaded["/assets/styles.css"][0]
+    assert b".course-item-row" in loaded["/assets/styles.css"][0]
+    assert "活动查询提示词已复制".encode() in loaded["/assets/app.js"][0]
+    assert b".event-date-status.confirmed" in loaded["/assets/styles.css"][0]
+    assert b'".course-item-row"' in loaded["/assets/canvas-effects.js"][0]
+    assert b"event-card-heading" in loaded["/assets/app.js"][0]
+    assert b"event-date-status" in loaded["/assets/app.js"][0]
+    assert b'titleLine.append(element("span", "material-type-badge"' not in loaded[
+        "/assets/app.js"
+    ][0]
 
 
 def test_material_preview_csp_keeps_native_pdf_viewer_out_of_sandbox() -> None:
@@ -191,6 +215,8 @@ def test_information_snapshot_handles_missing_and_valid_database(tmp_path: Path)
     assert snapshot["moodle_session"]["login_status"] == "login_required"
     assert snapshot["review_closure"]["agent_prompt"].startswith("请处理本机 HIQS")
     assert snapshot["course_reconciliation"]["counts"]["legacy"] == 1
+    assert snapshot["course_reconciliation"]["source_order"][0] == "moodle"
+    assert "Moodle" in snapshot["course_reconciliation"]["authority_note"]
 
 
 def test_course_management_adds_and_deletes_canonical_course_data(tmp_path: Path) -> None:
@@ -308,6 +334,89 @@ def test_course_management_batch_deletes_selected_courses(tmp_path: Path) -> Non
     store = JsonInformationRepository().load(tmp_path / "information.json")
     assert store.courses == []
     assert store.items == []
+
+
+def test_user_calendar_event_add_and_guarded_delete(tmp_path: Path) -> None:
+    service = DashboardService(tmp_path)
+    service.add_course(
+        {
+            "confirmed": True,
+            "course": {
+                "course_id": "DEMO1001",
+                "code": "DEMO1001",
+                "title": "Demo Course",
+            },
+        }
+    )
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.add_calendar_event({"confirmed": False, "event": {}})
+
+    created = service.add_calendar_event(
+        {
+            "confirmed": True,
+            "event": {
+                "course_id": "DEMO1001",
+                "title": "Study meeting",
+                "category": "other",
+                "starts_at": "2026-09-22T09:00:00+08:00",
+                "ends_at": "2026-09-22T10:00:00+08:00",
+                "location": "Library",
+            },
+        }
+    )
+    snapshot = service.information_snapshot()
+    created_item = next(
+        item for item in snapshot["items"] if item["item_id"] == created["item_id"]
+    )
+    assert created_item["user_created"] is True
+    assert created_item["location"] == "Library"
+
+    with pytest.raises(DashboardError, match="确认"):
+        service.delete_calendar_event(
+            {
+                "confirmed": True,
+                "confirmation": "wrong-item",
+                "item_id": created["item_id"],
+            }
+        )
+
+    deleted = service.delete_calendar_event(
+        {
+            "confirmed": True,
+            "confirmation": created["item_id"],
+            "item_id": created["item_id"],
+        }
+    )
+    assert deleted["deleted"] is True
+    assert (tmp_path / deleted["recoverable_from"]).is_file()
+    assert JsonInformationRepository().load(tmp_path / "information.json").items == []
+
+    apply_information_update(
+        tmp_path / "information.json",
+        {
+            "items": [
+                {
+                    "item_id": "official-item",
+                    "course_id": "DEMO1001",
+                    "title": "Official event",
+                    "category": "class",
+                    "date_status": "unknown",
+                    "sources": [{"source_type": "moodle", "title": "Moodle"}],
+                }
+            ]
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
+    )
+    with pytest.raises(DashboardError, match="只能删除"):
+        service.delete_calendar_event(
+            {
+                "confirmed": True,
+                "confirmation": "official-item",
+                "item_id": "official-item",
+            }
+        )
 
 
 def test_ocr_action_requires_confirmation_and_reports_results(
@@ -805,6 +914,10 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
     assert course["overview"] == "A concise official overview."
     assert course["objectives"] == ["Understand the core methods"]
     assert course["grade_distribution"][0]["item_id"] == "demo-assignment"
+    activity = snapshot["items"][0]
+    assert "hsas query" in activity["agent_prompt"]
+    assert "demo-assignment" in activity["agent_prompt"]
+    assert "最相关的课件/资料" in activity["agent_prompt"]
     assert course["materials"]["sections"][0]["title"] == "Foundations and limit arguments"
     classified = course["materials"]["sections"][0]["materials"][0]
     assert classified["title"] == "lecture-1.pptx"

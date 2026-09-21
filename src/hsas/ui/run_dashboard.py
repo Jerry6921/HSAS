@@ -141,6 +141,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/courses/add",
             "/api/courses/delete",
             "/api/courses/delete-many",
+            "/api/events/add",
+            "/api/events/delete",
             "/api/update/apply",
         }:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found."})
@@ -173,6 +175,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.delete_course(payload)
             elif path == "/api/courses/delete-many":
                 result = self.server.dashboard_service.delete_courses(payload)
+            elif path == "/api/events/add":
+                result = self.server.dashboard_service.add_calendar_event(payload)
+            elif path == "/api/events/delete":
+                result = self.server.dashboard_service.delete_calendar_event(payload)
             elif path == "/api/update/apply":
                 result = self.server.dashboard_service.apply_application_update(payload)
             else:

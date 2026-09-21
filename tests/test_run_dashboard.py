@@ -109,6 +109,8 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert "待 AI 分类".encode() in loaded["/assets/app.js"][0]
     assert b"renderDailyAgenda" in loaded["/assets/app.js"][0]
     assert b"renderWeeklyAgenda" in loaded["/assets/app.js"][0]
+    assert b"openEventEditorFromGrid" in loaded["/assets/app.js"][0]
+    assert "双击空白时段即可添加事件".encode() in loaded["/"][0]
     assert b".week-timeline" in loaded["/assets/styles.css"][0]
     assert b"closeItemDetail" in loaded["/assets/app.js"][0]
     assert b'window.open(url, "_blank", "noopener,noreferrer")' in loaded["/assets/app.js"][0]

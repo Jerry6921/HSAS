@@ -48,6 +48,27 @@ function timeGridEventHeight(startMinutes, endMinutes) {
   return Math.max(20, (visibleEnd - visibleStart) / 60 * timeGridHourHeight);
 }
 
+function clockValue(minutes) {
+  const safeMinutes = Math.max(0, Math.min(23 * 60 + 59, minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainder = safeMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function timeFromGridPointer(event, timeline) {
+  const rect = timeline.getBoundingClientRect();
+  const offset = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+  const rawMinutes = timeGridStartHour * 60 + offset / timeGridHourHeight * 60;
+  return Math.max(timeGridStartHour * 60, Math.min(23 * 60, Math.round(rawMinutes / 30) * 30));
+}
+
+function openEventEditorFromGrid(event, timeline, date) {
+  if (event.target.closest(".agenda-item, .week-event, .week-now-line, .agenda-now-line")) return;
+  const startMinutes = timeFromGridPointer(event, timeline);
+  const endMinutes = Math.min(23 * 60 + 59, startMinutes + 60);
+  openEventEditor(date, clockValue(startMinutes), clockValue(endMinutes));
+}
+
 const state = {
   data: null,
   currentMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -1214,6 +1235,10 @@ function renderDailyAgenda(occurrences) {
 
   const scroll = element("div", "agenda-scroll");
   const timeline = element("div", "agenda-timeline");
+  timeline.title = "双击空白时段添加事件";
+  timeline.addEventListener("dblclick", (event) => {
+    openEventEditorFromGrid(event, timeline, state.selectedDay);
+  });
   for (let hour = timeGridStartHour; hour < 24; hour += 1) {
     const row = element("div", "agenda-hour");
     row.append(element("time", "agenda-hour-label", `${String(hour).padStart(2, "0")}:00`));
@@ -1310,6 +1335,10 @@ function renderWeeklyAgenda(occurrences) {
   for (const day of days) {
     const key = dateKey(day);
     const column = element("div", `week-day-column ${key === today ? "today" : ""}`.trim());
+    column.title = "双击空白时段添加事件";
+    column.addEventListener("dblclick", (event) => {
+      openEventEditorFromGrid(event, timeline, day);
+    });
     const timed = (grouped.get(key) || []).filter((value) => value.time && !value.item.all_day);
     for (const layout of weekEventLayouts(timed)) {
       const { occurrence, startMinutes, endMinutes, lane, laneCount } = layout;
@@ -1591,11 +1620,11 @@ function setEventTimeFieldState() {
   byId("event-end-time").disabled = allDay;
 }
 
-function openEventEditor(date = state.selectedDay) {
+function openEventEditor(date = state.selectedDay, startTime = "09:00", endTime = "10:00") {
   const form = byId("event-editor-form");
   form.reset();
-  byId("event-start-time").value = "09:00";
-  byId("event-end-time").value = "10:00";
+  byId("event-start-time").value = startTime;
+  byId("event-end-time").value = endTime;
   byId("event-date").value = dateKey(date);
   const courseSelect = byId("event-course");
   courseSelect.replaceChildren();

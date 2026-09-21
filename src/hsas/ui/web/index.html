@@ -43,19 +43,6 @@
           </div>
           <div id="course-navigation" class="course-navigation"></div>
         </nav>
-        <div id="query-controls" class="hidden">
-        <label class="search-field">
-          <span>搜索</span>
-          <input id="search-input" type="search" placeholder="作业、地点、要求…" autocomplete="off">
-        </label>
-        <section class="filter-section" aria-labelledby="course-filter-title">
-          <div class="filter-heading">
-            <h3 id="course-filter-title">课程</h3>
-            <button id="select-all-courses" type="button">全部</button>
-          </div>
-          <div id="course-filters" class="course-filters"></div>
-        </section>
-        </div>
         <div class="sidebar-guide">
           <strong>资料怎么进入这里？</strong>
           <p>让 AI 阅读课程资料，按模板生成更新文件，再通过校验命令写入。程序本身不猜测课程事实。</p>
@@ -201,6 +188,20 @@
         </div>
 
         <div id="calendar-view" class="hidden">
+
+          <section id="query-controls" class="calendar-query-panel hidden" aria-labelledby="calendar-filter-title">
+            <label class="search-field">
+              <span id="calendar-filter-title">筛选日历事项</span>
+              <input id="search-input" type="search" placeholder="作业、地点、要求…" autocomplete="off">
+            </label>
+            <div class="filter-section" aria-labelledby="course-filter-title">
+              <div class="filter-heading">
+                <h3 id="course-filter-title">显示课程</h3>
+                <button id="select-all-courses" type="button">全部</button>
+              </div>
+              <div id="course-filters" class="course-filters"></div>
+            </div>
+          </section>
 
           <div class="workspace">
             <section class="calendar-card" aria-labelledby="calendar-title">

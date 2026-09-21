@@ -15,25 +15,54 @@ const categoryLabels = {
 };
 
 const categoryColors = {
-  class: "#4f7df3",
-  tutorial: "#8b5cf6",
-  lab: "#10a36f",
-  office_hour: "#64748b",
-  assignment: "#d97706",
-  quiz: "#ca8a04",
-  exam: "#dc3545",
-  presentation: "#db3f8d",
-  project: "#9a6700",
-  report: "#ea580c",
-  reading: "#168aad",
-  deadline: "#c92a2a",
-  other: "#64748b",
+  class: "#a45e48",
+  tutorial: "#8e6857",
+  lab: "#7e7661",
+  office_hour: "#7d7069",
+  assignment: "#b06c3f",
+  quiz: "#b88a32",
+  exam: "#9e443d",
+  presentation: "#9a5960",
+  project: "#9a6c3a",
+  report: "#a75d3e",
+  reading: "#7b6d61",
+  deadline: "#963f36",
+  other: "#83756d",
 };
 
 const categoryOrder = [
   "assignment", "quiz", "exam", "project", "report", "presentation",
   "class", "tutorial", "lab", "office_hour", "reading", "deadline", "other",
 ];
+
+const materialPalettes = [
+  { match: /ppt|powerpoint|slide|lecture|课件/i, code: "SLD", color: "#b85f3f" },
+  { match: /pdf/i, code: "PDF", color: "#994b3d" },
+  { match: /doc|word|note|reading|handout|讲义/i, code: "DOC", color: "#876252" },
+  { match: /xls|sheet|csv|table|data/i, code: "DAT", color: "#69775d" },
+  { match: /image|png|jpe?g|gif|figure/i, code: "IMG", color: "#a66b70" },
+  { match: /video|mp4|mov|recording|录影|录像/i, code: "VID", color: "#765d72" },
+  { match: /zip|archive|package/i, code: "ZIP", color: "#6d7071" },
+  { match: /link|url|web/i, code: "URL", color: "#a57a43" },
+];
+
+const materialSectionColors = ["#994b3d", "#b85f3f", "#876252", "#69775d", "#a66b70", "#765d72"];
+
+function materialVisual(material) {
+  const value = [
+    material.material_type,
+    material.relative_path,
+    material.source_url,
+    material.title,
+  ].filter(Boolean).join(" ");
+  return materialPalettes.find((entry) => entry.match.test(value))
+    || { code: material.relative_path ? "FILE" : "LINK", color: "#83756d" };
+}
+
+function materialSectionColor(title) {
+  const checksum = [...String(title || "")].reduce((total, character) => total + character.codePointAt(0), 0);
+  return materialSectionColors[checksum % materialSectionColors.length];
+}
 
 const timeGridStartHour = 7;
 const timeGridHourHeight = 34;
@@ -361,7 +390,7 @@ function setView(view) {
   byId("show-home").classList.toggle("active", view === "home");
   byId("show-calendar").classList.toggle("active", view === "calendar");
   byId("show-reconciliation").classList.toggle("active", view === "reconciliation");
-  byId("query-controls").classList.toggle("hidden", view === "home" || view === "reconciliation");
+  byId("query-controls").classList.toggle("hidden", view !== "calendar");
   renderCourseNavigation();
 }
 
@@ -640,6 +669,7 @@ function formatBytes(value) {
 
 function renderMaterialSection(parent, title, description, materials, className = "") {
   const section = element("section", `material-subgroup ${className}`.trim());
+  section.style.setProperty("--section-color", materialSectionColor(title));
   const heading = element("div", "material-subgroup-heading");
   const copy = element("div");
   copy.append(element("h3", "", title));
@@ -663,6 +693,8 @@ function renderMaterialCard(list, material) {
     const remoteUrl = safeHttpUrl(material.source_url);
     const canOpen = Boolean(hasLocal || remoteUrl);
     const card = element("article", "material-card");
+    const visual = materialVisual(material);
+    card.style.setProperty("--material-color", visual.color);
     const main = element(hasLocal ? "button" : remoteUrl ? "a" : "div", "material-card-main");
     if (hasLocal) {
       main.type = "button";
@@ -672,7 +704,7 @@ function renderMaterialCard(list, material) {
       main.target = "_blank";
       main.rel = "noopener noreferrer";
     }
-    const icon = element("span", "material-icon", material.relative_path ? "FILE" : "LINK");
+    const icon = element("span", "material-icon", visual.code);
     const copy = element("div", "material-copy");
     const titleLine = element("div", "material-title-line");
     titleLine.append(element("strong", "", material.title));

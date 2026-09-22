@@ -53,11 +53,12 @@ flowchart LR
 src/hsas/
 ├── core/             业务模块及唯一公开 HIQSPort
 ├── mcp/              面向 AI 的 MCP tools
-├── ui/               面向用户的 HTTP API、HTML/CSS/JavaScript
+├── ui/               面向用户的本地 HTTP API 与生产静态资源
 ├── domain/           CORE 内部纯模型与规则
 ├── application/      CORE 内部用例
 ├── infrastructure/   CORE 内部来源、存储和运行时适配器
 └── interfaces/       旧导入路径与 CLI 兼容层
+ui/                    React + TypeScript 前端源码
 ```
 
 `HIQSPort` 是 CORE 对外的稳定用例契约。MCP 与 UI 接受注入的 Port，不导入
@@ -214,8 +215,9 @@ Inbox 条目标为 applied。
 store。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
 SIS Course Information 与 Class Planner；单一进度条显示阶段、当前课程和完成数量。同时
 集中本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异。日历作为
-独立侧栏页面。JavaScript 在当前 42 天月历网格内展开 weekly recurrence，并提供按日排列
-开始与结束时间的议程视图。两种视图共享课程与全文筛选，日期待确认事项单独列出。
+独立侧栏页面。React 岛使用 shadcn/ui 风格的本地组件、FullCalendar 和 Motion 呈现月、周、日
+视图；旧 JavaScript 日历保留为静态资源缺失时的回退。两套视图共享课程与全文筛选，日期待确认
+事项单独列出。前端构建产物固定写入 `src/hsas/ui/web/modern-assets/`，运行应用不依赖 Node。
 
 课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
 `information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记

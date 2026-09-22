@@ -412,6 +412,7 @@ function showCalendar() {
   byId("page-eyebrow").textContent = "CALENDAR";
   byId("page-title").textContent = "课程日历";
   byId("data-caption").textContent = dataCaption();
+  renderDataViews();
 }
 
 function showCourseOverview(courseId) {
@@ -1142,6 +1143,74 @@ function renderCalendar(occurrences) {
   grid.replaceChildren();
   const isMonth = state.calendarMode === "month";
   const isWeek = state.calendarMode === "week";
+  const modernRoot = byId("modern-calendar-root");
+  const modernCalendar = window.HIQSModernCalendar;
+  if (modernRoot && modernCalendar && state.view === "calendar") {
+    byId("weekday-row").classList.add("hidden");
+    grid.classList.add("hidden");
+    byId("weekly-agenda").classList.add("hidden");
+    byId("daily-agenda").classList.add("hidden");
+    byId("legacy-calendar-controls").classList.add("hidden");
+    modernRoot.classList.remove("hidden");
+    byId("calendar-title").textContent = isMonth ? "课程日历" : isWeek ? "每周日历" : "每日议程";
+    const { start, end } = visibleRange();
+    const label = isMonth
+      ? new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long" }).format(state.currentMonth)
+      : isWeek
+        ? `${new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric" }).format(start)} – ${new Intl.DateTimeFormat("zh-HK", { month: "short", day: "numeric", year: "numeric" }).format(end)}`
+        : new Intl.DateTimeFormat("zh-HK", { year: "numeric", month: "long", day: "numeric", weekday: "short" }).format(state.selectedDay);
+    const modernEvents = occurrences.map((occurrence) => {
+      const item = occurrence.item;
+      const course = courseFor(item);
+      const allDay = !occurrence.time || Boolean(item.all_day);
+      const startValue = allDay ? occurrence.key : `${occurrence.key}T${occurrence.time}:00`;
+      const endTime = occurrence.endTime || occurrenceEndTime(item);
+      return {
+        id: `${item.item_id}:${occurrence.key}:${occurrence.time || "all-day"}`,
+        title: occurrence.title || item.title,
+        start: startValue,
+        end: !allDay && endTime ? `${occurrence.key}T${endTime}:00` : undefined,
+        allDay,
+        color: categoryColor(item),
+        itemId: item.item_id,
+        dateKey: occurrence.key,
+        courseCode: course.code || course.title,
+        category: categoryLabels[item.category] || item.category,
+        categoryKey: item.category || "other",
+        dateStatus: item.date_status,
+        agentPrompt: item.agent_prompt,
+      };
+    });
+    modernCalendar.mount(modernRoot, {
+      mode: state.calendarMode,
+      date: isMonth ? dateKey(state.currentMonth) : dateKey(state.selectedDay),
+      label,
+      events: modernEvents,
+      onViewChange: (mode) => byId(`${mode}-view-button`).click(),
+      onPrevious: () => byId("previous-month").click(),
+      onNext: () => byId("next-month").click(),
+      onToday: () => byId("today-button").click(),
+      onAdd: () => openEventEditor(),
+      onOpenEvent: (itemId, key) => {
+        const item = state.data.items.find((value) => value.item_id === itemId);
+        if (!item) return;
+        state.selectedItemId = itemId;
+        state.selectedDateKey = key;
+        renderDetail(item, key);
+      },
+      onOpenDay: (key) => {
+        state.selectedDay = parseDateOnly(key);
+        state.currentMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
+        state.calendarMode = "day";
+        renderDataViews();
+      },
+      onSelectTime: (key, startTime, endTime) => openEventEditor(parseDateOnly(key), startTime, endTime),
+      onCopyPrompt: (prompt, title) => copyText(prompt, `“${title}”活动查询提示词已复制。`),
+    });
+    return;
+  }
+  if (modernRoot) modernRoot.classList.add("hidden");
+  byId("legacy-calendar-controls").classList.remove("hidden");
   byId("weekday-row").classList.toggle("hidden", !isMonth);
   grid.classList.toggle("hidden", !isMonth);
   byId("weekly-agenda").classList.toggle("hidden", !isWeek);

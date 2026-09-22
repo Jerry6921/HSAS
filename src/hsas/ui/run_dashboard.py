@@ -18,6 +18,8 @@ ALLOWED_ASSETS = {
     "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/assets/ripple.js": ("ripple.js", "text/javascript; charset=utf-8"),
     "/assets/canvas-effects.js": ("canvas-effects.js", "text/javascript; charset=utf-8"),
+    "/assets/modern-ui.css": ("modern-assets/modern-ui.css", "text/css; charset=utf-8"),
+    "/assets/modern-ui.js": ("modern-assets/modern-ui.js", "text/javascript; charset=utf-8"),
     "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
 MAX_REQUEST_BYTES = 16 * 1024
@@ -267,8 +269,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+            "default-src 'self'; script-src 'self'; "
+            "style-src 'self' 'nonce-hiqs-local-ui'; "
+            "img-src 'self' data:; font-src 'self' data:; "
+            "connect-src 'self'; frame-ancestors 'none'",
         )
 
     def log_message(self, format: str, *args: object) -> None:

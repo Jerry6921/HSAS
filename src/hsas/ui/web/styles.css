@@ -1456,6 +1456,10 @@ body::after {
 .material-subgroup:nth-of-type(3) { animation-delay: 90ms; }
 .material-subgroup:nth-of-type(4) { animation-delay: 135ms; }
 .material-subgroup-heading { position: relative; padding-left: 14px; }
+.material-subgroup-heading h3, .material-subgroup-heading h4 {
+  color: #332d29;
+  font-weight: 760;
+}
 .material-subgroup-heading::before {
   position: absolute;
   top: 1px;
@@ -1556,11 +1560,20 @@ body::after {
   border-left: 5px solid var(--item-color);
   color: #332d29;
   background: #fffaf3 !important;
+  box-shadow: 0 1px 0 rgba(95, 65, 51, .04);
+  transition:
+    transform .2s cubic-bezier(.2, .75, .2, 1),
+    border-color .18s ease,
+    background-color .18s ease,
+    box-shadow .22s ease;
 }
-.material-card.course-item-row:hover {
-  border-color: color-mix(in srgb, var(--item-color) 52%, #d8c8be);
+.material-card.course-item-row:hover,
+.material-card.course-item-row:focus-within {
+  border-color: color-mix(in srgb, var(--item-color) 66%, #d8c8be);
   border-left-color: var(--item-color);
   background: #fbf2ea !important;
+  box-shadow: 0 10px 24px rgba(111, 65, 47, .14), inset 0 1px rgba(255, 255, 255, .72);
+  transform: translateY(-2px);
 }
 .material-icon.course-item-icon {
   color: var(--item-color);
@@ -1679,6 +1692,36 @@ body::after {
   background: radial-gradient(320px circle at var(--motion-x, 50%) var(--motion-y, 50%), rgba(255, 239, 224, .2), transparent 62%);
 }
 
+/* Unified warm hover feedback for every actionable button. */
+button:not(:disabled), a.button {
+  transition:
+    transform .2s cubic-bezier(.2, .75, .2, 1),
+    border-color .18s ease,
+    background-color .18s ease,
+    box-shadow .22s ease,
+    color .18s ease;
+}
+button:not(:disabled):hover, a.button:hover {
+  border-color: color-mix(in srgb, #a5563f 58%, #d8c8be);
+  background-color: #fbf2ea;
+  box-shadow: 0 10px 24px rgba(111, 65, 47, .14), inset 0 1px rgba(255, 255, 255, .72);
+  transform: translateY(-2px);
+}
+button:not(:disabled):not(.next-up-card):not(.material-card-main):hover,
+a.button:not(.primary):hover {
+  box-shadow: 0 10px 24px rgba(111, 65, 47, .14), inset 0 1px rgba(255, 255, 255, .72) !important;
+}
+button:not(:disabled):focus-visible, a.button:focus-visible {
+  outline: 2px solid rgba(165, 86, 63, .72);
+  outline-offset: 3px;
+}
+button.material-card-main:hover {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
 @keyframes archive-sheen {
   0%, 18% { background-position: 120% 0; opacity: .35; }
   55%, 100% { background-position: -80% 0; opacity: .8; }
@@ -1714,4 +1757,6 @@ body::after {
   .item-detail-dialog[open]::after, .app-shell::after { animation: none; }
   .material-card, .unscheduled-item { transition: none; }
   .material-card:hover, .unscheduled-item:hover { transform: none; }
+  button:not(:disabled), a.button { transition: none; }
+  button:not(:disabled):hover, a.button:hover { transform: none; }
 }

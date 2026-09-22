@@ -25,7 +25,6 @@
     ".event-chip",
     ".agenda-item",
     ".unscheduled-item",
-    ".course-item-row",
     ".course-manager-row",
   ];
   const surfaceSelector = [

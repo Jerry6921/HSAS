@@ -133,6 +133,21 @@ App 每次启动会比较 GitHub `main` 与本机版本。自动更新只接受�
 和 fast-forward；检测到未提交修改或分叉时会停止并提示交给 Agent 处理。更新源码和必要
 依赖后会重建 `HIQS.app`，课程文件与 `information.json` 不在 Git 更新范围内。
 
+### 前端开发
+
+Dashboard 日历采用 React、TypeScript、shadcn/ui 风格组件、FullCalendar 与 Motion；生产
+bundle 已随 Python 包保存，普通运行不需要 Node。修改 `ui/` 后使用 pnpm 重新构建：
+
+```bash
+cd ui
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run build
+```
+
+构建结果写入 `src/hsas/ui/web/modern-assets/`。Python UI 仅通过 `HIQSPort` 和现有本地 API
+访问业务数据，前端依赖不会进入 CORE 或 MCP。
+
 ## 使用方式
 
 ### 让 Agent 整理新增信息

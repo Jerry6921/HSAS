@@ -4,8 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <meta name="csp-nonce" content="hiqs-local-ui">
   <title>HIQS · HKU 课程信息查询</title>
   <link rel="stylesheet" href="assets/styles.css">
+  <link rel="stylesheet" href="assets/modern-ui.css">
 </head>
 <body>
   <div class="app-shell">
@@ -211,7 +213,7 @@
                   <h2 id="calendar-title">课程日历</h2>
                   <p class="calendar-hint">周／日视图双击空白时段即可添加事件</p>
                 </div>
-                <div class="calendar-controls">
+                <div id="legacy-calendar-controls" class="calendar-controls">
                   <div class="calendar-mode-switch" aria-label="日历视图">
                     <button id="month-view-button" class="calendar-mode active" type="button">月</button>
                     <button id="week-view-button" class="calendar-mode" type="button">周</button>
@@ -231,6 +233,7 @@
               <div id="calendar-grid" class="calendar-grid" aria-live="polite"></div>
               <div id="weekly-agenda" class="weekly-agenda hidden" aria-live="polite"></div>
               <div id="daily-agenda" class="daily-agenda hidden" aria-live="polite"></div>
+              <div id="modern-calendar-root" class="hidden" aria-live="polite"></div>
             </section>
           </div>
 
@@ -347,6 +350,7 @@
   </dialog>
   <script src="assets/ripple.js"></script>
   <script src="assets/canvas-effects.js"></script>
+  <script src="assets/modern-ui.js"></script>
   <script src="assets/app.js"></script>
 </body>
 </html>

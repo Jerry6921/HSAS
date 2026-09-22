@@ -14,7 +14,7 @@ AI 查阅本地课程内容。重要信息同时保留来源与待确认状态�
   Class Planner，不再逐个网页查找课程信息。
 
 - **跨课程可视化日历**：集中查看 Lecture、Tutorial、Lab、Assessment、DDL、地点、占分
-  与提交要求，并以月历和每日议程掌握近期安排。
+  与提交要求，并以月、周、日视图掌握近期安排；也可添加和删除个人事件。
 
 - **AI 课件智能分区**：按每门课程的周次、主题、Assessment 或学习用途整理课件，快速
   找到讲义、阅读、练习和复习材料。
@@ -52,8 +52,10 @@ HIQS 将课程资料、重要日程、课件目录与原始来源集中在同一
 
 ### 日历页
 
-- **月历与每日议程**：统一显示课程、Tutorial、Lab、Office Hour、Assessment 与 DDL。
+- **月、周、日视图**：统一显示课程、Tutorial、Lab、Office Hour、Assessment 与 DDL。
 - **课程筛选**：按课程或关键字缩小日程范围。
+- **个人事件**：在日历中添加个人事项，并安全删除由用户创建的事件。
+- **日期待确认**：没有可靠日期的课程活动仍保留在日历页，等待后续来源核实。
 - **事项详情**：查看时间、地点、提交方式、字数、占分、要求、相关课件与证据来源。
 - **课程变更**：显示假期、Reading Week、补课、取消、改时和教室变更。
 - **导出 ICS**：将当前日程导入 Apple Calendar 等日历应用。
@@ -68,8 +70,8 @@ HIQS 将课程资料、重要日程、课件目录与原始来源集中在同一
 
 - **课程资料**：查看学期、教师、教学日期、课程综述与学习目标。
 - **成绩构成**：汇总已确认的 Assessment、占分和子项目。
-- **重要事项**：集中查看本课程的课堂、作业、Quiz、考试与 DDL。
-- **课件入口**：直接进入该课程的完整课件目录。
+- **课件／活动切换**：在同一页面切换完整课件目录与课堂、作业、Quiz、考试及 DDL。
+- **活动提示词**：从活动卡或详情复制提示词，查询活动要求及相关课件。
 
 ### 课件目录
 
@@ -135,8 +137,9 @@ App 每次启动会比较 GitHub `main` 与本机版本。自动更新只接受�
 
 ### 前端开发
 
-Dashboard 日历采用 React、TypeScript、shadcn/ui 风格组件、FullCalendar 与 Motion；生产
-bundle 已随 Python 包保存，普通运行不需要 Node。修改 `ui/` 后使用 pnpm 重新构建：
+Dashboard 全部页面采用 React、TypeScript、shadcn/ui 风格组件与 Motion，日历由
+FullCalendar 提供月、周、日视图；生产 bundle 已随 Python 包保存，普通运行不需要 Node。
+修改 `ui/` 后使用 pnpm 重新构建：
 
 ```bash
 cd ui
@@ -174,9 +177,10 @@ HIQS 提供本地 stdio MCP Server。安装项目后运行：
 hiqs-mcp
 ```
 
-MCP 暴露经过统一 `HIQSPort` 的课程信息、ICS 日历、同步状态、同步控制、OCR 和 Personal
-Inbox 工具。MCP 与浏览器 UI 不直接访问 Moodle、Repository 或 JSON 文件；二者都调用同一
-CORE Port，因此来源优先级、确认要求和数据校验不会在不同入口中重复实现。
+MCP 暴露经过统一 `HIQSPort` 的课程信息与 Schema、校验写入、资料查询、来源差异、ICS
+日历、完整同步控制、OCR、Personal Inbox、来源登录／同步和课程管理工具。MCP 与浏览器
+UI 不直接访问 Moodle、Repository 或 JSON 文件；二者都调用同一 CORE Port，因此来源
+优先级、确认要求和数据校验不会在不同入口中重复实现。
 
 ### 在 Agent 中写入额外信息
 
@@ -236,6 +240,22 @@ HIQS 软件采用 [PolyForm Noncommercial License 1.0.0](LICENSE)。从 Moodle �
 ## 更新日志
 
 本节只记录功能与界面版本，文档措辞和演示图片调整不单独列项。
+
+### 2.8.0 · 2026-09-23
+
+- Dashboard 全部可见页面迁移到 React、TypeScript、shadcn/ui 风格组件与 Motion，统一
+  顶栏、侧栏、通知、课程概览、来源对账、详情窗口和课程管理交互；
+- 日历升级为 FullCalendar 月、周、日视图，加入课程与关键字筛选、日期待确认列表、
+  个人事件添加／删除、ICS 导出和活动 AI 提示词；
+- 课程概览采用课件／活动双视图，课件与活动保留分类颜色、来源预览和 AI 查询入口；
+- 首页整合同步工作台、资料闭环、Next Up、本地搜索、Inbox、OCR 与更新记录，并支持
+  后台同步进度、安全取消及失败来源精确重试；
+- MCP 补齐信息 Schema、校验写入、课程问答、课件检索、来源差异与 checkpoint、统一同步、
+  OCR、Inbox、来源登录／同步和课程管理能力；
+- 项目拆分为 CORE、MCP 与 UI 顶层模块，并以 APPLICATION Port 作为统一依赖边界；
+  UI 和 MCP 不直接读写课程事实；
+- Moodle 继续作为课程事实最高优先级，Student Center、SIS Course Information 与
+  Class Planner 补充 Moodle 未说明的字段；`information.json` 保持唯一 canonical 数据源。
 
 ### 2.7.0 · 2026-09-18
 

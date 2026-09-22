@@ -6,7 +6,7 @@ import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
 import type { DateClickArg } from "@fullcalendar/interaction";
 import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ChevronLeft, ChevronRight, Copy, Plus } from "lucide-react";
+import { CalendarX2, ChevronLeft, ChevronRight, Copy, Plus, Search } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import type { CalendarMode, ModernCalendarEvent, ModernCalendarOptions } from "./types";
@@ -57,8 +57,6 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
     start: event.start,
     end: event.end,
     allDay: event.allDay,
-    backgroundColor: event.color,
-    borderColor: event.color,
     classNames: [`hiqs-category-${event.categoryKey.replaceAll("_", "-")}`],
     extendedProps: event,
   }));
@@ -76,7 +74,21 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
 
   return (
     <section className="hiqs-modern-calendar" aria-label="课程日历">
+      <div className="hiqs-calendar-query">
+        <label><Search size={16} /><input type="search" value={options.query} onChange={(event) => options.onQueryChange(event.target.value)} placeholder="作业、地点、要求…" aria-label="筛选日历事项" /></label>
+        <div className="hiqs-calendar-course-filters">
+          <span>课程</span>
+          {options.filterCourses.map((course) => <button key={course.courseId} type="button" className={`tone-${course.toneIndex} ${course.selected ? "is-selected" : ""}`} title={course.title} onClick={() => options.onToggleCourse(course.courseId, !course.selected)}><i />{course.code}</button>)}
+          <Button type="button" size="sm" variant="ghost" onClick={options.onSelectAllCourses}>全部</Button>
+        </div>
+      </div>
       <div className="hiqs-modern-toolbar">
+        <Button type="button" variant="default" size="sm" onClick={options.onAdd}><Plus size={15} />添加事件</Button>
+        <Button type="button" size="sm" onClick={options.onToday}>今天</Button>
+        <Button type="button" size="icon" aria-label="上一时间段" onClick={options.onPrevious}><ChevronLeft size={17} /></Button>
+        <Button type="button" size="icon" aria-label="下一时间段" onClick={options.onNext}><ChevronRight size={17} /></Button>
+        <strong className="hiqs-modern-label">{options.label}</strong>
+        <Button asChild size="sm"><a href="/api/calendar.ics" download="HIQS-calendar.ics">导出 ICS</a></Button>
         <div className="hiqs-view-switch" aria-label="日历视图">
           {views.map(([mode, label]) => (
             <Button
@@ -93,12 +105,6 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
             </Button>
           ))}
         </div>
-        <Button type="button" variant="default" size="sm" onClick={options.onAdd}><Plus size={15} />添加事件</Button>
-        <Button type="button" size="sm" onClick={options.onToday}>今天</Button>
-        <Button type="button" size="icon" aria-label="上一时间段" onClick={options.onPrevious}><ChevronLeft size={17} /></Button>
-        <Button type="button" size="icon" aria-label="下一时间段" onClick={options.onNext}><ChevronRight size={17} /></Button>
-        <strong className="hiqs-modern-label">{options.label}</strong>
-        <Button asChild size="sm"><a href="/api/calendar.ics" download="HIQS-calendar.ics">导出 ICS</a></Button>
       </div>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -135,6 +141,10 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
           />
         </motion.div>
       </AnimatePresence>
+      <section className="hiqs-modern-unscheduled">
+        <header><div><p>TO VERIFY</p><h2>日期待确认</h2><span>这些事项仍保留在查询结果中；日期缺失不等于没有截止时间。</span></div><Badge>{options.unscheduled.length} 项</Badge></header>
+        <div>{options.unscheduled.map((item) => <motion.button type="button" key={item.itemId} className={`hiqs-unscheduled-item hiqs-category-${item.categoryKey.replaceAll("_", "-")}`} onClick={() => options.onOpenUnscheduled(item.itemId)} whileHover={reduceMotion ? undefined : { y: -2 }}><i /><span><Badge>{item.category}</Badge><strong>{item.title}</strong><small>{item.courseCode} · {item.dateLabel}</small></span></motion.button>)}{!options.unscheduled.length && <p className="hiqs-calendar-empty"><CalendarX2 size={18} />当前筛选范围没有日期待确认事项。</p>}</div>
+      </section>
     </section>
   );
 }

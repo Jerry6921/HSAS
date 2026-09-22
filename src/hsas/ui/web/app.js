@@ -113,6 +113,8 @@ const state = {
   query: "",
   homeQuery: "",
   applicationUpdate: null,
+  syncJob: null,
+  operationRunning: false,
 };
 
 function categoryColor(item) {
@@ -120,6 +122,74 @@ function categoryColor(item) {
 }
 
 const byId = (id) => document.getElementById(id);
+
+function visibleNotice(id, kind) {
+  const node = byId(id);
+  return node && !node.classList.contains("hidden") && node.textContent.trim()
+    ? { kind, message: node.textContent.trim() }
+    : null;
+}
+
+function modernShellOptions() {
+  const update = state.applicationUpdate || { status: "checking" };
+  return {
+    view: state.view,
+    eyebrow: byId("page-eyebrow").textContent,
+    title: byId("page-title").textContent,
+    caption: byId("data-caption").textContent,
+    courses: (state.data?.courses || []).map((course, index) => ({
+      courseId: course.course_id,
+      code: course.code || course.title,
+      title: course.title,
+      toneIndex: index % 6,
+      active: state.view === "course" && state.selectedOverviewCourseId === course.course_id,
+    })),
+    notices: [visibleNotice("global-error", "error"), visibleNotice("data-warning", "warning"), visibleNotice("operation-status", "success")].filter(Boolean),
+    updateLabel: byId("app-update").textContent || "检查更新",
+    updateStatus: update.status,
+    updateDisabled: Boolean(byId("app-update").disabled),
+    updateTitle: update.message || "",
+    motionEnabled: document.documentElement.classList.contains("motion-enabled"),
+    operationRunning: state.operationRunning,
+    onNavigate: (view) => view === "home" ? showHome() : view === "calendar" ? showCalendar() : showReconciliation(),
+    onOpenCourse: showCourseOverview,
+    onManageCourses: openCourseManager,
+    onRefresh: loadInformation,
+    onUpdate: applyApplicationUpdate,
+    onToggleMotion: () => { byId("canvas-effect-toggle").click(); window.setTimeout(renderModernShell, 0); },
+  };
+}
+
+function renderModernShell() {
+  const bridge = window.HIQSModernShell;
+  if (!bridge) return;
+  bridge.mount(byId("modern-topbar-root"), byId("modern-sidebar-root"), byId("modern-heading-root"), byId("modern-notices-root"), modernShellOptions());
+}
+
+function modernOverlayOptions() {
+  const courses = state.data?.courses || [];
+  return {
+    courses: courses.map((course) => ({ courseId: course.course_id, label: `${course.code || course.title} · ${course.title}` })),
+    managerCourses: courses.map((course, index) => ({ courseId: course.course_id, code: course.code || course.title, title: course.title, semester: course.semester, toneIndex: index % 6 })),
+    operationRunning: state.operationRunning,
+    onCloseDetail: () => { state.selectedItemId = null; state.selectedDateKey = null; renderDataViews(); },
+    onOpenSource: openSourcePreview,
+    onCopyPrompt: copyText,
+    onDeleteEvent: (itemId) => { const item = state.data?.items.find((value) => value.item_id === itemId); if (item) deleteCalendarEvent(item); },
+    onSubmitEvent: addCalendarEventValue,
+    onAddCourse: addCourseValue,
+    onDeleteCourse: (courseId) => { const course = courses.find((value) => value.course_id === courseId); if (course) deleteCourse(course); },
+    onDeleteCourses: (courseIds) => { state.managerSelectedCourseIds = new Set(courseIds); deleteSelectedCourses(); },
+  };
+}
+
+function renderModernOverlay() {
+  const bridge = window.HIQSModernOverlay;
+  const root = byId("modern-overlay-root");
+  if (!bridge || !root) return;
+  if (!root.dataset.mounted) { bridge.mount(root, modernOverlayOptions()); root.dataset.mounted = "true"; }
+  else bridge.update(modernOverlayOptions());
+}
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -371,12 +441,18 @@ function updateCourseManagerSelection() {
 
 function openCourseManager() {
   state.managerSelectedCourseIds.clear();
+  if (window.HIQSModernOverlay) {
+    renderModernOverlay();
+    window.HIQSModernOverlay.openCourseManager();
+    return;
+  }
   renderCourseManager();
   const dialog = byId("course-manager-dialog");
   if (!dialog.open) dialog.showModal();
 }
 
 function closeCourseManager() {
+  if (window.HIQSModernOverlay) { window.HIQSModernOverlay.closeCourseManager(); return; }
   const dialog = byId("course-manager-dialog");
   if (dialog.open) dialog.close();
 }
@@ -392,6 +468,7 @@ function setView(view) {
   byId("show-reconciliation").classList.toggle("active", view === "reconciliation");
   byId("query-controls").classList.toggle("hidden", view !== "calendar");
   renderCourseNavigation();
+  renderModernShell();
 }
 
 function showReconciliation() {
@@ -400,11 +477,13 @@ function showReconciliation() {
   byId("page-title").textContent = "课程来源对账";
   byId("data-caption").textContent = "以当前注册课程为基准，查看每个来源与本地信息库的覆盖情况。";
   renderReconciliation();
+  renderModernShell();
 }
 
 function showHome() {
   setView("home");
   renderHomeFocus();
+  renderModernShell();
 }
 
 function showCalendar() {
@@ -413,12 +492,14 @@ function showCalendar() {
   byId("page-title").textContent = "课程日历";
   byId("data-caption").textContent = dataCaption();
   renderDataViews();
+  renderModernShell();
 }
 
 function showCourseOverview(courseId) {
   state.selectedOverviewCourseId = courseId;
   setView("course");
   renderCourseOverview();
+  renderModernShell();
 }
 
 function dataCaption() {
@@ -627,6 +708,32 @@ function renderReconciliation() {
     card.append(heading, sources, element("p", "reconciliation-note", note));
     container.append(card);
   }
+  const bridge = window.HIQSModernReconciliation;
+  const root = byId("modern-reconciliation-root");
+  if (bridge && root) {
+    bridge.mount(root, {
+      authority: byId("reconciliation-authority").textContent,
+      countLabel: byId("reconciliation-count").textContent,
+      courses: (reconciliation.rows || []).map((course) => {
+        const stateLabel = course.state === "complete" ? "已对齐" : course.state === "legacy" ? "历史资料" : "需要处理";
+        const note = course.state === "legacy"
+          ? "当前注册课程中已不存在；保留为历史资料。"
+          : course.pending_information_write
+            ? "来源已采集，等待 Agent 整理并写入本地信息库。"
+            : course.missing_sources?.length
+              ? `待补来源：${course.missing_sources.map((key) => labels[key] || key).join("、")}`
+              : "各课程来源与本地信息库均有记录。";
+        return {
+          courseCode: course.course_code,
+          title: course.title,
+          state: course.state,
+          stateLabel,
+          note,
+          sources: sourceOrder.map((key) => ({ key, label: labels[key] || key, present: Boolean(course.sources?.[key]) })),
+        };
+      }),
+    });
+  }
 }
 
 function appendOverviewList(parent, values, emptyText) {
@@ -741,11 +848,17 @@ function openExternalTab(value) {
 }
 
 function closeSourcePreview() {
+  if (window.HIQSModernOverlay) { window.HIQSModernOverlay.closeSource(); return; }
   const dialog = byId("source-preview");
   if (dialog.open) dialog.close();
 }
 
 async function openSourcePreview(source) {
+  if (window.HIQSModernOverlay) {
+    renderModernOverlay();
+    window.HIQSModernOverlay.openSource(source);
+    return;
+  }
   const dialog = byId("source-preview");
   const body = byId("preview-body");
   const original = byId("open-original");
@@ -897,6 +1010,124 @@ function renderCourseItems(parent, course) {
   }
 }
 
+function modernCourseMaterial(material) {
+  const visual = materialVisual(material);
+  const changeLabels = { baseline: "首次待整理", added: "新增", modified: "已更新", removed: "已删除" };
+  const meta = [
+    material.material_type,
+    material.section_title,
+    material.activity_name !== material.title ? material.activity_name : null,
+    formatBytes(material.size_bytes),
+    material.text_available ? "已有文本副本" : null,
+  ].filter(Boolean).join(" · ");
+  return {
+    id: String(material.id || material.relative_path || material.source_url || material.title),
+    title: material.title,
+    code: visual.code,
+    tone: String(visual.code || "file").toLocaleLowerCase(),
+    meta: meta || categoryLabels[material.category] || material.category || "课程资料",
+    error: material.download_error || null,
+    changeLabel: material.change_action ? changeLabels[material.change_action] || "有变化" : null,
+    canOpen: Boolean((material.relative_path && material.exists) || safeHttpUrl(material.source_url)),
+    hasPrompt: Boolean(material.agent_prompt),
+    source: material,
+    prompt: material.agent_prompt || null,
+  };
+}
+
+function renderModernCourse(course) {
+  const root = byId("modern-course-root");
+  const modernCourse = window.HIQSModernCourse;
+  if (!root || !modernCourse) return;
+  const teachingPeriod = course.starts_on || course.ends_on
+    ? `${course.starts_on || "起始日期待确认"} 至 ${course.ends_on || "结束日期待确认"}`
+    : null;
+  const facts = [course.semester, teachingPeriod, ...(course.instructors || [])].filter(Boolean).join(" · ")
+    || "课程身份已建立，其他资料待 AI 整理。";
+  const items = courseItemsFor(course);
+  const sections = (course.materials?.sections || []).map((section, index) => ({
+    title: section.title,
+    description: section.description || null,
+    toneIndex: index % materialSectionColors.length,
+    unclassified: false,
+    materials: (section.materials || []).map(modernCourseMaterial),
+  }));
+  const unclassified = course.materials?.unclassified || [];
+  if (unclassified.length) {
+    sections.push({
+      title: "待 AI 分类",
+      description: "这些资料尚未写入 AI 自由命名的课程栏位。",
+      toneIndex: sections.length % materialSectionColors.length,
+      unclassified: true,
+      materials: unclassified.map(modernCourseMaterial),
+    });
+  }
+  const activities = categoryOrder.flatMap((category) => {
+    const values = items.filter((item) => item.category === category);
+    if (!values.length) return [];
+    return [{
+      category: categoryLabels[category] || category,
+      categoryKey: category.replaceAll("_", "-"),
+      items: values.map((item) => ({
+        itemId: item.item_id,
+        title: item.title,
+        category: categoryLabels[item.category] || item.category,
+        categoryKey: item.category.replaceAll("_", "-"),
+        dateState: item.date_status,
+        dateStateLabel: item.date_status === "confirmed" ? "已确认" : item.date_status === "tentative" ? "待核实" : "日期未知",
+        meta: [
+          categoryLabels[item.category] || item.category,
+          courseItemDateLabel(item),
+          item.location,
+          item.weight_percent === null || item.weight_percent === undefined ? null : `占分 ${item.weight_percent}%`,
+          (item.materials || []).length ? `${item.materials.length} 份相关资料` : null,
+        ].filter(Boolean).join(" · "),
+        description: item.description || null,
+        hasPrompt: Boolean(item.agent_prompt),
+        prompt: item.agent_prompt || null,
+      })),
+    }];
+  });
+  const archiveSummary = state.courseContentMode === "materials"
+    ? course.moodle
+      ? `${course.moodle.downloaded_file_count} 个本地文件 · ${course.moodle.activity_count} 个 Moodle 项目`
+      : "尚未同步 Moodle 快照"
+    : `${items.length} 项结构化活动`;
+  modernCourse.mount(root, {
+    courseId: course.course_id,
+    code: course.code || course.title,
+    title: course.title,
+    facts,
+    moodleUrl: safeHttpUrl(course.moodle?.url),
+    overview: course.overview || null,
+    objectives: course.objectives || [],
+    sources: course.sources || [],
+    grades: (course.grade_distribution || []).map((item) => ({ title: item.title, weightPercent: item.weight_percent })),
+    mode: state.courseContentMode,
+    archiveSummary,
+    hasRecentPrompt: Boolean(course.agent_prompts?.recent_lecture_materials),
+    materialSections: sections,
+    activities,
+    onModeChange: (mode) => {
+      state.courseContentMode = mode;
+      renderCourseOverview();
+    },
+    onOpenSource: openSourcePreview,
+    onCopyPrompt: copyText,
+    onOpenItem: (itemId) => {
+      const item = state.data.items.find((value) => value.item_id === itemId);
+      if (!item) return;
+      state.selectedItemId = item.item_id;
+      state.selectedDateKey = primaryDateKey(item);
+      renderDetail(item, state.selectedDateKey);
+    },
+    onCopyRecentPrompt: () => copyText(
+      course.agent_prompts?.recent_lecture_materials,
+      `${course.code || course.title} 最近 Lecture 课件提示词已复制。`,
+    ),
+  });
+}
+
 function renderCourseOverview() {
   const course = state.data.courses.find((value) => value.course_id === state.selectedOverviewCourseId);
   const container = byId("course-overview");
@@ -973,7 +1204,6 @@ function renderCourseOverview() {
     });
     switcher.append(button);
   }
-  materialActions.append(switcher);
   materialActions.append(element("span", "archive-summary", showingMaterials ? counts : `${courseItemsFor(course).length} 项结构化活动`));
   const recentPrompt = element("button", "button compact", "复制最近 Lecture 提示词");
   recentPrompt.type = "button";
@@ -983,6 +1213,7 @@ function renderCourseOverview() {
     `${course.code || course.title} 最近 Lecture 课件提示词已复制。`,
   ));
   if (showingMaterials) materialActions.append(recentPrompt);
+  materialActions.append(switcher);
   materialHeading.append(materialActions);
   materials.append(materialHeading);
   if (showingMaterials) {
@@ -1006,6 +1237,7 @@ function renderCourseOverview() {
     renderCourseItems(materials, course);
   }
   container.append(materials);
+  renderModernCourse(course);
 }
 
 function renderMetrics(occurrences) {
@@ -1171,7 +1403,6 @@ function renderCalendar(occurrences) {
         start: startValue,
         end: !allDay && endTime ? `${occurrence.key}T${endTime}:00` : undefined,
         allDay,
-        color: categoryColor(item),
         itemId: item.item_id,
         dateKey: occurrence.key,
         courseCode: course.code || course.title,
@@ -1181,6 +1412,19 @@ function renderCalendar(occurrences) {
         agentPrompt: item.agent_prompt,
       };
     });
+    const unscheduled = state.data.items
+      .filter((item) => itemMatches(item) && !primaryDateKey(item) && !item.recurrence)
+      .map((item) => {
+        const course = courseFor(item);
+        return {
+          itemId: item.item_id,
+          title: item.title,
+          courseCode: course.code || course.title,
+          category: categoryLabels[item.category] || item.category,
+          categoryKey: item.category || "other",
+          dateLabel: courseItemDateLabel(item),
+        };
+      });
     modernCalendar.mount(modernRoot, {
       mode: state.calendarMode,
       date: isMonth ? dateKey(state.currentMonth) : dateKey(state.selectedDay),
@@ -1206,6 +1450,13 @@ function renderCalendar(occurrences) {
       },
       onSelectTime: (key, startTime, endTime) => openEventEditor(parseDateOnly(key), startTime, endTime),
       onCopyPrompt: (prompt, title) => copyText(prompt, `“${title}”活动查询提示词已复制。`),
+      query: state.query,
+      filterCourses: state.data.courses.map((course, index) => ({ courseId: course.course_id, code: course.code || course.title, title: course.title, selected: state.selectedCourses.has(course.course_id), toneIndex: index % 6 })),
+      unscheduled,
+      onQueryChange: (query) => { state.query = query.trim().toLocaleLowerCase(); byId("search-input").value = query; renderDataViews(); },
+      onToggleCourse: (courseId, selected) => { if (selected) state.selectedCourses.add(courseId); else state.selectedCourses.delete(courseId); renderCourseFilters(); renderDataViews(); },
+      onSelectAllCourses: () => { state.selectedCourses = new Set(state.data.courses.map((course) => course.course_id)); renderCourseFilters(); renderDataViews(); },
+      onOpenUnscheduled: (itemId) => { const item = state.data.items.find((value) => value.item_id === itemId); if (item) { state.selectedItemId = itemId; state.selectedDateKey = null; renderDetail(item); } },
     });
     return;
   }
@@ -1601,6 +1852,51 @@ function sourcePreviewButton(source) {
 }
 
 function renderDetail(item, occurrenceKey = null) {
+  if (window.HIQSModernOverlay) {
+    const course = courseFor(item);
+    const exception = item.recurrence && occurrenceKey ? recurrenceException(item.recurrence, occurrenceKey) : null;
+    const facts = [];
+    const add = (label, value) => { if (value !== null && value !== undefined && value !== "") facts.push({ label, value: String(value) }); };
+    if (item.recurrence) {
+      add("本次日期", occurrenceKey || "每周重复");
+      add("时间", `${(exception?.start_time || item.recurrence.start_time).slice(0, 5)}–${(exception?.end_time || item.recurrence.end_time).slice(0, 5)}`);
+      add("有效日期", `${item.recurrence.valid_from} 至 ${item.recurrence.valid_until}`);
+      add("本次变更", exception?.note);
+    } else {
+      add("开放", formatDateTime(item.opens_at)); add("开始", formatDateTime(item.starts_at)); add("结束", formatDateTime(item.ends_at));
+      add("DDL", formatDateTime(item.due_at) || item.due_on); add("安排日期", item.scheduled_on);
+    }
+    add("地点", exception?.location || item.location); add("课业形式", item.assessment_format);
+    add("GPA 占比", item.weight_percent === null || item.weight_percent === undefined ? null : `${item.weight_percent}%`);
+    add("字数限制", item.word_limit === null || item.word_limit === undefined ? null : `${item.word_limit} 字`);
+    add("提交方式", item.submission_method); add("最近核实", formatDateTime(item.last_verified_at));
+    renderModernOverlay();
+    window.HIQSModernOverlay.openDetail({
+      itemId: item.item_id,
+      courseLabel: `${course.code} · ${categoryLabels[item.category] || item.category}`,
+      title: exception?.title || item.title,
+      category: categoryLabels[item.category] || item.category,
+      categoryKey: (item.category || "other").replaceAll("_", "-"),
+      dateStateLabel: item.date_status === "confirmed" ? "日期已确认" : item.date_status === "tentative" ? "日期待核实" : "日期未知",
+      weightLabel: item.weight_percent === null || item.weight_percent === undefined ? null : `占分 ${item.weight_percent}%`,
+      warningCount: item.warnings?.length || 0,
+      description: item.description,
+      facts,
+      blocks: [
+        { title: "课业要求", values: item.requirements || [] },
+        { title: "相关政策", values: item.policies || [] },
+        { title: "提醒与冲突", values: item.warnings || [], warning: true },
+      ].filter((block) => block.values.length),
+      materials: item.materials || [],
+      links: (item.links || []).filter((link) => /^https?:\/\//i.test(link.url)),
+      sources: item.sources || [],
+      exceptionSources: exception?.sources || [],
+      hasPrompt: Boolean(item.agent_prompt),
+      prompt: item.agent_prompt,
+      userCreated: Boolean(item.user_created),
+    });
+    return;
+  }
   const dialog = byId("item-detail-dialog");
   const panel = byId("detail-panel");
   const course = courseFor(item);
@@ -1710,6 +2006,7 @@ function renderDetail(item, occurrenceKey = null) {
 function closeItemDetail() {
   state.selectedItemId = null;
   state.selectedDateKey = null;
+  if (window.HIQSModernOverlay) { window.HIQSModernOverlay.closeDetail(); renderDataViews(); return; }
   const dialog = byId("item-detail-dialog");
   if (dialog.open) dialog.close();
   renderDataViews();
@@ -1722,6 +2019,11 @@ function setEventTimeFieldState() {
 }
 
 function openEventEditor(date = state.selectedDay, startTime = "09:00", endTime = "10:00") {
+  if (window.HIQSModernOverlay) {
+    renderModernOverlay();
+    window.HIQSModernOverlay.openEventEditor({ date: dateKey(date), startTime, endTime, courseId: state.selectedOverviewCourseId });
+    return;
+  }
   const form = byId("event-editor-form");
   form.reset();
   byId("event-start-time").value = startTime;
@@ -1741,6 +2043,7 @@ function openEventEditor(date = state.selectedDay, startTime = "09:00", endTime 
 }
 
 function closeEventEditor() {
+  if (window.HIQSModernOverlay) { window.HIQSModernOverlay.closeEventEditor(); return; }
   const dialog = byId("event-editor-dialog");
   if (dialog.open) dialog.close();
 }
@@ -1761,16 +2064,18 @@ async function addCalendarEvent(event) {
   }
   const title = byId("event-title").value.trim();
   if (!window.confirm(`将“${title}”写入本地课程日历。继续吗？`)) return;
+  return addCalendarEventValue({ course_id: byId("event-course").value, title, category: byId("event-category").value, all_day: allDay, date, start_time: startTime, end_time: endTime, location: byId("event-location").value.trim(), description: byId("event-description").value.trim() }, true);
+}
+
+async function addCalendarEventValue(input, confirmedAlready = false) {
+  const title = input.title.trim();
+  if (!confirmedAlready && !window.confirm(`将“${title}”写入本地课程日历。继续吗？`)) return;
   const value = {
-    course_id: byId("event-course").value,
-    title,
-    category: byId("event-category").value,
-    all_day: allDay,
-    scheduled_on: allDay ? date : null,
-    starts_at: allDay ? null : localEventDateTime(date, startTime),
-    ends_at: allDay ? null : localEventDateTime(date, endTime),
-    location: byId("event-location").value.trim() || null,
-    description: byId("event-description").value.trim() || null,
+    course_id: input.course_id, title, category: input.category, all_day: input.all_day,
+    scheduled_on: input.all_day ? input.date : null,
+    starts_at: input.all_day ? null : localEventDateTime(input.date, input.start_time),
+    ends_at: input.all_day ? null : localEventDateTime(input.date, input.end_time),
+    location: input.location.trim() || null, description: input.description.trim() || null,
   };
   const result = await runLocalMutation(
     "/api/events/add",
@@ -1933,6 +2238,20 @@ function localSearchRecords() {
   return records;
 }
 
+function homeSearchMatches() {
+  const query = state.homeQuery.trim().toLocaleLowerCase();
+  if (!query) return [];
+  const ignored = new Set(["的", "是", "什么", "多少", "请问", "我", "how", "what", "is", "the"]);
+  const normalized = query
+    .replace(/占分多少|占比多少/g, "占分")
+    .replace(/什么时候|在哪里|是什么|有哪些|怎么样|怎么/g, " ");
+  const terms = normalized.split(/[\s，。？！,.?!:：]+/).filter((value) => value && !ignored.has(value));
+  return localSearchRecords().filter((record) => {
+    const value = `${record.title} ${record.subtitle} ${record.searchable}`.toLocaleLowerCase();
+    return terms.every((term) => value.includes(term));
+  }).slice(0, 12);
+}
+
 function renderHomeSearch() {
   const container = byId("home-search-results");
   container.replaceChildren();
@@ -1941,15 +2260,7 @@ function renderHomeSearch() {
     container.append(element("p", "search-hint", "可查询 DDL、占分、地点、课业形式、课件名称和课程代码。"));
     return;
   }
-  const ignored = new Set(["的", "是", "什么", "多少", "请问", "我", "how", "what", "is", "the"]);
-  const normalized = query
-    .replace(/占分多少|占比多少/g, "占分")
-    .replace(/什么时候|在哪里|是什么|有哪些|怎么样|怎么/g, " ");
-  const terms = normalized.split(/[\s，。？！,.?!:：]+/).filter((value) => value && !ignored.has(value));
-  const matches = localSearchRecords().filter((record) => {
-    const value = `${record.title} ${record.subtitle} ${record.searchable}`.toLocaleLowerCase();
-    return terms.every((term) => value.includes(term));
-  }).slice(0, 12);
+  const matches = homeSearchMatches();
   if (!matches.length) {
     container.append(element("p", "search-hint", "本地信息库中没有匹配结果，可以缩短问题或改用课程代码、事项名称。"));
     return;
@@ -1974,6 +2285,149 @@ function renderHomeSearch() {
   }
 }
 
+function modernHomeNextUp(now = new Date()) {
+  const next = upcomingOccurrences(now)[0];
+  if (!next) {
+    return {
+      empty: true,
+      course: "近期没有已排定事项",
+      meta: "待确认日期仍保留在课程日历中",
+      start: "CLEAR",
+      end: "",
+    };
+  }
+  const course = courseFor(next.item);
+  const dateLabel = `${next.startsAt.getMonth() + 1} 月 ${next.startsAt.getDate()} 日`;
+  const relative = relativeStartLabel(next.startsAt, next.endsAt, now);
+  const verification = next.item.date_status === "confirmed" ? "" : " · 待核实";
+  return {
+    empty: false,
+    course: `${course.code || course.title} · ${course.title}`,
+    meta: [next.item.title, next.item.location, `${dateLabel} · ${relative}${verification}`].filter(Boolean).join("　·　"),
+    start: next.time || dateLabel,
+    end: next.endTime ? `— ${next.endTime.slice(0, 5)}` : categoryLabels[next.item.category] || "查看详情",
+    itemId: next.item.item_id,
+    dateKey: next.key,
+  };
+}
+
+function modernHomeAttention() {
+  const status = state.data?.material_status || {};
+  return [
+    ...(status.google_authorization || []).map((item) => ({ ...item, kind: "Google 授权" })),
+    ...(status.source_conflicts || []).map((item) => ({ ...item, kind: "来源冲突" })),
+    ...(status.date_unknown || []).map((item) => ({ ...item, kind: "日期待确认" })),
+  ].slice(0, 10);
+}
+
+function openModernHomeSearchResult(record) {
+  if (!record) return;
+  if (record.kind === "material") {
+    const remoteUrl = safeHttpUrl(record.value.source_url);
+    if (!record.value.relative_path && remoteUrl) openExternalTab(remoteUrl);
+    else openSourcePreview(record.value);
+    return;
+  }
+  showCalendar();
+  state.selectedItemId = record.value.item_id;
+  state.selectedDateKey = primaryDateKey(record.value);
+  renderDetail(record.value, state.selectedDateKey);
+}
+
+function renderModernHome(occurrences) {
+  const root = byId("modern-home-root");
+  const modernHome = window.HIQSModernHome;
+  if (!root || !modernHome || !state.data) return;
+  const filteredItems = state.data.items.filter(itemMatches);
+  const monthPrefix = dateKey(state.currentMonth).slice(0, 7);
+  const status = state.data.material_status || {};
+  const counts = status.counts || {};
+  const statusTotal = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+  const ocr = status.ocr || { capabilities: {}, queue: [] };
+  const ocrQueue = (ocr.queue || []).slice(0, 8);
+  const attention = modernHomeAttention();
+  const searchResults = homeSearchMatches();
+  const closure = state.data.review_closure || { stages: [], retry_tasks: [] };
+  const retryTasks = closure.retry_tasks || [];
+  const inbox = state.data.personal_inbox || { pending_count: 0, entries: [] };
+  const updateCourses = state.data.updates?.courses || [];
+  modernHome.mount(root, {
+    nextUp: modernHomeNextUp(),
+    metrics: [
+      { label: "课程", value: state.selectedCourses.size, note: "统一课程目录" },
+      { label: "信息事项", value: filteredItems.length, note: "课程、tutorial 与 assessment" },
+      { label: "本月日程", value: occurrences.filter((value) => value.key.startsWith(monthPrefix)).length, note: "含每周重复时间" },
+      { label: "日期待确认", value: filteredItems.filter((item) => item.date_status === "unknown").length, note: "保留并等待来源核实" },
+      { label: "待 AI 整理", value: counts.ai_review || 0, note: "仅处理新增或变化资料" },
+    ],
+    stages: closure.stages || [],
+    retrySummary: retryTasks.length
+      ? `${retryTasks.length} 个失败项目可精确重试：${retryTasks.map((task) => `${task.source}${task.course_code ? ` · ${task.course_code}` : ""}`).join("、")}`
+      : "",
+    hasRetryTasks: retryTasks.length > 0,
+    hasAgentPrompt: Boolean(closure.agent_prompt),
+    counts,
+    statusTotal,
+    ocrCapability: ocr.capabilities?.engine ? `${ocr.capabilities.engine} · 全程本地处理` : "本机需要 Apple Vision 或 Tesseract",
+    canRunOcr: Boolean(ocr.capabilities?.available && ocr.queue?.length),
+    ocrQueue: ocrQueue.map((item, index) => ({
+      title: item.title,
+      meta: `${item.course_id} · ${String(item.document_kind || "file").toUpperCase()}`,
+      note: item.activity_name,
+      actionIndex: index,
+    })),
+    attention: attention.map((item, index) => ({
+      title: item.title,
+      meta: `${item.course_id} · ${item.kind}`,
+      note: item.message || (item.warnings || []).join("；") || null,
+      actionIndex: item.item_id || item.url ? index : undefined,
+    })),
+    searchQuery: state.homeQuery,
+    searchHint: state.homeQuery.trim()
+      ? "本地信息库中没有匹配结果，可以缩短问题或改用课程代码、事项名称。"
+      : "可查询 DDL、占分、地点、课业形式、课件名称和课程代码。",
+    searchResults: searchResults.map((record, index) => ({ title: record.title, subtitle: record.subtitle, resultIndex: index })),
+    inboxCount: inbox.pending_count || 0,
+    inboxEntries: inbox.entries || [],
+    updateCount: state.data.pending_review?.change_count || 0,
+    updates: updateCourses,
+    syncJob: state.syncJob,
+    onOpenNext: (itemId, selectedDateKey) => {
+      const item = state.data?.items.find((value) => value.item_id === itemId);
+      if (item) renderDetail(item, selectedDateKey || null);
+    },
+    onStartWorkflow: startWorkflow,
+    onRetryFailures: retryFailures,
+    onCopyAgentPrompt: copyAgentPrompt,
+    onCancelSync: cancelCourseSync,
+    onRunOcr: processOcrQueue,
+    onOpenOcr: (index) => ocrQueue[index] && openSourcePreview(ocrQueue[index]),
+    onOpenAttention: (index) => {
+      const entry = attention[index];
+      if (!entry) return;
+      const item = entry.item_id ? state.data.items.find((value) => value.item_id === entry.item_id) : null;
+      if (item) {
+        showCalendar();
+        state.selectedItemId = item.item_id;
+        state.selectedDateKey = primaryDateKey(item);
+        renderDetail(item, state.selectedDateKey);
+      } else if (entry.url) {
+        openExternalTab(entry.url);
+      }
+    },
+    onSearch: (query) => {
+      state.homeQuery = query;
+      renderModernHome(buildOccurrences());
+    },
+    onOpenSearchResult: (index) => openModernHomeSearchResult(searchResults[index]),
+    onApplyInbox: (entryId) => {
+      const entry = (inbox.entries || []).find((value) => value.entry_id === entryId);
+      if (entry) applyInboxEntry(entry);
+    },
+    onOpenSource: openSourcePreview,
+  });
+}
+
 function renderDataViews() {
   const occurrences = buildOccurrences();
   renderHomeFocus();
@@ -1985,6 +2439,7 @@ function renderDataViews() {
   renderUpdates();
   renderHomeSearch();
   renderReviewClosure();
+  renderModernHome(occurrences);
   renderReconciliation();
   if (state.selectedItemId) {
     const selected = state.data.items.find((item) => item.item_id === state.selectedItemId && itemMatches(item));
@@ -2059,10 +2514,13 @@ async function loadInformation() {
     renderCourseNavigation();
     renderCourseFilters();
     renderDataViews();
+    renderModernOverlay();
+    renderModernShell();
   } catch (error) {
     const alert = byId("global-error");
     alert.textContent = error.message;
     alert.classList.remove("hidden");
+    renderModernShell();
   }
 }
 
@@ -2089,6 +2547,7 @@ function renderApplicationUpdate(value) {
   } else {
     button.textContent = "正在检查更新…";
   }
+  renderModernShell();
 }
 
 async function checkApplicationUpdate() {
@@ -2140,6 +2599,7 @@ async function applyApplicationUpdate() {
 }
 
 function setOperationState(running, message = "") {
+  state.operationRunning = running;
   const reloadButton = byId("reload-data");
   const ocrButton = byId("run-ocr");
   const workflowButton = byId("start-workflow");
@@ -2158,6 +2618,8 @@ function setOperationState(running, message = "") {
   } else {
     status.classList.add("hidden");
   }
+  renderModernOverlay();
+  renderModernShell();
 }
 
 async function runLocalMutation(path, payload, pendingMessage) {
@@ -2212,6 +2674,7 @@ async function applyInboxEntry(entry) {
 }
 
 function renderSyncProgress(job) {
+  state.syncJob = job;
   const panel = byId("sync-progress");
   const running = job.state === "running";
   const cancelling = running && Boolean(job.cancel_requested);
@@ -2223,6 +2686,7 @@ function renderSyncProgress(job) {
   bar.max = Math.max(1, job.total || 1);
   bar.value = Math.min(job.completed || 0, bar.max);
   byId("cancel-sync").disabled = !running || cancelling;
+  if (state.data) renderModernHome(buildOccurrences());
 }
 
 async function pollCourseSync(jobId = null, options = {}) {
@@ -2283,21 +2747,25 @@ async function startWorkflow() {
 
 async function addCourse(event) {
   event.preventDefault();
-  const course = {
+  return addCourseValue({
     course_id: byId("new-course-id").value.trim(),
     code: byId("new-course-code").value.trim(),
     title: byId("new-course-title").value.trim(),
-    semester: byId("new-course-semester").value.trim() || null,
-  };
+    semester: byId("new-course-semester").value.trim(),
+  }, true);
+}
+
+async function addCourseValue(input, legacyForm = false) {
+  const course = { course_id: input.course_id.trim(), code: input.code.trim(), title: input.title.trim(), semester: input.semester.trim() || null };
   const result = await runLocalMutation(
     "/api/courses/add",
     { confirmed: true, course },
     `正在添加 ${course.code || course.course_id}…`,
   );
   if (!result) return;
-  byId("add-course-form").reset();
+  if (legacyForm) byId("add-course-form").reset();
   await loadInformation();
-  renderCourseManager();
+  if (!window.HIQSModernOverlay) renderCourseManager();
   setOperationState(false, `课程已添加：${course.code}。`);
 }
 
@@ -2316,7 +2784,7 @@ async function deleteCourse(course) {
   state.managerSelectedCourseIds.delete(course.course_id);
   if (state.selectedOverviewCourseId === course.course_id) state.selectedOverviewCourseId = null;
   await loadInformation();
-  renderCourseManager();
+  if (!window.HIQSModernOverlay) renderCourseManager();
   if (state.view === "course" && !state.selectedOverviewCourseId) showHome();
   setOperationState(false, `课程已删除：${course.code || course.title}；同时移除 ${result.deleted_item_count} 条关联事项。`);
 }
@@ -2346,7 +2814,7 @@ async function deleteSelectedCourses() {
   }
   state.managerSelectedCourseIds.clear();
   await loadInformation();
-  renderCourseManager();
+  if (!window.HIQSModernOverlay) renderCourseManager();
   if (state.view === "course" && !state.selectedOverviewCourseId) showHome();
   setOperationState(false, `已删除 ${result.deleted_course_count} 门课程和 ${result.deleted_item_count} 条关联事项。`);
 }

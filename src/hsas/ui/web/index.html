@@ -12,6 +12,7 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
+      <div id="modern-topbar-root"></div>
       <a class="brand" href="/" aria-label="返回首页">
         <span class="brand-mark">H</span>
         <span><strong>HIQS</strong><small>HKU Information Query System</small></span>
@@ -25,6 +26,7 @@
 
     <div class="app-body">
       <aside class="sidebar">
+        <div id="modern-sidebar-root"></div>
         <div class="sidebar-heading">
           <p class="eyebrow">QUERY</p>
           <h2>课程导航</h2>
@@ -53,11 +55,13 @@
       </aside>
 
       <main>
+        <div id="modern-notices-root" aria-live="polite"></div>
         <div id="global-error" class="notice error hidden" role="alert"></div>
         <div id="data-warning" class="notice warning hidden" role="status"></div>
         <div id="operation-status" class="notice success hidden" role="status"></div>
 
         <header class="page-heading">
+          <div id="modern-heading-root"></div>
           <div>
             <p id="page-eyebrow" class="eyebrow">APPLICATION</p>
             <h1 id="page-title">HIQS 首页</h1>
@@ -69,6 +73,7 @@
         </header>
 
         <div id="home-view">
+          <div id="modern-home-root" aria-live="polite"></div>
           <button id="next-up-card" class="next-up-card" type="button" aria-label="查看下一项课程安排">
             <span class="next-up-orbit orbit-one" aria-hidden="true"></span>
             <span class="next-up-orbit orbit-two" aria-hidden="true"></span>
@@ -248,10 +253,13 @@
         </div>
 
         <section id="course-overview-view" class="course-overview-view hidden" aria-live="polite">
-          <div id="course-overview"></div>
+          <div id="modern-course-root"></div>
+          <div id="course-overview" class="hidden"></div>
         </section>
 
         <section id="reconciliation-view" class="reconciliation-view hidden" aria-live="polite">
+          <div id="modern-reconciliation-root"></div>
+          <div class="legacy-reconciliation hidden">
           <div class="section-heading reconciliation-heading">
             <div>
               <p class="eyebrow">SOURCE RECONCILIATION</p>
@@ -261,10 +269,12 @@
             <span id="reconciliation-count">0 门待处理</span>
           </div>
           <div id="reconciliation-list" class="reconciliation-list"></div>
+          </div>
         </section>
       </main>
     </div>
   </div>
+  <div id="modern-overlay-root"></div>
   <dialog id="item-detail-dialog" class="item-detail-dialog">
     <div class="detail-dialog-heading">
       <p class="eyebrow">CALENDAR ITEM</p>

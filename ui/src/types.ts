@@ -252,6 +252,8 @@ export interface ModernCourseOptions {
   code: string;
   title: string;
   facts: string;
+  operationRunning: boolean;
+  onRefresh: () => void;
   moodleUrl?: string | null;
   overview?: string | null;
   objectives: string[];

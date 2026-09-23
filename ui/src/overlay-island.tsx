@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { flowEase, useWorkspaceMotion } from "./lib/motion";
 import { ArrowUpRight, Copy, ExternalLink, FileText, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -33,6 +34,7 @@ interface SourcePayload {
 }
 
 function Modal({ children, onClose, wide = false }: { children: ReactNode; onClose: () => void; wide?: boolean }) {
+  const animate = useWorkspaceMotion();
   const dialog = useRef<HTMLElement>(null);
   const close = useRef(onClose); close.current = onClose;
   useEffect(() => {
@@ -55,8 +57,8 @@ function Modal({ children, onClose, wide = false }: { children: ReactNode; onClo
     document.addEventListener('keydown', key);
     return () => { document.removeEventListener('keydown', key); document.body.style.overflow = oldOverflow; previous?.focus(); };
   }, []);
-  return <motion.div className="hiqs-modal-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <motion.section ref={dialog} role="dialog" aria-modal="true" aria-label="详情与操作" tabIndex={-1} className={`hiqs-modal ${wide ? "is-wide" : ""}`} initial={{ opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: .99 }} transition={{ duration: .18 }}>{children}</motion.section>
+  return <motion.div className="hiqs-modal-backdrop" initial={animate ? { opacity: 0 } : false} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: animate ? .22 : 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <motion.section ref={dialog} role="dialog" aria-modal="true" aria-label="详情与操作" tabIndex={-1} className={`hiqs-modal ${wide ? "is-wide" : ""}`} initial={animate ? { opacity: 0, y: 22, scale: .985 } : false} animate={{ opacity: 1, y: 0, scale: 1 }} exit={animate ? { opacity: 0, y: 8, scale: .99 } : { opacity: 0 }} transition={{ duration: animate ? .34 : 0, ease: flowEase }}>{children}</motion.section>
   </motion.div>;
 }
 

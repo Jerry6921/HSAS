@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { flowTransition, useWorkspaceMotion } from "./lib/motion";
 import { AlertTriangle, CalendarDays, Database, Home, RefreshCw, Settings2, Sparkles } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -9,7 +10,7 @@ export function TopbarIsland({ options }: { options: ModernShellOptions }) {
     <button type="button" className="hiqs-shell-brand" onClick={() => options.onNavigate("home")}><span>H</span><strong>HIQS<small>HKU INFORMATION QUERY SYSTEM</small></strong></button>
     <details className="hiqs-settings"><summary>设置与状态</summary><div className="hiqs-shell-top-actions">
       <Button size="sm" onClick={options.onUpdate} disabled={options.updateDisabled} title={options.updateTitle}><RefreshCw size={14} />{options.updateLabel}</Button>
-      <Button size="sm" onClick={options.onToggleMotion}><Sparkles size={14} />动态质感 · {options.motionEnabled ? "开" : "关"}</Button>
+      <Button size="sm" onClick={options.onToggleMotion} aria-pressed={options.motionEnabled}><Sparkles size={14} />动效 · {options.motionEnabled ? "开" : "关"}</Button>
       <Badge>仅限本机 · 数据由 AI 整理</Badge>
     </div></details>
   </div>;
@@ -37,14 +38,16 @@ export function SidebarIsland({ options }: { options: ModernShellOptions }) {
 }
 
 export function HeadingIsland({ options }: { options: ModernShellOptions }) {
-  return <motion.div className="hiqs-shell-heading" key={`${options.view}:${options.title}`} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>
+  const animate = useWorkspaceMotion();
+  return <motion.div className="hiqs-shell-heading" key={`${options.view}:${options.title}`} initial={animate ? { opacity: 0, x: -12 } : false} animate={{ opacity: 1, x: 0 }} transition={flowTransition}>
     <div><p>{options.view === 'home' ? `PERSONAL EDITION / ${new Date().getFullYear()}` : options.eyebrow}</p><h1>{options.view === 'home' ? '学习手记' : options.title}<span /></h1><small>{options.caption}</small></div>
     <Button onClick={options.onRefresh} disabled={options.operationRunning}><RefreshCw size={15} />刷新数据</Button>
   </motion.div>;
 }
 
 export function NoticesIsland({ options }: { options: ModernShellOptions }) {
+  const animate = useWorkspaceMotion();
   return <div className="hiqs-shell-notices">
-    {options.notices.map((notice, index) => <motion.div key={`${notice.kind}:${notice.message}:${index}`} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className={notice.kind}><AlertTriangle size={15} /><span>{notice.message}</span></motion.div>)}
+    {options.notices.map((notice, index) => <motion.div key={`${notice.kind}:${notice.message}:${index}`} initial={animate ? { opacity: 0, y: -6 } : false} animate={{ opacity: 1, y: 0 }} transition={flowTransition} className={notice.kind}><AlertTriangle size={15} /><span>{notice.message}</span></motion.div>)}
   </div>;
 }

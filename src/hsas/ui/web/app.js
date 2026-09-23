@@ -139,7 +139,7 @@ function modernShellOptions() {
     caption: byId("data-caption").textContent,
     courses: (state.data?.courses || []).map((course, index) => ({
       courseId: course.course_id,
-      code: course.code || course.title,
+      code: displayCourseCode(course),
       title: course.title,
       toneIndex: index % 6,
       active: state.view === "course" && state.selectedOverviewCourseId === course.course_id,
@@ -459,6 +459,7 @@ function closeCourseManager() {
 
 function setView(view) {
   state.view = view;
+  document.body.classList.toggle("hiqs-course-view", view === "course");
   byId("home-view").classList.toggle("hidden", view !== "home");
   byId("calendar-view").classList.toggle("hidden", view !== "calendar");
   byId("course-overview-view").classList.toggle("hidden", view !== "course");
@@ -467,6 +468,7 @@ function setView(view) {
   byId("show-calendar").classList.toggle("active", view === "calendar");
   byId("show-reconciliation").classList.toggle("active", view === "reconciliation");
   byId("query-controls").classList.toggle("hidden", view !== "calendar");
+  window.scrollTo(0, 0);
   renderCourseNavigation();
   renderModernShell();
 }
@@ -1095,9 +1097,11 @@ function renderModernCourse(course) {
     : `${items.length} 项结构化活动`;
   modernCourse.mount(root, {
     courseId: course.course_id,
-    code: course.code || course.title,
+    code: displayCourseCode(course),
     title: course.title,
     facts,
+    operationRunning: state.operationRunning,
+    onRefresh: loadInformation,
     moodleUrl: safeHttpUrl(course.moodle?.url),
     overview: course.overview || null,
     objectives: course.objectives || [],
@@ -1128,6 +1132,12 @@ function renderModernCourse(course) {
   });
 }
 
+function displayCourseCode(course) {
+  const label = String(course.code || course.title || "");
+  const firstToken = label.split(/\s+/)[0];
+  return /\d/.test(firstToken) ? firstToken : label;
+}
+
 function renderCourseOverview() {
   const course = state.data.courses.find((value) => value.course_id === state.selectedOverviewCourseId);
   const container = byId("course-overview");
@@ -1137,7 +1147,7 @@ function renderCourseOverview() {
     return;
   }
   byId("page-eyebrow").textContent = "COURSE OVERVIEW";
-  byId("page-title").textContent = course.code || course.title;
+  byId("page-title").textContent = displayCourseCode(course);
   byId("data-caption").textContent = [course.title, course.semester].filter(Boolean).join(" · ");
 
   const hero = element("section", "course-hero");

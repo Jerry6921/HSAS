@@ -214,9 +214,9 @@ body.hiqs-modern-home-ready #home-view > :not(#modern-home-root) { display: none
 .hiqs-course-grade-list > div > span { display: flex; justify-content: space-between; gap: .7rem; margin-bottom: .4rem; font-size: .76rem; }
 .hiqs-course-grade-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hiqs-course-grade-list b { color: var(--hiqs-rust-dark); }
-.hiqs-course-grade-list progress { display: block; width: 100%; height: 7px; border: 0; accent-color: var(--hiqs-rust); }
-.hiqs-course-grade-list progress::-webkit-progress-bar { border-radius: 99px; background: #eee4dc; }
-.hiqs-course-grade-list progress::-webkit-progress-value { border-radius: 99px; background: var(--hiqs-rust); }
+.hiqs-grade-bar { position: relative; height: 7px; overflow: hidden; border-radius: 99px; background: #eee4dc; }
+.hiqs-grade-bar progress { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+.hiqs-grade-fill { display: block; height: 100%; border-radius: inherit; background: var(--hiqs-rust); }
 .hiqs-course-grade-note { display: block; margin-top: 1.2rem; color: var(--hiqs-rust-dark); font-size: .7rem; font-weight: 700; }
 
 .hiqs-course-content > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }

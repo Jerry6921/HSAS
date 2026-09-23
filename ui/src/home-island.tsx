@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { flowEase, flowTransition, useWorkspaceMotion } from "./lib/motion";
 import {
   AlertTriangle,
   ArrowRight,
@@ -144,28 +145,29 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
   const dateNumber = String(today.getDate()).padStart(2, '0');
   const dateMonth = new Intl.DateTimeFormat('zh-HK', {year: 'numeric', month: 'long'}).format(today);
   const weekday = new Intl.DateTimeFormat('zh-HK', {weekday: 'long'}).format(today);
-  const reduceMotion = useReducedMotion();
-  const enter = reduceMotion ? false : { opacity: 0, y: 10 };
+  const animate = useWorkspaceMotion();
+  const reveal = animate ? { opacity: 0, y: 16 } : false;
   const sync = options.syncJob;
   const syncing = sync?.state === "running";
   const syncTotal = Math.max(1, sync?.total || 1);
   const syncCompleted = Math.min(sync?.completed || 0, syncTotal);
 
   return (
-    <motion.div className="hiqs-modern-home" initial={enter} animate={{ opacity: 1, y: 0 }} transition={{ duration: .24, ease: [.2, .75, .2, 1] }}>
-      <div className="hiqs-workspace-tabs" role="group" aria-label="首页视图"><Button aria-pressed={!workspace} variant={!workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(false)}>今天</Button><Button aria-pressed={workspace} variant={workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(true)}>资料中心 {options.statusTotal > 0 && <Badge>{options.statusTotal}</Badge>}</Button></div>
+    <div className="hiqs-modern-home">
+      <div className="hiqs-workspace-tabs" role="group" aria-label="首页视图"><Button aria-pressed={!workspace} variant={!workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(false)}>今天{!workspace && <motion.span layoutId="hiqs-home-tab" className="hiqs-tab-indicator" transition={animate ? { type: 'spring', stiffness: 370, damping: 38 } : { duration: 0 }} />}</Button><Button aria-pressed={workspace} variant={workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(true)}>资料中心 {options.statusTotal > 0 && <Badge>{options.statusTotal}</Badge>}{workspace && <motion.span layoutId="hiqs-home-tab" className="hiqs-tab-indicator" transition={animate ? { type: 'spring', stiffness: 370, damping: 38 } : { duration: 0 }} />}</Button></div>
       {!workspace && <>
-      <header className="hiqs-editorial-masthead">
+      <motion.header className="hiqs-editorial-masthead" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={flowTransition}>
         <div className="hiqs-masthead-date"><span>{dateMonth}</span><strong>{dateNumber}</strong><span>{weekday}</span></div>
         <div className="hiqs-masthead-copy"><span className="hiqs-kicker">HIQS / STUDY JOURNAL · 01</span><h2>今天，值得掌握的事。</h2><p>课程日程与资料变化，按你的学习节奏排列。</p></div>
         <div className="hiqs-masthead-facts"><span><strong>{options.today.length}</strong> 今天的安排</span><span><strong>{options.deadlines.length}</strong> 近期考核</span><span><strong>{options.statusTotal}</strong> 资料提醒</span></div>
-      </header>
-      <div className="hiqs-feature-layout">
+      </motion.header>
+      <motion.div className="hiqs-feature-layout" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .5, delay: .07, ease: flowEase }}>
       <motion.button
         type="button"
         className={`hiqs-home-next ${options.nextUp.empty ? "is-empty" : ""}`}
         disabled={options.nextUp.empty}
-        whileHover={reduceMotion ? undefined : { y: -2 }}
+        whileHover={animate ? { scale: 1.005 } : undefined}
+        transition={{ duration: .32, ease: flowEase }}
         onClick={() => options.nextUp.itemId && options.onOpenNext(options.nextUp.itemId, options.nextUp.dateKey)}
       >
         <span className="hiqs-home-next-lines" aria-hidden="true" />
@@ -177,14 +179,14 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
         <span className="hiqs-home-next-time"><strong>{options.nextUp.start}</strong><small>{options.nextUp.end}</small></span>
       </motion.button>
       <aside className="hiqs-feature-note"><span className="hiqs-kicker">AT A GLANCE / 02</span><strong>先看下一项，再进入细节。</strong><p>点击事项可查看时间、地点及相关来源；待核实信息会单独标明。</p><button type="button" onClick={() => setWorkspace(true)}>查看资料状态 <ArrowRight size={16}/></button></aside>
-      </div>
+      </motion.div>
 
-      <section className="hiqs-daily-grid">{[["今天的安排", options.today], ["接下来 · 考核与截止", options.deadlines]].map(([title, entries], index) => <section key={String(title)}><header className="hiqs-editorial-section-title"><span>0{index + 3} / AGENDA</span><h2>{String(title)}</h2></header>{(entries as ModernHomeOptions['today']).length ? (entries as ModernHomeOptions['today']).map((entry, row) => <button className="hiqs-agenda-row" key={`${entry.itemId}:${entry.dateKey}`} onClick={() => options.onOpenNext(entry.itemId, entry.dateKey)}><em>{String(row + 1).padStart(2, '0')}</em><span><strong>{entry.title}</strong><small>{entry.meta}</small></span><ArrowRight size={16}/></button>) : <p className="hiqs-home-empty">暂无已排定事项。待确认日期可在日历中查看。</p>}</section>)}</section>
-      <section className="hiqs-recent"><header className="hiqs-editorial-section-title"><span>05 / ARCHIVE</span><h2>课程资料更新</h2></header>{options.updates.length ? options.updates.slice(0, 5).map((course, index) => <article key={course.course_id}><em>{String(index + 1).padStart(2, '0')}</em><strong>{course.course_title}</strong><span>{course.changes?.length || course.files?.length || 0} 项变更</span><Button size="sm" onClick={() => setWorkspace(true)}>查看更新</Button></article>) : <p>当前没有待整理的资料更新。</p>}</section>
-      <button className="hiqs-health" onClick={() => setWorkspace(true)}><span>{syncing ? "正在同步课程资料…" : options.statusTotal ? `${options.statusTotal} 项资料状态需要关注` : "本地资料状态正常"}</span><span>打开资料中心 →</span></button>
+      <motion.section className="hiqs-daily-grid" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .13, ease: flowEase }}>{[["今天的安排", options.today], ["接下来 · 考核与截止", options.deadlines]].map(([title, entries], index) => <section key={String(title)}><header className="hiqs-editorial-section-title"><span>0{index + 3} / AGENDA</span><h2>{String(title)}</h2></header>{(entries as ModernHomeOptions['today']).length ? (entries as ModernHomeOptions['today']).map((entry, row) => <button className="hiqs-agenda-row" key={`${entry.itemId}:${entry.dateKey}`} onClick={() => options.onOpenNext(entry.itemId, entry.dateKey)}><em>{String(row + 1).padStart(2, '0')}</em><span><strong>{entry.title}</strong><small>{entry.meta}</small></span><ArrowRight size={16}/></button>) : <p className="hiqs-home-empty">暂无已排定事项。待确认日期可在日历中查看。</p>}</section>)}</motion.section>
+      <motion.section className="hiqs-recent" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .18, ease: flowEase }}><header className="hiqs-editorial-section-title"><span>05 / ARCHIVE</span><h2>课程资料更新</h2></header>{options.updates.length ? options.updates.slice(0, 5).map((course, index) => <article key={course.course_id}><em>{String(index + 1).padStart(2, '0')}</em><strong>{course.course_title}</strong><span>{course.changes?.length || course.files?.length || 0} 项变更</span><Button size="sm" onClick={() => setWorkspace(true)}>查看更新</Button></article>) : <p>当前没有待整理的资料更新。</p>}</motion.section>
+      <motion.button className="hiqs-health" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .22, ease: flowEase }} onClick={() => setWorkspace(true)}><span>{syncing ? "正在同步课程资料…" : options.statusTotal ? `${options.statusTotal} 项资料状态需要关注` : "本地资料状态正常"}</span><span>打开资料中心 →</span></motion.button>
       </>}
 
-      {workspace && <section className="hiqs-home-command">
+      {workspace && <motion.section className="hiqs-home-command" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={flowTransition}>
         <header className="hiqs-home-section-heading">
           <div><p>COMMAND CENTER</p><h2>同步工作台</h2><span>连接课程来源、读取变更，再由你决定哪些信息进入本地资料库。</span></div>
           <div className="hiqs-home-actions"><Badge><Sparkles size={13} />本地工作区</Badge><Button variant="default" onClick={options.onStartWorkflow} disabled={syncing}>{syncing ? "同步中" : "开始同步"}</Button></div>
@@ -208,7 +210,7 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
           </div>
           <div className="hiqs-home-stages">
             {options.stages.map((stage, index) => (
-              <motion.article key={stage.id} initial={reduceMotion ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * .035 }} className={stage.state}>
+              <motion.article key={stage.id} initial={animate ? { opacity: 0, x: -8 } : false} animate={{ opacity: 1, x: 0 }} transition={{ duration: .35, delay: index * .035, ease: flowEase }} className={stage.state}>
                 <i>{stage.state === "complete" ? <Check size={12} /> : <span />}</i>
                 <strong>{stage.label}</strong>
                 <small>{stage.state === "complete" ? "已完成" : stage.count ? `${stage.count} 项待处理` : "待处理"}</small>
@@ -221,7 +223,7 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
         <div className="hiqs-home-metrics">
           {options.metrics.map((metric) => <article key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}
         </div>
-      </section>}
+      </motion.section>}
 
       <div className={`hiqs-home-grid ${workspace ? 'is-workspace' : 'is-today'}`}>
         {workspace && <section className="hiqs-home-status">
@@ -265,6 +267,6 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
         {!options.updates.length && <p className="hiqs-home-empty"><FileText size={15} />当前 Moodle 快照已完成整理。</p>}
         <div className="hiqs-home-update-list">{options.updates.map((course) => <UpdateCourse key={course.course_id} course={course} onOpenSource={options.onOpenSource} />)}</div>
       </section>}
-    </motion.div>
+    </div>
   );
 }

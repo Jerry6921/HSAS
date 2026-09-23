@@ -1,5 +1,6 @@
 import { createRef, useEffect, useState, type ReactNode } from "react";
 import { MotionConfig } from "motion/react";
+import { MotionPreference } from "./lib/motion";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { CalendarIsland } from "./calendar-island";
@@ -16,8 +17,17 @@ const roots = new WeakMap<HTMLElement, Root>();
 
 function WorkspaceMotion({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(document.documentElement.classList.contains('motion-enabled'));
-  useEffect(() => { const observer = new MutationObserver(() => setEnabled(document.documentElement.classList.contains('motion-enabled'))); observer.observe(document.documentElement, {attributes: true, attributeFilter: ['class']}); return () => observer.disconnect(); }, []);
-  return <MotionConfig reducedMotion={enabled ? 'user' : 'always'} transition={{duration: enabled ? .18 : 0}}>{children}</MotionConfig>;
+  const [reduceMotion, setReduceMotion] = useState(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setEnabled(document.documentElement.classList.contains('motion-enabled')));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setReduceMotion(preference.matches);
+    preference.addEventListener('change', updatePreference);
+    return () => { observer.disconnect(); preference.removeEventListener('change', updatePreference); };
+  }, []);
+  const active = enabled && !reduceMotion;
+  return <MotionPreference.Provider value={active}><MotionConfig reducedMotion={active ? 'never' : 'always'}>{children}</MotionConfig></MotionPreference.Provider>;
 }
 
 window.HIQSModernCalendar = {

@@ -1,12 +1,13 @@
 import FullCalendar from "@fullcalendar/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import zhCnLocale from "@fullcalendar/core/locales/zh-cn";
 import type { DateClickArg } from "@fullcalendar/interaction";
 import type { DateSelectArg, EventClickArg, EventContentArg } from "@fullcalendar/core";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { flowEase, useWorkspaceMotion } from "./lib/motion";
 import { CalendarX2, ChevronLeft, ChevronRight, Copy, Plus, Search } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
@@ -51,11 +52,14 @@ function CalendarEventContent({ arg, options }: { arg: EventContentArg; options:
 }
 
 export function CalendarIsland({ options }: { options: ModernCalendarOptions }) {
+  const calendarRef = useRef<FullCalendar>(null);
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches);
   useEffect(() => { const query = window.matchMedia('(max-width: 700px)'); const change = () => setMobile(query.matches); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
+  useEffect(() => { calendarRef.current?.getApi().gotoDate(options.date); }, [options.date, mobile]);
+  useEffect(() => { calendarRef.current?.getApi().changeView(viewNames[options.mode], options.date); }, [options.mode, mobile]);
   const palette = ['#397566', '#76639b', '#ad6545', '#447b9b', '#887337', '#995f73'];
   const colorFor = (event: ModernCalendarEvent) => palette[(options.filterCourses.find(course => course.code === event.courseCode)?.toneIndex || 0) % palette.length];
-  const reduceMotion = useReducedMotion();
+  const animate = useWorkspaceMotion();
   const calendarEvents = options.events.map((event) => ({
     id: event.id,
     title: event.title,
@@ -94,7 +98,7 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
         <Button type="button" size="sm" onClick={options.onToday}>今天</Button>
         <Button type="button" size="icon" aria-label="上一时间段" onClick={options.onPrevious}><ChevronLeft size={17} /></Button>
         <Button type="button" size="icon" aria-label="下一时间段" onClick={options.onNext}><ChevronRight size={17} /></Button>
-        <strong className="hiqs-modern-label">{options.label}</strong>
+        <AnimatePresence mode="wait" initial={false}><motion.strong key={options.label} className="hiqs-modern-label" initial={animate ? { opacity: 0, x: 9 } : false} animate={{ opacity: 1, x: 0 }} exit={animate ? { opacity: 0, x: -9 } : undefined} transition={{ duration: .2, ease: flowEase }}>{options.label}</motion.strong></AnimatePresence>
         <Button asChild size="sm"><a href="/api/calendar.ics" download="HIQS-calendar.ics">导出 ICS</a></Button>
         <div className="hiqs-view-switch" aria-label="日历视图">
           {views.map(([mode, label]) => (
@@ -107,21 +111,16 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
               aria-pressed={options.mode === mode}
               onClick={() => options.onViewChange(mode)}
             >
-              {options.mode === mode && <motion.span layoutId="hiqs-calendar-mode" className="hiqs-view-active" />}
+              {options.mode === mode && <motion.span layoutId="hiqs-calendar-mode" className="hiqs-view-active" transition={animate ? { type: 'spring', stiffness: 370, damping: 38 } : { duration: 0 }} />}
               <span>{label}</span>
             </Button>
           ))}
         </div>
       </div>
-      {mobile ? <section className="hiqs-mobile-agenda" aria-label="日程列表">{options.events.filter(event => options.mode === 'month' ? event.dateKey.startsWith(options.date.slice(0, 7)) : options.mode === 'day' ? event.dateKey === options.date.slice(0, 10) : (() => { const start = new Date(`${options.date.slice(0,10)}T00:00:00`); start.setDate(start.getDate() - start.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); const date = new Date(`${event.dateKey}T00:00:00`); return date >= start && date < end; })()).sort((a,b) => a.start.localeCompare(b.start)).map(event => <button className="hiqs-agenda-row" key={event.id} style={{borderLeft: `3px solid ${colorFor(event)}`}} onClick={() => options.onOpenEvent(event.itemId, event.dateKey)}><span><small>{event.dateKey} · {event.allDay ? '全天' : event.start.slice(11,16)}</small><strong>{event.title}</strong><small>{event.courseCode} · {event.category}{event.dateStatus !== 'confirmed' ? ' · 日期待核实' : ''}</small></span></button>)}{!options.events.length && <p>当前范围没有已排定事项。</p>}</section> : <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={`${options.mode}:${options.date}`}
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduceMotion ? undefined : { opacity: 0, y: -6 }}
-          transition={{ duration: 0.18, ease: [0.2, 0.75, 0.2, 1] }}
-        >
+      {mobile ? <section className="hiqs-mobile-agenda" aria-label="日程列表">{options.events.filter(event => options.mode === 'month' ? event.dateKey.startsWith(options.date.slice(0, 7)) : options.mode === 'day' ? event.dateKey === options.date.slice(0, 10) : (() => { const start = new Date(`${options.date.slice(0,10)}T00:00:00`); start.setDate(start.getDate() - start.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); const date = new Date(`${event.dateKey}T00:00:00`); return date >= start && date < end; })()).sort((a,b) => a.start.localeCompare(b.start)).map(event => <button className="hiqs-agenda-row" key={event.id} style={{borderLeft: `3px solid ${colorFor(event)}`}} onClick={() => options.onOpenEvent(event.itemId, event.dateKey)}><span><small>{event.dateKey} · {event.allDay ? '全天' : event.start.slice(11,16)}</small><strong>{event.title}</strong><small>{event.courseCode} · {event.category}{event.dateStatus !== 'confirmed' ? ' · 日期待核实' : ''}</small></span></button>)}{!options.events.length && <p>当前范围没有已排定事项。</p>}</section> :
+        <div className="hiqs-calendar-stage">
           <FullCalendar
+            ref={calendarRef}
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
             locale={zhCnLocale}
             initialView={viewNames[options.mode]}
@@ -147,11 +146,10 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
             allDayText="全天"
             eventTimeFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
           />
-        </motion.div>
-      </AnimatePresence>}
+        </div>}
       <details className="hiqs-modern-unscheduled"><summary>日期待确认 · {options.unscheduled.length} 项</summary>
         <header><div><p>TO VERIFY</p><h2>日期待确认</h2><span>这些事项仍保留在查询结果中；日期缺失不等于没有截止时间。</span></div><Badge>{options.unscheduled.length} 项</Badge></header>
-        <div>{options.unscheduled.map((item) => <motion.button type="button" key={item.itemId} className={`hiqs-unscheduled-item hiqs-category-${item.categoryKey.replaceAll("_", "-")}`} onClick={() => options.onOpenUnscheduled(item.itemId)} whileHover={reduceMotion ? undefined : { y: -2 }}><i /><span><Badge>{item.category}</Badge><strong>{item.title}</strong><small>{item.courseCode} · {item.dateLabel}</small></span></motion.button>)}{!options.unscheduled.length && <p className="hiqs-calendar-empty"><CalendarX2 size={18} />当前筛选范围没有日期待确认事项。</p>}</div>
+        <div>{options.unscheduled.map((item) => <motion.button type="button" key={item.itemId} className={`hiqs-unscheduled-item hiqs-category-${item.categoryKey.replaceAll("_", "-")}`} onClick={() => options.onOpenUnscheduled(item.itemId)} whileHover={animate ? { x: 3 } : undefined} transition={{ duration: .25, ease: flowEase }}><i /><span><Badge>{item.category}</Badge><strong>{item.title}</strong><small>{item.courseCode} · {item.dateLabel}</small></span></motion.button>)}{!options.unscheduled.length && <p className="hiqs-calendar-empty"><CalendarX2 size={18} />当前筛选范围没有日期待确认事项。</p>}</div>
       </details>
     </section>
   );

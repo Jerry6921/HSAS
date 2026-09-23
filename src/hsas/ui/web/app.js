@@ -2571,20 +2571,20 @@ async function applyApplicationUpdate() {
     await checkApplicationUpdate();
     return;
   }
-  if (!update.can_apply) {
+  if (!update.can_apply || !update.target_commit) {
     const alert = byId("global-error");
     alert.textContent = update.message || "当前源码目录无法自动更新。";
     alert.classList.remove("hidden");
     return;
   }
   const confirmed = window.confirm(
-    `将从官方 GitHub main 更新 HIQS ${update.current_version} → ${update.latest_version}。更新仅在工作树干净且可以 fast-forward 时执行；课程资料不会改变。继续吗？`,
+    `将从官方 GitHub main 更新 HIQS ${update.current_version} → ${update.latest_version}，目标 commit ${update.target_commit.slice(0, 12)}。更新仅在目标未变化、工作树干净且可以 fast-forward 时执行；课程资料不会改变。继续吗？`,
   );
   if (!confirmed) return;
   renderApplicationUpdate({ ...update, status: "updating", message: "正在更新 HIQS。" });
   const result = await runLocalMutation(
     "/api/update/apply",
-    { confirmed: true },
+    { confirmed: true, target_commit: update.target_commit },
     "正在从 GitHub 更新 HIQS；请保持应用打开…",
   );
   if (!result) {

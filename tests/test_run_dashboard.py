@@ -90,6 +90,7 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert b'"/api/sync/retry"' in loaded["/assets/app.js"][0]
     assert b'"/api/update/status"' in loaded["/assets/app.js"][0]
     assert b'"/api/update/apply"' in loaded["/assets/app.js"][0]
+    assert b"target_commit: update.target_commit" in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("hidden", !running)' in loaded["/assets/app.js"][0]
     assert b'panel.classList.toggle("cancelling", cancelling)' in loaded["/assets/app.js"][0]
     assert b'"/api/moodle/status"' not in loaded["/assets/app.js"][0]
@@ -204,14 +205,17 @@ def test_application_update_delegates_to_safe_update_service(tmp_path: Path) -> 
                 "latest_version": "2.7.0",
             }
 
-        def apply(self, *, confirmed: bool) -> dict[str, object]:
+        def apply(self, *, confirmed: bool, target_commit: str) -> dict[str, object]:
             assert confirmed is True
+            assert target_commit == "1" * 40
             return {"status": "updated", "current_version": "2.8.0"}
 
     service = DashboardService(tmp_path, update_service=FakeUpdateService())  # type: ignore[arg-type]
 
     assert service.application_update_status()["status"] == "current"
-    assert service.apply_application_update({"confirmed": True})["status"] == "updated"
+    assert service.apply_application_update(
+        {"confirmed": True, "target_commit": "1" * 40}
+    )["status"] == "updated"
 
     with pytest.raises(DashboardError, match="确认"):
         service.apply_application_update({"confirmed": False})

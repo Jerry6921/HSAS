@@ -8,6 +8,8 @@ Before sharing a diagnostic, remove personal paths and course content. Security
 reports should identify the affected HIQS version/commit and provide the smallest
 reproduction built from synthetic data.
 
-The updater accepts an HTTPS release only after the user pins the full commit
-reported by a dry run. Dependency changes are intentionally outside the in-place
-update transaction.
+The updater resolves the official GitHub `main` branch to a full commit before
+confirmation. Apply succeeds only when that exact commit remains current, the
+checkout is clean, and the update is a fast-forward. Dependency changes are
+intentionally rejected from the in-place update transaction and require a
+separate Agent-managed environment upgrade.

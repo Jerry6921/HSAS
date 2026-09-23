@@ -129,6 +129,14 @@ def test_core_does_not_depend_on_delivery_adapters() -> None:
     assert violations == []
 
 
+def test_infrastructure_does_not_depend_on_composition_or_delivery_layers() -> None:
+    violations = _import_violations(
+        SOURCE_ROOT / "infrastructure",
+        forbidden_prefixes=("hsas.core", "hsas.interfaces", "hsas.mcp", "hsas.ui"),
+    )
+    assert violations == []
+
+
 def test_mcp_and_ui_depend_on_core_port_not_internal_layers() -> None:
     forbidden_prefixes = (
         "hsas.application",

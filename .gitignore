@@ -8,6 +8,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+work/
 ui/node_modules/
 .DS_Store
 config/selectors.local.json

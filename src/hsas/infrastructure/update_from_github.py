@@ -25,6 +25,7 @@ SUPPORTED_ORIGINS = {
     "ssh://git@github.com/Jerry6921/HSAS.git",
 }
 VERSION_PATTERN = re.compile(r"__version__\s*=\s*['\"]([0-9]+(?:\.[0-9]+){2})['\"]")
+COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
 class ApplicationUpdateError(RuntimeError):
@@ -97,6 +98,7 @@ class GitHubUpdateService:
         try:
             latest_version = _version_from_source(self.fetch_text(REMOTE_VERSION_URL))
             checkout = self._checkout_state()
+            target_commit = self._remote_main_commit() if checkout["can_apply"] else None
             comparison = _version_key(latest_version) > _version_key(self.current_version)
             if comparison:
                 status = "available"
@@ -113,6 +115,7 @@ class GitHubUpdateService:
                 "status": status,
                 "current_version": self.current_version,
                 "latest_version": latest_version,
+                "target_commit": target_commit,
                 "update_available": comparison,
                 "can_apply": bool(comparison and checkout["can_apply"]),
                 "message": message,
@@ -124,6 +127,7 @@ class GitHubUpdateService:
                 "status": "error",
                 "current_version": self.current_version,
                 "latest_version": None,
+                "target_commit": None,
                 "update_available": False,
                 "can_apply": False,
                 "message": f"暂时无法检查更新：{type(exc).__name__}",
@@ -131,16 +135,23 @@ class GitHubUpdateService:
                 "repository_url": GITHUB_REPOSITORY_URL,
             }
 
-    def apply(self, *, confirmed: bool) -> dict[str, object]:
+    def apply(self, *, confirmed: bool, target_commit: str) -> dict[str, object]:
         if not confirmed:
             raise ApplicationUpdateError("请先确认更新 HIQS。")
+        if COMMIT_PATTERN.fullmatch(target_commit) is None:
+            raise ApplicationUpdateError("更新目标 commit 无效，请重新检查更新。")
         checkout = self._checkout_state()
         if not checkout["can_apply"]:
             raise ApplicationUpdateError(str(checkout["reason"]))
 
         self._command(["git", "fetch", "origin", "main", "--quiet"], timeout=120)
+        fetched_commit = self._command(
+            ["git", "rev-parse", "origin/main^{commit}"], timeout=30
+        ).stdout.strip()
+        if fetched_commit != target_commit:
+            raise ApplicationUpdateError("GitHub main 已变化，请重新检查并确认新的 commit。")
         remote_source = self._command(
-            ["git", "show", "origin/main:src/hsas/__init__.py"], timeout=30
+            ["git", "show", f"{target_commit}:src/hsas/__init__.py"], timeout=30
         ).stdout
         latest_version = _version_from_source(remote_source)
         if _version_key(latest_version) <= _version_key(self.current_version):
@@ -153,55 +164,30 @@ class GitHubUpdateService:
             }
 
         ancestor = self.run_command(
-            ["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+            ["git", "merge-base", "--is-ancestor", "HEAD", target_commit],
             self.project_root,
             30,
         )
         if ancestor.returncode != 0:
             raise ApplicationUpdateError("本机分支与 GitHub main 已分叉，请交给 Agent 检查。")
 
-        changed = self._command(
+        dependency_changes = self._command(
             [
                 "git",
                 "diff",
                 "--name-only",
-                "HEAD..origin/main",
+                f"HEAD..{target_commit}",
                 "--",
                 "requirements.lock",
                 "pyproject.toml",
             ],
             timeout=30,
         ).stdout.splitlines()
-        self._command(["git", "merge", "--ff-only", "origin/main"], timeout=120)
-
-        if changed:
-            python = self.project_root / ".venv" / "bin" / "python"
-            if not python.is_file():
-                raise ApplicationUpdateError(
-                    "源码已更新，但项目 .venv 不存在；请让 Agent 重新安装环境。"
-                )
-            try:
-                self._command(
-                    [
-                        str(python),
-                        "-m",
-                        "pip",
-                        "install",
-                        "-c",
-                        str(self.project_root / "requirements.lock"),
-                        "-e",
-                        str(self.project_root),
-                    ],
-                    timeout=600,
-                )
-                self._command(
-                    [str(python), "-m", "playwright", "install", "chromium"],
-                    timeout=600,
-                )
-            except ApplicationUpdateError as exc:
-                raise ApplicationUpdateError(
-                    f"源码已更新至 {latest_version}，但环境更新失败：{exc}"
-                ) from exc
+        if dependency_changes:
+            raise ApplicationUpdateError(
+                "此版本包含依赖变更，已停止原地更新；请交给 Agent 在独立步骤中升级。"
+            )
+        self._command(["git", "merge", "--ff-only", target_commit], timeout=120)
 
         if self.system_name == "Darwin":
             builder = self.project_root / "scripts" / "build_macos_app.sh"
@@ -217,6 +203,7 @@ class GitHubUpdateService:
             "status": "updated",
             "previous_version": self.current_version,
             "current_version": latest_version,
+            "target_commit": target_commit,
             "restart_required": True,
             "message": f"已更新至 HIQS {latest_version}，请退出并重新打开应用。",
         }
@@ -245,6 +232,16 @@ class GitHubUpdateService:
         except ApplicationUpdateError as exc:
             return {"can_apply": False, "reason": str(exc)}
         return {"can_apply": True, "reason": ""}
+
+    def _remote_main_commit(self) -> str:
+        result = self._command(
+            ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+            timeout=30,
+        )
+        commit = result.stdout.strip().split(maxsplit=1)[0]
+        if COMMIT_PATTERN.fullmatch(commit) is None:
+            raise ApplicationUpdateError("无法确认 GitHub main commit。")
+        return commit
 
     def _command(self, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         try:

@@ -61,8 +61,14 @@ src/hsas/
 ui/                    React + TypeScript 前端源码
 ```
 
-`HIQSPort` 是 CORE 对外的稳定用例契约。MCP 与 UI 接受注入的 Port，不导入
-domain、application、infrastructure 或彼此的实现：
+`HIQSPort` 是 CORE 对外的聚合契约，由四个较小的能力接口组成：
+
+- `InformationQueryPort`：信息、材料、证据与日历的只读查询；
+- `InformationCommandPort`：经验证和明确确认的信息变更；
+- `CourseSyncPort`：HKU 来源认证、同步与后台任务控制；
+- `ApplicationLifecyclePort`：固定 commit 的本地应用更新。
+
+MCP 与 UI 接受注入的 Port，不导入 domain、application、infrastructure 或彼此的实现：
 
 ```text
 domain ← application ← infrastructure/composition ← CORE implements HIQSPort
@@ -71,8 +77,14 @@ domain ← application ← infrastructure/composition ← CORE implements HIQSPo
 ```
 
 领域层保持纯模型与规则。内部应用用例通过 repository/gateway ports 使用外部系统，
-基础设施提供实现；这些内部对象不会穿过 `HIQSPort`。旧 `interfaces` 包仅保留 CLI 与
-兼容 import，新增 AI 和用户入口必须分别放入 `mcp` 与 `ui`。
+基础设施提供实现；这些内部对象不会穿过 `HIQSPort`。后台同步线程、取消信号与状态快照
+由独立的 `CourseSyncController` 管理，`CourseSyncWorkflow` 负责认证、并发来源采集、进度、
+取消、精确重试和结果持久化。`DashboardProjectionService` 组合规范事实与各来源状态，生成
+Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`PersonalInboxService` 与
+`MaterialQueryService` 分别负责规范记录变更、来源审阅游标、个人草稿和只读材料证据。它们
+使用注入的 repository，并由 `HIQSCore` 组合。CORE façade 只维持稳定 Port、跨能力事务和
+兼容入口。旧 `interfaces` 包保留 CLI 与兼容 import；CLI 的通用查询入口通过 CORE，仍需
+终端交互回调的 collector 命令保留专用适配器。新增 AI 和用户入口必须分别放入 `mcp` 与 `ui`。
 
 ## Moodle Collector
 

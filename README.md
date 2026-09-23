@@ -129,8 +129,10 @@ Support 目录。移动或重装源码环境后，重新运行构建脚本即可
 签名的 `.app`，不会生成需要公开签名与 notarization 的 DMG。
 
 App 每次启动会比较 GitHub `main` 与本机版本。自动更新只接受官方 `origin`、干净工作树
-和 fast-forward；检测到未提交修改或分叉时会停止并提示交给 Agent 处理。更新源码和必要
-依赖后会重建 `HIQS.app`，课程文件与 `information.json` 不在 Git 更新范围内。
+和 fast-forward，并要求用户确认检查结果中的完整目标 commit；apply 时若目标已经变化会
+停止并要求重新确认。包含 Python 依赖变更的版本不会执行原地更新，而会提示交给 Agent
+独立升级环境。更新源码后会重建 `HIQS.app`，课程文件与 `information.json` 不在 Git
+更新范围内。
 
 ### 前端开发
 

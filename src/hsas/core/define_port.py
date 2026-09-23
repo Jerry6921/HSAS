@@ -11,8 +11,8 @@ class HIQSPortError(RuntimeError):
 
 
 @runtime_checkable
-class HIQSPort(Protocol):
-    """Expose HIQS use cases without leaking storage or collector adapters."""
+class InformationQueryPort(Protocol):
+    """Read validated information, materials, evidence and calendar projections."""
 
     @property
     def resources_dir(self) -> Path: ...
@@ -21,17 +21,32 @@ class HIQSPort(Protocol):
 
     def status_snapshot(self) -> dict[str, Any]: ...
 
+    def calendar_ics(self) -> bytes: ...
+
+    def materials_manifest(self, course_ids: list[str] | None = None) -> dict[str, Any]: ...
+
+    def search_materials(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+    def query_course(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+    def material_file(self, relative_path: str) -> tuple[Path, str]: ...
+
+    def source_preview(
+        self,
+        relative_path: str,
+        page_numbers: list[int] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class InformationCommandPort(Protocol):
+    """Validate and apply explicitly confirmed canonical information changes."""
+
     def information_update_schema(self) -> dict[str, Any]: ...
 
     def validate_information_update(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def apply_information_update(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
-    def application_update_status(self) -> dict[str, object]: ...
-
-    def apply_application_update(self, payload: dict[str, Any]) -> dict[str, object]: ...
-
-    def calendar_ics(self) -> bytes: ...
 
     def add_course(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
@@ -43,8 +58,6 @@ class HIQSPort(Protocol):
 
     def delete_calendar_event(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
-    def verify_moodle_session(self) -> dict[str, Any]: ...
-
     def process_ocr_queue(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def apply_personal_inbox(self, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -55,23 +68,16 @@ class HIQSPort(Protocol):
 
     def personal_inbox_entry(self, entry_id: str) -> dict[str, Any]: ...
 
-    def materials_manifest(self, course_ids: list[str] | None = None) -> dict[str, Any]: ...
-
-    def search_materials(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
-    def query_course(self, payload: dict[str, Any]) -> dict[str, Any]: ...
-
     def pending_changes(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def acknowledge_changes(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
-    def material_file(self, relative_path: str) -> tuple[Path, str]: ...
 
-    def source_preview(
-        self,
-        relative_path: str,
-        page_numbers: list[int] | None = None,
-    ) -> dict[str, Any]: ...
+@runtime_checkable
+class CourseSyncPort(Protocol):
+    """Authenticate and synchronize authorized HKU course sources."""
+
+    def verify_moodle_session(self) -> dict[str, Any]: ...
 
     def login_moodle(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
@@ -94,3 +100,23 @@ class HIQSPort(Protocol):
     def synchronize_sis_course_info(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
     def synchronize_sis_enrollment(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class ApplicationLifecyclePort(Protocol):
+    """Expose the pinned, local-application update lifecycle."""
+
+    def application_update_status(self) -> dict[str, object]: ...
+
+    def apply_application_update(self, payload: dict[str, Any]) -> dict[str, object]: ...
+
+
+@runtime_checkable
+class HIQSPort(
+    InformationQueryPort,
+    InformationCommandPort,
+    CourseSyncPort,
+    ApplicationLifecyclePort,
+    Protocol,
+):
+    """Aggregate stable capabilities for delivery adapters and composition."""

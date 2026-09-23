@@ -2,23 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from hsas.application.manage_changes import collect_pending_changes
-from hsas.application.manage_inbox import personal_inbox_snapshot
-from hsas.application.retrieve_course_context import build_course_question_context
 from hsas.application.synchronize_courses import CourseSynchronizationService
-from hsas.domain.courses import ArchiveIndex, iter_files
-from hsas.domain.information import InformationStore
-from hsas.infrastructure.documents.run_ocr import collect_ocr_queue
-from hsas.infrastructure.class_planner import class_planner_status
-from hsas.infrastructure.fetch_sis_enrollment import SisEnrollmentBrowserGateway
-from hsas.infrastructure.manage_sis_enrollment import collect_sis_enrollment_changes
-from hsas.infrastructure.sis_course_info import sis_course_info_status
-from hsas.infrastructure.sis_course_info.manage_changes import collect_sis_course_info_changes
+from hsas.core import HIQSPortError, build_port
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
 from hsas.infrastructure.runtime import (
@@ -26,12 +17,10 @@ from hsas.infrastructure.runtime import (
     get_runtime_paths,
     hku_portal_profile_dir,
 )
-from hsas.infrastructure.storage import JsonPersonalInboxRepository
-
-from .manage_information import INFORMATION_REPOSITORY, information_app
+from .manage_information import information_app
 from .manage_class_planner import class_planner_app
 from .manage_calendar import calendar_app
-from .manage_changes import CHANGE_REPOSITORY, changes_app
+from .manage_changes import changes_app
 from .manage_inbox import inbox_app
 from .manage_ocr import ocr_app
 from .manage_sis_course_info import sis_course_info_app
@@ -74,80 +63,49 @@ def list_status(ctx: typer.Context) -> None:
     """Show information-database and downloaded-material status."""
     resources = _resources(ctx)
     typer.echo(f"Resources: {resources}")
-    information_path = resources / "information.json"
-    store: InformationStore | None = None
-    if not INFORMATION_REPOSITORY.exists(information_path):
+    status = build_port(resources).status_snapshot()
+    summary = status["summary"]
+    if not status["available"]:
         typer.echo("Information: unavailable (ask AI to prepare an update)")
     else:
-        try:
-            store = INFORMATION_REPOSITORY.load(information_path)
-        except Exception as exc:
-            typer.echo(f"Information: invalid ({type(exc).__name__})")
-        else:
-            calendar_count = sum(
-                item.starts_at is not None
-                or item.opens_at is not None
-                or item.due_at is not None
-                or item.due_on is not None
-                or item.scheduled_on is not None
-                or item.recurrence is not None
-                for item in store.items
-            )
-            typer.echo(
-                f"Information: {len(store.courses)} course(s), {len(store.items)} item(s), "
-                f"{calendar_count} calendar item(s); updated={store.updated_at.isoformat()}"
-            )
+        typer.echo(
+            f"Information: {summary['course_count']} course(s), "
+            f"{summary['item_count']} item(s), "
+            f"{summary['calendar_item_count']} calendar item(s); "
+            f"updated={status['updated_at']}"
+        )
 
-    archives = files = searchable = 0
-    for archive_path in sorted((resources / "courses").glob("*/course.json")):
-        try:
-            index = ArchiveIndex.from_json(archive_path)
-        except Exception:
-            continue
-        archives += 1
-        for _activity, stored_file in iter_files(index.archive):
-            files += 1
-            if stored_file.analysis and stored_file.analysis.extracted_text_path:
-                searchable += 1
+    counts = status["material_status"]["counts"]
     typer.echo(
-        f"Materials: {archives} course archive(s), {files} downloaded file(s), "
-        f"{searchable} searchable text sidecar(s)"
+        f"Materials: {counts['course_archives']} course archive(s), "
+        f"{counts['downloaded_files']} downloaded file(s), "
+        f"{counts['searchable_files']} searchable text sidecar(s)"
     )
-    pending = collect_pending_changes(resources, CHANGE_REPOSITORY)
+    pending = status["pending_review"]
     typer.echo(
-        f"AI review: {len(pending.courses)} course(s), "
-        f"{pending.pending_change_count} pending review item(s)"
+        f"AI review: {pending['course_count']} course(s), "
+        f"{pending['change_count']} pending review item(s)"
     )
-    typer.echo(f"OCR queue: {len(collect_ocr_queue(resources))} document(s)")
-    inbox = personal_inbox_snapshot(
-        resources,
-        information=store,
-        inbox_repository=JsonPersonalInboxRepository(),
-        information_repository=INFORMATION_REPOSITORY,
-    )
-    typer.echo(
-        f"Personal inbox: {inbox.get('pending_count', 0)} draft(s)"
-    )
-    enrollment = SisEnrollmentBrowserGateway(resources).status()
-    enrollment_review = collect_sis_enrollment_changes(resources)
+    typer.echo(f"OCR queue: {counts['ocr']} document(s)")
+    typer.echo(f"Personal inbox: {status['personal_inbox'].get('pending_count', 0)} draft(s)")
+    enrollment = status["sis_enrollment"]
     typer.echo(
         f"Student Center: {enrollment['course_count']} course(s); "
         f"term={enrollment.get('term') or 'unknown'}; "
-        f"pending review={enrollment_review['pending_change_count']}"
+        f"pending review={enrollment['review']['pending_change_count']}"
     )
-    planner = class_planner_status(resources)
+    planner = status["class_planner"]
     typer.echo(
         f"Class Planner: {planner['course_count']} course(s), "
         f"{planner['meeting_count']} meeting(s); "
         f"synced={planner['synced_at'] or 'never'}; "
-        f"pending review={planner['review']['pending_change_count']}"
+        f"pending review={planner.get('review', {}).get('pending_change_count', 0)}"
     )
-    sis = sis_course_info_status(resources)
-    sis_review = collect_sis_course_info_changes(resources)
+    sis = status["sis_course_info"]
     typer.echo(
         f"HKU SIS course information: {sis['course_count']} course(s); "
         f"synced={sis['synced_at'] or 'never'}; "
-        f"pending review={sis_review['pending_change_count']}"
+        f"pending review={sis['review']['pending_change_count']}"
     )
 
 
@@ -173,24 +131,18 @@ def query(
 ) -> None:
     """Return a cited local RAG packet for an AI to answer from."""
     resources = _resources(ctx)
-    information_path = resources / "information.json"
     try:
-        information = (
-            INFORMATION_REPOSITORY.load(information_path)
-            if INFORMATION_REPOSITORY.exists(information_path)
-            else None
+        context = build_port(resources).query_course(
+            {
+                "question": question,
+                "course_ids": course_ids,
+                "material_limit": material_limit,
+                "item_limit": item_limit,
+            }
         )
-        context = build_course_question_context(
-            resources,
-            question,
-            information=information,
-            course_ids=set(course_ids) if course_ids else None,
-            material_limit=material_limit,
-            item_limit=item_limit,
-        )
-    except (OSError, ValueError) as exc:
+    except (HIQSPortError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo(context.model_dump_json(indent=2))
+    typer.echo(json.dumps(context, ensure_ascii=False, indent=2))
 
 
 @app.command("login")

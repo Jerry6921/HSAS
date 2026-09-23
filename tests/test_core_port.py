@@ -2,14 +2,42 @@ from pathlib import Path
 
 import pytest
 
-from hsas.core import HIQSCore, HIQSPort, HIQSPortError, build_port
+from hsas.core import (
+    ApplicationLifecyclePort,
+    CourseSyncPort,
+    HIQSCore,
+    HIQSPort,
+    HIQSPortError,
+    InformationCommandPort,
+    InformationQueryPort,
+    build_port,
+)
 
 
 def test_core_implements_public_port(tmp_path: Path) -> None:
     core = HIQSCore(resources_dir=tmp_path)
 
     assert isinstance(core, HIQSPort)
+    assert isinstance(core, InformationQueryPort)
+    assert isinstance(core, InformationCommandPort)
+    assert isinstance(core, CourseSyncPort)
+    assert isinstance(core, ApplicationLifecyclePort)
     assert core.resources_dir == tmp_path
+
+
+def test_core_composes_capability_services_with_shared_state(tmp_path: Path) -> None:
+    core = HIQSCore(resources_dir=tmp_path)
+
+    assert core.record_service.resources_dir == tmp_path
+    assert core.review_service.resources_dir == tmp_path
+    assert core.personal_inbox_service.resources_dir == tmp_path
+    assert core.material_query_service.resources_dir == tmp_path
+    assert core.dashboard_projection_service.resources_dir == tmp_path
+    assert core.sync_workflow.resources_dir == tmp_path
+    assert core.record_service.mutation_lock is core.mutation_lock
+    assert core.personal_inbox_service.mutation_lock is core.mutation_lock
+    assert core.sync_workflow.mutation_lock is core.mutation_lock
+    assert core.sync_workflow.controller is core.sync_controller
 
 
 def test_build_port_uses_explicit_resources_directory(tmp_path: Path) -> None:

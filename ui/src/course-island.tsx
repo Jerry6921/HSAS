@@ -1,4 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useState } from "react";
 import { ArrowUpRight, BookOpen, Copy, Diamond, ExternalLink, FileText, ListChecks } from "lucide-react";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -14,7 +15,7 @@ const modes: Array<[CourseContentMode, string]> = [["materials", "课件"], ["ac
 
 function MaterialCard({ material, options }: { material: CourseMaterialItem; options: ModernCourseOptions }) {
   return (
-    <motion.article className={`hiqs-course-material tone-${material.tone}`} whileHover={{ y: -2 }}>
+    <motion.article className={`hiqs-course-material tone-${material.tone}`}>
       <button type="button" className="hiqs-course-material-main" disabled={!material.canOpen} onClick={() => options.onOpenSource(material.source)}>
         <span className="hiqs-course-material-icon">{material.code}</span>
         <span className="hiqs-course-material-copy">
@@ -31,16 +32,18 @@ function MaterialCard({ material, options }: { material: CourseMaterialItem; opt
         type="button"
         variant="ghost"
         className="hiqs-course-prompt"
+        title="复制 AI 提示词"
+        aria-label={`复制 ${material.title} 的 AI 提示词`}
         disabled={!material.hasPrompt || !material.prompt}
         onClick={() => material.prompt && options.onCopyPrompt(material.prompt, `“${material.title}”定位与总结提示词已复制。`)}
-      ><Copy size={14} />复制 AI 提示词</Button>
+      ><Copy size={16} /></Button>
     </motion.article>
   );
 }
 
 function ActivityCard({ item, options }: { item: CourseActivityItem; options: ModernCourseOptions }) {
   return (
-    <motion.article className={`hiqs-course-activity category-${item.categoryKey}`} whileHover={{ y: -2 }}>
+    <motion.article className={`hiqs-course-activity category-${item.categoryKey}`}>
       <button type="button" className="hiqs-course-activity-main" onClick={() => options.onOpenItem(item.itemId)}>
         <span className="hiqs-course-activity-icon"><Diamond size={17} fill="currentColor" /></span>
         <span className="hiqs-course-activity-copy">
@@ -54,9 +57,11 @@ function ActivityCard({ item, options }: { item: CourseActivityItem; options: Mo
         type="button"
         variant="ghost"
         className="hiqs-course-prompt"
+        title="复制 AI 提示词"
+        aria-label={`复制 ${item.title} 的 AI 提示词`}
         disabled={!item.hasPrompt || !item.prompt}
         onClick={() => item.prompt && options.onCopyPrompt(item.prompt, `“${item.title}”活动查询提示词已复制。`)}
-      ><Copy size={14} />复制 AI 提示词</Button>
+      ><Copy size={16} /></Button>
     </motion.article>
   );
 }
@@ -67,13 +72,16 @@ function SourceButton({ source, onOpen }: { source: CourseSource; onOpen: (sourc
 }
 
 export function CourseIsland({ options }: { options: ModernCourseOptions }) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('hiqs-material-sections') || '{}'); } catch { return {}; } });
+  const [query, setQuery] = useState('');
+  const toggleSection = (key: string, closed: boolean) => setCollapsed(previous => { const next = {...previous, [key]: closed}; try { localStorage.setItem('hiqs-material-sections', JSON.stringify(next)); } catch {} return next; });
   const reduceMotion = useReducedMotion();
   const showingMaterials = options.mode === "materials";
   return (
     <motion.div className="hiqs-modern-course" initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .24, ease: [.2, .75, .2, 1] }}>
       <section className="hiqs-course-hero">
         <div>
-          <p>COURSE</p>
+          <p>COURSE FILE / {options.code}</p>
           <h2>{options.title}</h2>
           <span>{options.facts}</span>
         </div>
@@ -114,14 +122,16 @@ export function CourseIsland({ options }: { options: ModernCourseOptions }) {
           </div>
         </header>
 
+        {showingMaterials && <label className="hiqs-material-search">查找资料<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="输入文件名或关键词" /></label>}
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={options.mode} initial={reduceMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? undefined : { opacity: 0, y: -6 }} transition={{ duration: .18 }}>
             {showingMaterials ? (
               options.materialSections.length ? options.materialSections.map((section) => (
-                <section key={`${section.title}:${section.toneIndex}`} className={`hiqs-course-material-section tone-${section.toneIndex}${section.unclassified ? " is-unclassified" : ""}`}>
-                  <header><div><h3>{section.title}</h3>{section.description && <p>{section.description}</p>}</div><Badge>{section.materials.length} 项</Badge></header>
-                  <div className="hiqs-course-material-list">{section.materials.map((material) => <MaterialCard key={material.id} material={material} options={options} />)}</div>
-                </section>
+                <details key={`${options.courseId}:${section.title}`} open={query ? true : !collapsed[`${options.courseId}:${section.title}`]} onToggle={event => { if (!query) toggleSection(`${options.courseId}:${section.title}`, !event.currentTarget.open); }} className={`hiqs-course-material-section tone-${section.toneIndex}${section.unclassified ? " is-unclassified" : ""}`}>
+                  <summary>{section.title}<Badge>{section.materials.length} 项</Badge></summary>
+                  {section.description && <p className="hiqs-section-description">{section.description}</p>}
+                  <div className="hiqs-course-material-list">{section.materials.filter(material => `${material.title} ${material.meta}`.toLowerCase().includes(query.toLowerCase())).map((material) => <MaterialCard key={material.id} material={material} options={options} />)}</div>
+                </details>
               )) : <div className="hiqs-course-empty large"><BookOpen size={18} />当前 Moodle 快照中没有课程资料。</div>
             ) : (
               options.activities.length ? options.activities.map((group) => (

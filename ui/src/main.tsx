@@ -1,4 +1,5 @@
-import { createRef, type ReactNode } from "react";
+import { createRef, useEffect, useState, type ReactNode } from "react";
+import { MotionConfig } from "motion/react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { CalendarIsland } from "./calendar-island";
@@ -9,8 +10,15 @@ import { ReconciliationIsland } from "./reconciliation-island";
 import { OverlayIsland, type OverlayHandle } from "./overlay-island";
 import type { ModernCalendarOptions, ModernCourseOptions, ModernHomeOptions, ModernOverlayOptions, ModernReconciliationOptions, ModernShellOptions } from "./types";
 import "./styles.css";
+import "./editorial.css";
 
 const roots = new WeakMap<HTMLElement, Root>();
+
+function WorkspaceMotion({ children }: { children: ReactNode }) {
+  const [enabled, setEnabled] = useState(document.documentElement.classList.contains('motion-enabled'));
+  useEffect(() => { const observer = new MutationObserver(() => setEnabled(document.documentElement.classList.contains('motion-enabled'))); observer.observe(document.documentElement, {attributes: true, attributeFilter: ['class']}); return () => observer.disconnect(); }, []);
+  return <MotionConfig reducedMotion={enabled ? 'user' : 'always'} transition={{duration: enabled ? .18 : 0}}>{children}</MotionConfig>;
+}
 
 window.HIQSModernCalendar = {
   mount(element: HTMLElement, options: ModernCalendarOptions) {
@@ -19,7 +27,7 @@ window.HIQSModernCalendar = {
       root = createRoot(element);
       roots.set(element, root);
     }
-    root.render(<CalendarIsland options={options} />);
+    root.render(<WorkspaceMotion><CalendarIsland options={options} /></WorkspaceMotion>);
   },
   unmount(element: HTMLElement) {
     const root = roots.get(element);
@@ -37,7 +45,7 @@ window.HIQSModernHome = {
       roots.set(element, root);
     }
     document.body.classList.add("hiqs-modern-home-ready");
-    root.render(<HomeIsland options={options} />);
+    root.render(<WorkspaceMotion><HomeIsland options={options} /></WorkspaceMotion>);
   },
   unmount(element: HTMLElement) {
     const root = roots.get(element);
@@ -55,7 +63,7 @@ window.HIQSModernCourse = {
       root = createRoot(element);
       roots.set(element, root);
     }
-    root.render(<CourseIsland options={options} />);
+    root.render(<WorkspaceMotion><CourseIsland options={options} /></WorkspaceMotion>);
   },
   unmount(element: HTMLElement) {
     const root = roots.get(element);
@@ -76,7 +84,7 @@ window.HIQSModernShell = {
     for (const [element, node] of values) {
       let root = roots.get(element);
       if (!root) { root = createRoot(element); roots.set(element, root); }
-      root.render(node);
+      root.render(<WorkspaceMotion>{node}</WorkspaceMotion>);
     }
     document.body.classList.add("hiqs-modern-shell-ready");
   },
@@ -93,7 +101,7 @@ window.HIQSModernReconciliation = {
   mount(element, options: ModernReconciliationOptions) {
     let root = roots.get(element);
     if (!root) { root = createRoot(element); roots.set(element, root); }
-    root.render(<ReconciliationIsland options={options} />);
+    root.render(<WorkspaceMotion><ReconciliationIsland options={options} /></WorkspaceMotion>);
   },
   unmount(element) {
     const root = roots.get(element);
@@ -109,7 +117,7 @@ window.HIQSModernOverlay = {
   mount(element, options) {
     overlayOptions = options;
     if (!overlayRoot) overlayRoot = createRoot(element);
-    flushSync(() => overlayRoot?.render(<OverlayIsland ref={overlayRef} initialOptions={options} />));
+    flushSync(() => overlayRoot?.render(<WorkspaceMotion><OverlayIsland ref={overlayRef} initialOptions={options} /></WorkspaceMotion>));
   },
   update(options) { overlayOptions = options; overlayRef.current?.update(options); },
   openDetail(options) { overlayRef.current?.openDetail(options); },

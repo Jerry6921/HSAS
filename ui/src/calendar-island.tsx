@@ -1,4 +1,5 @@
 import FullCalendar from "@fullcalendar/react";
+import { useEffect, useState } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -35,7 +36,7 @@ function CalendarEventContent({ arg, options }: { arg: EventContentArg; options:
         <strong>{arg.event.title}</strong>
         {!details.allDay && <time>{arg.timeText}</time>}
       </div>
-      <span className="hiqs-fc-course">{details.courseCode}</span>
+      <span className="hiqs-fc-course">{details.courseCode}{details.dateStatus !== 'confirmed' && ' · 待核实'}</span>
       <div className="hiqs-fc-event-footer">
         <Badge>{details.category}</Badge>
         {details.agentPrompt && (
@@ -50,6 +51,10 @@ function CalendarEventContent({ arg, options }: { arg: EventContentArg; options:
 }
 
 export function CalendarIsland({ options }: { options: ModernCalendarOptions }) {
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches);
+  useEffect(() => { const query = window.matchMedia('(max-width: 700px)'); const change = () => setMobile(query.matches); query.addEventListener('change', change); return () => query.removeEventListener('change', change); }, []);
+  const palette = ['#397566', '#76639b', '#ad6545', '#447b9b', '#887337', '#995f73'];
+  const colorFor = (event: ModernCalendarEvent) => palette[(options.filterCourses.find(course => course.code === event.courseCode)?.toneIndex || 0) % palette.length];
   const reduceMotion = useReducedMotion();
   const calendarEvents = options.events.map((event) => ({
     id: event.id,
@@ -57,6 +62,7 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
     start: event.start,
     end: event.end,
     allDay: event.allDay,
+    borderColor: colorFor(event),
     classNames: [`hiqs-category-${event.categoryKey.replaceAll("_", "-")}`],
     extendedProps: event,
   }));
@@ -69,18 +75,19 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
   };
   const handleSelect = ({ start, end, allDay }: DateSelectArg) => {
     if (allDay) return;
-    options.onSelectTime(start.toISOString().slice(0, 10), timeValue(start), timeValue(end));
+    const localDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    options.onSelectTime(localDate, timeValue(start), timeValue(end));
   };
 
   return (
     <section className="hiqs-modern-calendar" aria-label="课程日历">
       <div className="hiqs-calendar-query">
         <label><Search size={16} /><input type="search" value={options.query} onChange={(event) => options.onQueryChange(event.target.value)} placeholder="作业、地点、要求…" aria-label="筛选日历事项" /></label>
-        <div className="hiqs-calendar-course-filters">
+        <details className="hiqs-filter-disclosure"><summary>筛选课程 · {options.filterCourses.filter(course => course.selected).length} 门</summary><div className="hiqs-calendar-course-filters">
           <span>课程</span>
           {options.filterCourses.map((course) => <button key={course.courseId} type="button" className={`tone-${course.toneIndex} ${course.selected ? "is-selected" : ""}`} title={course.title} onClick={() => options.onToggleCourse(course.courseId, !course.selected)}><i />{course.code}</button>)}
           <Button type="button" size="sm" variant="ghost" onClick={options.onSelectAllCourses}>全部</Button>
-        </div>
+        </div></details>
       </div>
       <div className="hiqs-modern-toolbar">
         <Button type="button" variant="default" size="sm" onClick={options.onAdd}><Plus size={15} />添加事件</Button>
@@ -106,7 +113,7 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
           ))}
         </div>
       </div>
-      <AnimatePresence mode="wait" initial={false}>
+      {mobile ? <section className="hiqs-mobile-agenda" aria-label="日程列表">{options.events.filter(event => options.mode === 'month' ? event.dateKey.startsWith(options.date.slice(0, 7)) : options.mode === 'day' ? event.dateKey === options.date.slice(0, 10) : (() => { const start = new Date(`${options.date.slice(0,10)}T00:00:00`); start.setDate(start.getDate() - start.getDay()); const end = new Date(start); end.setDate(end.getDate() + 7); const date = new Date(`${event.dateKey}T00:00:00`); return date >= start && date < end; })()).sort((a,b) => a.start.localeCompare(b.start)).map(event => <button className="hiqs-agenda-row" key={event.id} style={{borderLeft: `3px solid ${colorFor(event)}`}} onClick={() => options.onOpenEvent(event.itemId, event.dateKey)}><span><small>{event.dateKey} · {event.allDay ? '全天' : event.start.slice(11,16)}</small><strong>{event.title}</strong><small>{event.courseCode} · {event.category}{event.dateStatus !== 'confirmed' ? ' · 日期待核实' : ''}</small></span></button>)}{!options.events.length && <p>当前范围没有已排定事项。</p>}</section> : <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={`${options.mode}:${options.date}`}
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
@@ -130,6 +137,7 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
             dateClick={handleDateClick}
             eventClick={handleEventClick}
             eventContent={(arg) => <CalendarEventContent arg={arg} options={options} />}
+            eventDidMount={({el, event}) => el.style.setProperty('--hiqs-event-color', colorFor(event.extendedProps as ModernCalendarEvent))}
             events={calendarEvents}
             dayMaxEvents={4}
             slotMinTime="07:00:00"
@@ -140,11 +148,11 @@ export function CalendarIsland({ options }: { options: ModernCalendarOptions }) 
             eventTimeFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
           />
         </motion.div>
-      </AnimatePresence>
-      <section className="hiqs-modern-unscheduled">
+      </AnimatePresence>}
+      <details className="hiqs-modern-unscheduled"><summary>日期待确认 · {options.unscheduled.length} 项</summary>
         <header><div><p>TO VERIFY</p><h2>日期待确认</h2><span>这些事项仍保留在查询结果中；日期缺失不等于没有截止时间。</span></div><Badge>{options.unscheduled.length} 项</Badge></header>
         <div>{options.unscheduled.map((item) => <motion.button type="button" key={item.itemId} className={`hiqs-unscheduled-item hiqs-category-${item.categoryKey.replaceAll("_", "-")}`} onClick={() => options.onOpenUnscheduled(item.itemId)} whileHover={reduceMotion ? undefined : { y: -2 }}><i /><span><Badge>{item.category}</Badge><strong>{item.title}</strong><small>{item.courseCode} · {item.dateLabel}</small></span></motion.button>)}{!options.unscheduled.length && <p className="hiqs-calendar-empty"><CalendarX2 size={18} />当前筛选范围没有日期待确认事项。</p>}</div>
-      </section>
+      </details>
     </section>
   );
 }

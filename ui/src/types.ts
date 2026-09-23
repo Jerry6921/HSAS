@@ -149,6 +149,8 @@ export interface HomeSyncJob {
 }
 
 export interface ModernHomeOptions {
+  today: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
+  deadlines: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
   nextUp: HomeNextUp;
   metrics: HomeMetric[];
   stages: HomeStage[];

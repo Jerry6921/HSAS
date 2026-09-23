@@ -2352,6 +2352,8 @@ function renderModernHome(occurrences) {
   const inbox = state.data.personal_inbox || { pending_count: 0, entries: [] };
   const updateCourses = state.data.updates?.courses || [];
   modernHome.mount(root, {
+    today: upcomingOccurrences(new Date()).filter(value => value.key === dateKey(new Date())).map(value => ({ itemId: value.item.item_id, dateKey: value.key, title: value.item.title, meta: [value.time, courseFor(value.item).code, value.item.location].filter(Boolean).join(' · ') })),
+    deadlines: upcomingOccurrences(new Date()).filter(value => ['assignment', 'quiz', 'exam', 'project', 'report', 'presentation', 'deadline'].includes(value.item.category)).slice(0, 6).map(value => ({ itemId: value.item.item_id, dateKey: value.key, title: value.item.title, meta: [value.key, value.time, courseFor(value.item).code, value.item.date_status !== 'confirmed' ? '待核实' : ''].filter(Boolean).join(' · ') })),
     nextUp: modernHomeNextUp(),
     metrics: [
       { label: "课程", value: state.selectedCourses.size, note: "统一课程目录" },

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   AlertTriangle,
@@ -107,13 +108,13 @@ function ChangeCard({ change, onOpenSource }: { change: HomeUpdateChange; onOpen
         <strong>{change.title}</strong>
         {canOpen && <Button size="sm" variant="ghost" onClick={() => onOpenSource({ ...change, relative_path: change.relative_path || change.text_path })}>预览</Button>}
       </div>
-      {change.field && <code className="hiqs-home-change-field">{change.field}</code>}
-      {change.action === "modified" && (
+      {change.field && change.field !== 'sha256' && <code className="hiqs-home-change-field">{change.field}</code>}
+      {change.action === "modified" && <details className="hiqs-change-details"><summary>{change.field === 'sha256' ? '文件内容已更新 · 查看技术详情' : '查看变更详情'}</summary>
         <div className="hiqs-home-diff">
           <div><span>更新前</span><pre>{previewValue(change.before)}</pre></div>
           <div><span>更新后</span><pre>{previewValue(change.after)}</pre></div>
         </div>
-      )}
+      </details>}
     </div>
   );
 }
@@ -138,6 +139,11 @@ function UpdateCourse({ course, onOpenSource }: { course: HomeUpdateCourse; onOp
 }
 
 export function HomeIsland({ options }: { options: ModernHomeOptions }) {
+  const [workspace, setWorkspace] = useState(false);
+  const today = new Date();
+  const dateNumber = String(today.getDate()).padStart(2, '0');
+  const dateMonth = new Intl.DateTimeFormat('zh-HK', {year: 'numeric', month: 'long'}).format(today);
+  const weekday = new Intl.DateTimeFormat('zh-HK', {weekday: 'long'}).format(today);
   const reduceMotion = useReducedMotion();
   const enter = reduceMotion ? false : { opacity: 0, y: 10 };
   const sync = options.syncJob;
@@ -147,6 +153,14 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
 
   return (
     <motion.div className="hiqs-modern-home" initial={enter} animate={{ opacity: 1, y: 0 }} transition={{ duration: .24, ease: [.2, .75, .2, 1] }}>
+      <div className="hiqs-workspace-tabs" role="group" aria-label="首页视图"><Button aria-pressed={!workspace} variant={!workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(false)}>今天</Button><Button aria-pressed={workspace} variant={workspace ? 'default' : 'ghost'} onClick={() => setWorkspace(true)}>资料中心 {options.statusTotal > 0 && <Badge>{options.statusTotal}</Badge>}</Button></div>
+      {!workspace && <>
+      <header className="hiqs-editorial-masthead">
+        <div className="hiqs-masthead-date"><span>{dateMonth}</span><strong>{dateNumber}</strong><span>{weekday}</span></div>
+        <div className="hiqs-masthead-copy"><span className="hiqs-kicker">HIQS / STUDY JOURNAL · 01</span><h2>今天，值得掌握的事。</h2><p>课程日程与资料变化，按你的学习节奏排列。</p></div>
+        <div className="hiqs-masthead-facts"><span><strong>{options.today.length}</strong> 今天的安排</span><span><strong>{options.deadlines.length}</strong> 近期考核</span><span><strong>{options.statusTotal}</strong> 资料提醒</span></div>
+      </header>
+      <div className="hiqs-feature-layout">
       <motion.button
         type="button"
         className={`hiqs-home-next ${options.nextUp.empty ? "is-empty" : ""}`}
@@ -162,8 +176,15 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
         </span>
         <span className="hiqs-home-next-time"><strong>{options.nextUp.start}</strong><small>{options.nextUp.end}</small></span>
       </motion.button>
+      <aside className="hiqs-feature-note"><span className="hiqs-kicker">AT A GLANCE / 02</span><strong>先看下一项，再进入细节。</strong><p>点击事项可查看时间、地点及相关来源；待核实信息会单独标明。</p><button type="button" onClick={() => setWorkspace(true)}>查看资料状态 <ArrowRight size={16}/></button></aside>
+      </div>
 
-      <section className="hiqs-home-command">
+      <section className="hiqs-daily-grid">{[["今天的安排", options.today], ["接下来 · 考核与截止", options.deadlines]].map(([title, entries], index) => <section key={String(title)}><header className="hiqs-editorial-section-title"><span>0{index + 3} / AGENDA</span><h2>{String(title)}</h2></header>{(entries as ModernHomeOptions['today']).length ? (entries as ModernHomeOptions['today']).map((entry, row) => <button className="hiqs-agenda-row" key={`${entry.itemId}:${entry.dateKey}`} onClick={() => options.onOpenNext(entry.itemId, entry.dateKey)}><em>{String(row + 1).padStart(2, '0')}</em><span><strong>{entry.title}</strong><small>{entry.meta}</small></span><ArrowRight size={16}/></button>) : <p className="hiqs-home-empty">暂无已排定事项。待确认日期可在日历中查看。</p>}</section>)}</section>
+      <section className="hiqs-recent"><header className="hiqs-editorial-section-title"><span>05 / ARCHIVE</span><h2>课程资料更新</h2></header>{options.updates.length ? options.updates.slice(0, 5).map((course, index) => <article key={course.course_id}><em>{String(index + 1).padStart(2, '0')}</em><strong>{course.course_title}</strong><span>{course.changes?.length || course.files?.length || 0} 项变更</span><Button size="sm" onClick={() => setWorkspace(true)}>查看更新</Button></article>) : <p>当前没有待整理的资料更新。</p>}</section>
+      <button className="hiqs-health" onClick={() => setWorkspace(true)}><span>{syncing ? "正在同步课程资料…" : options.statusTotal ? `${options.statusTotal} 项资料状态需要关注` : "本地资料状态正常"}</span><span>打开资料中心 →</span></button>
+      </>}
+
+      {workspace && <section className="hiqs-home-command">
         <header className="hiqs-home-section-heading">
           <div><p>COMMAND CENTER</p><h2>同步工作台</h2><span>连接课程来源、读取变更，再由你决定哪些信息进入本地资料库。</span></div>
           <div className="hiqs-home-actions"><Badge><Sparkles size={13} />本地工作区</Badge><Button variant="default" onClick={options.onStartWorkflow} disabled={syncing}>{syncing ? "同步中" : "开始同步"}</Button></div>
@@ -200,10 +221,10 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
         <div className="hiqs-home-metrics">
           {options.metrics.map((metric) => <article key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}
         </div>
-      </section>
+      </section>}
 
-      <div className="hiqs-home-grid">
-        <section className="hiqs-home-status">
+      <div className={`hiqs-home-grid ${workspace ? 'is-workspace' : 'is-today'}`}>
+        {workspace && <section className="hiqs-home-status">
           <header className="hiqs-home-section-heading compact"><div><p>MATERIAL STATUS</p><h2>资料状态</h2></div><Badge>{options.statusTotal} 项待处理</Badge></header>
           <div className="hiqs-home-counts">
             {countKeys.map(([key, label]) => <article key={key}><span>{label}</span><strong>{options.counts[key] || 0}</strong></article>)}
@@ -218,7 +239,7 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
               <StatusList entries={options.attention} empty="当前没有需要人工处理的资料状态。" onOpen={options.onOpenAttention} />
             </section>
           </div>
-        </section>
+        </section>}
 
         <div className="hiqs-home-side">
           <section className="hiqs-home-search">
@@ -229,21 +250,21 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
               {options.searchResults.map((result) => <button type="button" key={`${result.title}:${result.resultIndex}`} onClick={() => options.onOpenSearchResult(result.resultIndex)}><span><strong>{result.title}</strong><small>{result.subtitle}</small></span><ArrowRight size={15} /></button>)}
             </div>
           </section>
-          <section className="hiqs-home-inbox">
+          {workspace && <section className="hiqs-home-inbox">
             <header className="hiqs-home-section-heading compact"><div><p>PERSONAL INBOX</p><h2>个人补充信息</h2></div><Badge><Inbox size={13} />{options.inboxCount} 条草稿</Badge></header>
             <span className="hiqs-home-note">AI 将 Tutorial group、临时教室和个人提醒放入这里；预览后再确认写入。</span>
             {!options.inboxEntries.length && <p className="hiqs-home-empty">个人补充信息 Inbox 当前为空。</p>}
             {options.inboxEntries.map((entry) => <InboxEntry key={entry.entry_id} entry={entry} onApply={options.onApplyInbox} />)}
-          </section>
+          </section>}
         </div>
       </div>
 
-      <section className="hiqs-home-updates">
+      {workspace && <section className="hiqs-home-updates">
         <header className="hiqs-home-section-heading compact"><div><p>MOODLE CHANGES</p><h2>更新记录</h2></div><Badge><CalendarDays size={13} />{options.updateCount} 项</Badge></header>
         <span className="hiqs-home-note">逐项显示 Moodle 快照的新增、修改与删除，并标出需要 AI 整理的文件。</span>
         {!options.updates.length && <p className="hiqs-home-empty"><FileText size={15} />当前 Moodle 快照已完成整理。</p>}
         <div className="hiqs-home-update-list">{options.updates.map((course) => <UpdateCourse key={course.course_id} course={course} onOpenSource={options.onOpenSource} />)}</div>
-      </section>
+      </section>}
     </motion.div>
   );
 }

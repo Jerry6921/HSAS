@@ -249,6 +249,8 @@ def test_recursive_page_candidates_follow_content_but_not_moodle_navigation() ->
     <a href="/mod/url/view.php?id=8">Tutorial details</a>
     <a href="/course/view.php?id=123">Course home</a>
     <a href="/my/">Dashboard</a>
+    <a href="/mod/forum/discuss.php?d=12">Forum discussion</a>
+    <a href="/mod/assign/view.php?id=9">Assignment workflow</a>
     <a href="https://external.example/file.pdf">External PDF</a>
     <a href="/pluginfile.php/1/handout.pdf">Handout</a>
     """

@@ -113,10 +113,32 @@ class BrowserSyncSession:
                 )
             else:
                 try:
+                    def report_activity(
+                        state: str,
+                        activity: object,
+                        activity_completed: int,
+                        activity_total: int,
+                    ) -> None:
+                        activity_name = str(getattr(activity, "name", "活动"))
+                        verb = "完成" if state == "complete" else "采集"
+                        self._report(
+                            progress_callback,
+                            "moodle",
+                            processed=processed,
+                            completed=completed,
+                            failed=len(failures),
+                            total=len(courses),
+                            detail=(
+                                f"Moodle · {code} · {verb}活动 "
+                                f"{activity_completed}/{activity_total} · {activity_name}"
+                            ),
+                        )
+
                     result = await self.moodle.sync_course_in_context(
                         self.context,
                         entry.course_id,
                         cancel_requested=cancel_requested,
+                        progress_callback=report_activity,
                     )
                 except Exception as exc:
                     failure = {

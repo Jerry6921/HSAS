@@ -18,7 +18,7 @@ from hsas.infrastructure.storage.persist_data import safe_filename, write_bytes
 from hsas.domain.courses.index_courses import iter_activities
 from hsas.domain.courses.define_courses import CourseActivity, CourseArchive, StoredFile
 from hsas.domain.courses.calculate_statistics import refresh_archive_stats
-from hsas.infrastructure.moodle.handle_cancellation import raise_if_cancelled
+from hsas.infrastructure.moodle.handle_cancellation import MoodleSyncCancelled, raise_if_cancelled
 
 
 DownloadProgressCallback = Callable[[str, CourseActivity, int, int], None]
@@ -248,13 +248,17 @@ def _file_candidates(html: str, page_url: str, base_url: str) -> list[str]:
 
 
 def _page_candidates(html: str, page_url: str, base_url: str) -> list[str]:
-    """Find same-origin content pages without crawling Moodle navigation."""
+    """Find explicitly content-bearing Moodle pages, never general navigation."""
     soup = BeautifulSoup(html, "html.parser")
     candidates: list[str] = []
     seen: set[str] = set()
-    excluded_prefixes = (
-        "/admin/", "/calendar/", "/course/index", "/course/view", "/grade/", "/login/",
-        "/message/", "/my/", "/user/",
+    allowed_prefixes = (
+        "/mod/book/view.php",
+        "/mod/folder/view.php",
+        "/mod/lesson/view.php",
+        "/mod/page/view.php",
+        "/mod/resource/view.php",
+        "/mod/url/view.php",
     )
     current = sanitize_source_url(page_url)
     for node, attribute in [
@@ -270,9 +274,11 @@ def _page_candidates(html: str, page_url: str, base_url: str) -> list[str]:
         if url == current or not _same_origin(url, base_url):
             continue
         path = parts.path.casefold()
-        if path.startswith(excluded_prefixes) or "pluginfile.php" in path:
+        if "pluginfile.php" in path:
             continue
         if PurePosixPath(path).suffix in DOCUMENT_EXTENSIONS:
+            continue
+        if not path.startswith(allowed_prefixes):
             continue
         if url not in seen:
             seen.add(url)
@@ -396,6 +402,7 @@ async def download_activity_files(
     max_link_depth: int = 6,
     max_linked_pages: int = 100,
     max_linked_files: int = 200,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> None:
     if not activity.url or activity.download_status != "pending":
         return
@@ -418,12 +425,15 @@ async def download_activity_files(
         )
         # HTML pages can enqueue both files and more content pages; visited URLs
         # make cycles harmless while the activity-level budgets bound the crawl.
-        queue: deque[tuple[str, int]] = deque([(initial_url, 0)])
+        queue: deque[tuple[str, int, str]] = deque([
+            (initial_url, 0, "file" if google_export_url else "page")
+        ])
         visited: set[str] = set()
         linked_pages = 0
         linked_files = 0
         while queue and linked_pages < max_linked_pages and linked_files < max_linked_files:
-            url, depth = queue.popleft()
+            raise_if_cancelled(cancel_requested)
+            url, depth, candidate_kind = queue.popleft()
             clean_url = sanitize_source_url(url)
             if clean_url in visited:
                 continue
@@ -476,14 +486,19 @@ async def download_activity_files(
                 final_url = sanitize_source_url(response.url)
                 linked_pages += 1
                 _record_linked_page(activity, final_url, depth, html)
+                final_suffix = PurePosixPath(urlsplit(final_url).path.casefold()).suffix
+                if candidate_kind == "file" and final_suffix not in {".htm", ".html"}:
+                    continue
                 discovered = discover_html_links(html, final_url, base_url)
                 for candidate in discovered.file_urls:
                     if candidate not in visited and linked_files < max_linked_files:
-                        queue.append((candidate, depth + 1))
+                        suffix = PurePosixPath(urlsplit(candidate).path.casefold()).suffix
+                        kind = "page" if suffix in {".htm", ".html"} else "file"
+                        queue.append((candidate, depth + 1, kind))
                 if depth < max_link_depth and linked_pages < max_linked_pages:
                     for candidate in discovered.page_urls:
                         if candidate not in visited:
-                            queue.append((candidate, depth + 1))
+                            queue.append((candidate, depth + 1, "page"))
             finally:
                 await response.dispose()
 
@@ -496,6 +511,8 @@ async def download_activity_files(
             }
 
         activity.download_status = "downloaded" if activity.files else "skipped"
+    except MoodleSyncCancelled:
+        raise
     except Exception as exc:
         activity.download_status = "failed"
         activity.download_error = str(exc)[:300]
@@ -548,6 +565,7 @@ async def download_course_files(
                 max_link_depth=max_link_depth,
                 max_linked_pages=max_linked_pages,
                 max_linked_files=max_linked_files,
+                cancel_requested=cancel_requested,
             )
             raise_if_cancelled(cancel_requested)
             async with completion_lock:

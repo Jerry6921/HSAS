@@ -44,7 +44,7 @@ from hsas.domain.courses.detect_changes import (
     compare_course_archives,
 )
 from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.domain.courses.define_courses import CourseArchive
+from hsas.domain.courses.define_courses import CourseActivity, CourseArchive
 from hsas.infrastructure.documents.analyze_pdfs import analyze_course_pdfs
 from hsas.infrastructure.documents.analyze_office_documents import (
     analyze_course_office_documents,
@@ -113,6 +113,7 @@ async def _persist_course(
     progress: SyncProgress | None = None,
     progress_task: int | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    download_progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
 ) -> tuple[CourseArchive, CourseChangeSet, Path]:
     """Download every accessible file, create text sidecars, and persist one course."""
     live_storage_root = settings.output_dir
@@ -155,9 +156,12 @@ async def _persist_course(
                 max_linked_files=settings.max_linked_files,
                 previous_archive=previous_archive,
                 progress_callback=(
-                    progress.download_callback(progress_task)
-                    if progress is not None and progress_task is not None
-                    else None
+                    download_progress_callback
+                    or (
+                        progress.download_callback(progress_task)
+                        if progress is not None and progress_task is not None
+                        else None
+                    )
                 ),
                 cancel_requested=cancel_requested,
             )
@@ -437,6 +441,7 @@ async def sync_course_in_context(
     settings: Settings,
     *,
     cancel_requested: Callable[[], bool] | None = None,
+    progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
 ) -> SyncCourseResult:
     """Synchronize one Moodle course through a broker-owned context."""
     course_id, course_url = _resolve_course_target(course, str(settings.base_url))
@@ -459,6 +464,7 @@ async def sync_course_in_context(
             course_title=title,
             state=state,
             cancel_requested=cancel_requested,
+            download_progress_callback=progress_callback,
         )
     finally:
         await page.close()
@@ -826,12 +832,14 @@ class MoodleCourseGateway:
         course: str,
         *,
         cancel_requested: Callable[[], bool] | None = None,
+        progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
     ) -> SyncCourseResult:
         return await sync_course_in_context(
             context,
             course,
             self.settings,
             cancel_requested=cancel_requested,
+            progress_callback=progress_callback,
         )
 
     def sync_all(

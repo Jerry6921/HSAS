@@ -5,6 +5,7 @@ from collections import deque
 import hashlib
 import mimetypes
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
@@ -279,6 +280,22 @@ def _page_candidates(html: str, page_url: str, base_url: str) -> list[str]:
     return candidates
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoveryResult:
+    """Pure output of the discovery stage; no bytes are written here."""
+
+    file_urls: tuple[str, ...]
+    page_urls: tuple[str, ...]
+
+
+def discover_html_links(html: str, page_url: str, base_url: str) -> DiscoveryResult:
+    """Discover the next crawl frontier before the download stage runs."""
+    return DiscoveryResult(
+        file_urls=tuple(_file_candidates(html, page_url, base_url)),
+        page_urls=tuple(_page_candidates(html, page_url, base_url)),
+    )
+
+
 def _record_linked_page(activity: CourseActivity, url: str, depth: int, html: str) -> None:
     """Persist bounded inert evidence for intermediate pages in a link chain."""
     soup = BeautifulSoup(html, "html.parser")
@@ -286,6 +303,16 @@ def _record_linked_page(activity: CourseActivity, url: str, depth: int, html: st
         line for line in (" ".join(line.split()) for line in soup.get_text("\n").splitlines())
         if line
     ).strip()
+    # Trafilatura is optional: Moodle-specific parsing remains authoritative,
+    # while the extractor removes navigation noise on ordinary HTML pages.
+    try:
+        from trafilatura import extract
+    except ImportError:
+        extract = None
+    if extract is not None:
+        extracted = extract(html, include_links=False, include_comments=False)
+        if isinstance(extracted, str) and len(extracted.strip()) > len(text) * 0.15:
+            text = extracted.strip()
     pages = activity.metadata.setdefault("linked_pages", [])
     if isinstance(pages, list):
         pages.append({
@@ -449,11 +476,12 @@ async def download_activity_files(
                 final_url = sanitize_source_url(response.url)
                 linked_pages += 1
                 _record_linked_page(activity, final_url, depth, html)
-                for candidate in _file_candidates(html, final_url, base_url):
+                discovered = discover_html_links(html, final_url, base_url)
+                for candidate in discovered.file_urls:
                     if candidate not in visited and linked_files < max_linked_files:
                         queue.append((candidate, depth + 1))
                 if depth < max_link_depth and linked_pages < max_linked_pages:
-                    for candidate in _page_candidates(html, final_url, base_url):
+                    for candidate in discovered.page_urls:
                         if candidate not in visited:
                             queue.append((candidate, depth + 1))
             finally:

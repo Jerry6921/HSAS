@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import hashlib
+import json
 import math
 from pathlib import Path
 import re
@@ -11,7 +13,14 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from hsas.domain.courses import ArchiveIndex, StrictModel, iter_activities, iter_files
+from hsas.domain.courses import (
+    ArchiveIndex,
+    StrictModel,
+    activity_evidence_graph,
+    iter_activities,
+    iter_files,
+)
+from hsas.application.build_material_index import read_signature, search_index, write_index
 
 
 UNIT_MARKER = re.compile(
@@ -78,6 +87,7 @@ def list_materials(
                     "relative_path": course_relative_path,
                     "content_text": content_text,
                     "content_tables": activity.metadata.get("content_tables", []),
+                    "evidence_graph": activity_evidence_graph(activity).model_dump(mode="json"),
                 }
             )
         for activity, stored_file in iter_files(index.archive):
@@ -150,6 +160,12 @@ def search_materials(
     if limit < 1 or limit > 20:
         raise ValueError("material result limit must be between 1 and 20")
 
+    index_path = resources_dir / "index" / "materials.sqlite3"
+    signature = _material_signature(resources_dir, course_ids)
+    if read_signature(index_path) == signature:
+        indexed = search_index(index_path, " OR ".join(query_tokens), course_ids, limit)
+        return _result_from_index(normalized_query, course_ids, indexed, limit)
+
     chunks: list[_Chunk] = []
     document_count = 0
     skipped = 0
@@ -203,6 +219,7 @@ def search_materials(
             )
 
     scored = _rank(chunks, query_tokens, normalized_query)
+    write_index(index_path, signature, chunks, document_count, skipped)
     hits = [
         MaterialHit(
             score=round(score, 6),
@@ -230,6 +247,46 @@ def search_materials(
         indexed_document_count=document_count,
         indexed_chunk_count=len(chunks),
         skipped_document_count=skipped,
+        hits=hits,
+    )
+
+
+def _material_signature(resources_dir: Path, course_ids: set[str] | None) -> str:
+    digest = hashlib.sha256()
+    digest.update(json.dumps(sorted(course_ids or []), ensure_ascii=False).encode())
+    for path in sorted((resources_dir / "courses").rglob("*")):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size}".encode())
+    return digest.hexdigest()
+
+
+def _result_from_index(
+    query: str,
+    course_ids: set[str] | None,
+    indexed: dict[str, Any],
+    limit: int,
+) -> MaterialSearchResult:
+    hits = []
+    for row in indexed["rows"][:limit]:
+        score, *values = row
+        tables = json.loads(values[-1])
+        hits.append(MaterialHit(
+            score=round(1.0 / (1.0 + max(float(score), 0.0)), 6),
+            course_id=values[0], course_title=values[1], activity_id=values[2],
+            activity_name=values[3], source_kind=values[4], filename=values[5],
+            relative_text_path=values[6], page_start=values[7], page_end=values[8],
+            source_unit_label=values[9], source_unit_start=values[10],
+            source_unit_end=values[11], chunk_index=values[12], text=values[13],
+            content_tables=tables if isinstance(tables, list) else [],
+        ))
+    return MaterialSearchResult(
+        query=query,
+        course_ids=sorted(course_ids or {hit.course_id for hit in hits}),
+        indexed_document_count=int(indexed["document_count"]),
+        indexed_chunk_count=int(indexed["chunk_count"]),
+        skipped_document_count=int(indexed["skipped"]),
         hits=hits,
     )
 

@@ -10,6 +10,12 @@ as an atomic snapshot.
 The Collector owns acquisition and provenance. The AI reads collected evidence,
 derives assessment facts, and writes `information.json` through `hsas information apply`.
 
+The material query path maintains a local SQLite FTS5 index at
+`<RESOURCES_DIR>/index/materials.sqlite3`. It is rebuilt when the course archive
+or extracted sidecars change and preserves the same file/page provenance as the
+JSON archive. The UI contracts in `ui/src/contracts.ts` are generated from the
+Pydantic response models with `scripts/generate_ui_contracts.py`.
+
 ## 2. Commands
 
 ```bash

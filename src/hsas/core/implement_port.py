@@ -11,7 +11,6 @@ from typing import Any, Callable
 from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
-from hsas.application.build_attention import build_attention_snapshot
 from hsas.application.synchronize_unified_courses import UnifiedCourseSyncService
 from hsas.application.synchronize_class_planner import (
     ClassPlannerSynchronizationService,
@@ -72,6 +71,7 @@ from hsas.core.manage_personal_inbox import PersonalInboxService
 from hsas.core.manage_reviews import SourceReviewService
 from hsas.core.orchestrate_sync import CourseSyncController
 from hsas.core.build_dashboard import DashboardProjectionService, pending_summary
+from hsas.core.build_attention_service import AttentionService
 from hsas.core.query_materials import MaterialQueryService
 from hsas.core.synchronize_workflow import CourseSyncWorkflow
 
@@ -123,6 +123,7 @@ class HIQSCore:
         repr=False,
     )
     sync_workflow: CourseSyncWorkflow = field(init=False, repr=False)
+    attention_service: AttentionService = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.record_service = CourseRecordService(self.resources_dir, self.mutation_lock)
@@ -147,6 +148,10 @@ class HIQSCore:
             _class_planner_service,
             _sis_enrollment_gateway,
             _unified_course_sync_service,
+        )
+        self.attention_service = AttentionService(
+            self.information_snapshot,
+            self.clock,
         )
 
     @property
@@ -202,11 +207,7 @@ class HIQSCore:
     def attention_snapshot(self, horizon_days: int = 14) -> dict[str, Any]:
         """Return deterministic, read-only attention signals for agents and UI."""
         try:
-            return build_attention_snapshot(
-                self.information_snapshot(),
-                now=self.clock(),
-                horizon_days=horizon_days,
-            )
+            return self.attention_service.snapshot(horizon_days)
         except (TypeError, ValueError) as exc:
             raise DashboardError(str(exc)) from exc
 

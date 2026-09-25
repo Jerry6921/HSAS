@@ -10,6 +10,7 @@ from .expose_contracts import (
     iter_activities,
     iter_files,
 )
+from .define_evidence import EvidenceEdge, EvidenceGraph, EvidenceNode, activity_evidence_graph
 
 __all__ = [
     "ArchiveIndex",
@@ -20,4 +21,8 @@ __all__ = [
     "StrictModel",
     "iter_activities",
     "iter_files",
+    "EvidenceEdge",
+    "EvidenceGraph",
+    "EvidenceNode",
+    "activity_evidence_graph",
 ]

@@ -150,6 +150,10 @@ Moodle 页面自身的 Text and media area、活动说明等可见正文保存�
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
 
+检索第一次读取课程快照时会建立本地 SQLite FTS5 索引，之后按课程快照和 sidecar 的签名
+复用索引；搜索结果仍返回课程、活动、文件、页码和文本副本路径。索引是可删除的派生缓存，
+不会改变 canonical `course.json` 或个人资料。
+
 HKU SIS 课程页面保存在 `sis-course-info/courses/<COURSE_CODE>/latest.txt` 与
 `latest.html`。采集器只截取可见课程正文、移除 PeopleSoft 导航和会话状态，并记录安全的
 Subject/Catalogue URL 与 SHA-256。课程事实保持由 AI 阅读，页面结构差异不会进入固定事实

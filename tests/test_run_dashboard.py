@@ -10,23 +10,23 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from hsas.application.update_information import apply_information_update
-from hsas.application.synchronize_unified_courses import UnifiedCourseSyncResult
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.define_documents import PdfAnalysis
-from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.infrastructure.moodle.record_session import record_moodle_session_status
+from hsas.application.information import apply_information_update
+from hsas.application.unified_course_sync import UnifiedCourseSyncResult
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.documents import PdfAnalysis
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.infrastructure.moodle.session_store import record_moodle_session_status
 from hsas.infrastructure.storage import JsonInformationRepository
-from hsas.infrastructure.storage.persist_data import write_model
-from hsas.interfaces.run_dashboard import (
+from hsas.infrastructure.storage.json_store import write_model
+from hsas.core import HIQSCore as DashboardService
+from hsas.web.server import (
     ASSET_ROOT,
     DashboardError,
     DashboardRequestHandler,
-    DashboardService,
     _load_dashboard_assets,
     build_dashboard_server,
 )
-from hsas.ui.run_dashboard import _material_content_security_policy
+from hsas.web.server import _material_content_security_policy
 
 
 def test_dashboard_assets_include_application_calendar_and_source_preview() -> None:
@@ -477,7 +477,7 @@ def test_ocr_action_requires_confirmation_and_reports_results(
             "failures": [],
         }
 
-    monkeypatch.setattr("hsas.core.implement_port.run_ocr_queue", run)
+    monkeypatch.setattr("hsas.core.services.runtime.run_ocr_queue", run)
     service = DashboardService(tmp_path)
 
     with pytest.raises(DashboardError, match="确认"):
@@ -526,7 +526,7 @@ def test_moodle_actions_require_confirmation_and_report_results(
             )
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._course_service",
+        "hsas.core.facade._course_service",
         lambda _resources: Service(),
     )
     service = DashboardService(tmp_path)
@@ -577,7 +577,7 @@ def test_class_planner_actions_require_confirmation_and_report_differences(
             )
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._class_planner_service",
+        "hsas.core.facade._class_planner_service",
         lambda _resources: Service(),
     )
     service = DashboardService(tmp_path)
@@ -623,11 +623,11 @@ def test_course_workflow_reports_progress_and_can_cancel(
             raise InterruptedError("cancelled")
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._sis_enrollment_gateway",
+        "hsas.core.facade._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._class_planner_service",
+        "hsas.core.facade._class_planner_service",
         lambda _resources: PlannerService(),
     )
     service = DashboardService(tmp_path)
@@ -703,19 +703,19 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
             )
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._sis_enrollment_gateway",
+        "hsas.core.facade._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._course_service",
+        "hsas.core.facade._course_service",
         lambda _resources, *, profile_dir=None: MoodleService(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._class_planner_service",
+        "hsas.core.facade._class_planner_service",
         lambda _resources, *, profile_dir=None: PlannerService(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._unified_course_sync_service",
+        "hsas.core.facade._unified_course_sync_service",
         lambda _resources: UnifiedService(),
     )
 
@@ -764,19 +764,19 @@ def test_course_workflow_retries_only_failed_source_course(
             )
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._sis_enrollment_gateway",
+        "hsas.core.facade._sis_enrollment_gateway",
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._course_service",
+        "hsas.core.facade._course_service",
         lambda _resources, *, profile_dir=None: MoodleService(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._class_planner_service",
+        "hsas.core.facade._class_planner_service",
         lambda _resources, *, profile_dir=None: PlannerService(),
     )
     monkeypatch.setattr(
-        "hsas.core.implement_port._unified_course_sync_service",
+        "hsas.core.facade._unified_course_sync_service",
         lambda _resources: UnifiedService(),
     )
 
@@ -816,7 +816,7 @@ def test_moodle_session_verification_replaces_stale_logged_in_state(
             return SimpleNamespace(status="logged_out", error=None)
 
     monkeypatch.setattr(
-        "hsas.core.implement_port._course_service",
+        "hsas.core.facade._course_service",
         lambda _resources: Service(),
     )
 
@@ -859,6 +859,30 @@ def test_attention_endpoint_exposes_the_shared_port_snapshot(tmp_path: Path) -> 
             payload = json.load(response)
         assert payload["horizon_days"] == 7
         assert payload["items"][0]["reason_codes"] == ["LOGIN_REQUIRED"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_evidence_endpoint_returns_graph_node(tmp_path: Path) -> None:
+    state = json.loads((Path(__file__).parent / "fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    activity = archive.sections[0].activities[0]
+    write_model(tmp_path / "courses/138907/course.json", archive)
+    server = build_dashboard_server(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        with urlopen(  # noqa: S310 - loopback-only test server
+            f"http://127.0.0.1:{port}/api/evidence/activity:{activity.module_id}"
+        ) as response:
+            payload = json.load(response)
+        assert payload["status"] == "found"
+        assert payload["node"]["evidence_id"] == f"activity:{activity.module_id}"
     finally:
         server.shutdown()
         server.server_close()

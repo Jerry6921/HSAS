@@ -1,6 +1,6 @@
 """UI-independent HIQS application use cases."""
 
-from .update_information import (
+from .information import (
     InformationServiceError,
     InformationApplyResult,
     apply_information_update,

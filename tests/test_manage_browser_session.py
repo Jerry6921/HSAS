@@ -1,8 +1,8 @@
 import asyncio
 from pathlib import Path
 
-from hsas.application.ports.define_gateways import CourseCatalogEntry, SyncCourseResult
-from hsas.infrastructure.manage_browser_session import BrowserSyncSession
+from hsas.application.ports.gateways import CourseCatalogEntry, SyncCourseResult
+from hsas.infrastructure.browser.session import BrowserSyncSession
 
 
 def test_moodle_sync_collects_every_course_shell_with_the_same_course_code(

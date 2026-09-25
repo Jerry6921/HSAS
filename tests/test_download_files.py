@@ -3,7 +3,7 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hsas.infrastructure.moodle.download_files import (
+from hsas.infrastructure.moodle.activity_downloader import (
     _file_candidates,
     _page_candidates,
     _google_workspace_export_url,
@@ -11,7 +11,7 @@ from hsas.infrastructure.moodle.download_files import (
     _save_response,
     download_activity_files,
 )
-from hsas.domain.courses.define_courses import (
+from hsas.domain.courses.models import (
     CourseActivity,
     StoredFile,
 )
@@ -289,5 +289,6 @@ def test_download_activity_recursively_collects_files_through_html_pages(tmp_pat
     assert [str(file.source_url) for file in activity.files] == [
         "https://moodle.example.edu/pluginfile.php/1/tutorial.pdf"
     ]
-    assert len(activity.metadata["linked_pages"]) == 3
-    assert "Linked page depth=2" in activity.metadata["content_text"]
+    assert len(activity.linked_pages) == 3
+    assert [page.depth for page in activity.linked_pages] == [0, 1, 2]
+    assert activity.linked_pages[2].content_text == "file"

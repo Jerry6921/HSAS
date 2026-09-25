@@ -2,7 +2,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from hsas.interfaces.run_cli import app
+from hsas.cli.app import app
 
 
 def test_cli_exposes_only_information_workflow_commands() -> None:
@@ -48,7 +48,7 @@ def test_sync_command_dispatches_single_or_all(tmp_path: Path, monkeypatch) -> N
             calls.append(f"single:{course}")
             return Result()
 
-    monkeypatch.setattr("hsas.interfaces.run_cli._course_service", lambda _settings=None: Service())
+    monkeypatch.setattr("hsas.cli.app._course_service", lambda _settings=None: Service())
     all_result = CliRunner().invoke(app, ["--resources", str(tmp_path), "sync-courses"])
     one_result = CliRunner().invoke(
         app, ["--resources", str(tmp_path), "sync-courses", "138907"]

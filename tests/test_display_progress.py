@@ -2,7 +2,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from hsas.infrastructure.moodle.display_progress import SyncProgress
+from hsas.infrastructure.moodle.progress import SyncProgress
 
 
 def test_sync_progress_renders_stage_and_completion() -> None:

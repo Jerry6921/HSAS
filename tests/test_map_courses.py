@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from hsas.infrastructure.moodle.download_files import sanitize_source_url
-from hsas.infrastructure.moodle.map_courses import build_course_archive, map_activity
+from hsas.infrastructure.moodle.activity_downloader import sanitize_source_url
+from hsas.infrastructure.moodle.course_mapper import build_course_archive, map_activity
 
 
 ROOT = Path(__file__).parents[1]
@@ -21,17 +21,17 @@ def test_build_course_archive_preserves_structure_and_types() -> None:
         raw_state_path="courses/138907/raw/course-state.json",
     )
 
-    assert archive.schema_version == "2.2"
+    assert archive.schema_version == "2.3"
     assert archive.course.returned_section_count == 2
     assert archive.sections[0].number == 0
     assert archive.sections[0].activities[0].category == "announcement"
     assert archive.sections[0].activities[1].download_status == "pending"
     assert archive.sections[1].activities[0].category == "assignment"
     assert archive.sections[1].activities[0].metadata["duedate"] == 1794733200
-    assert archive.sections[1].activities[0].metadata["content_text"] == (
+    assert archive.sections[1].activities[0].content_text == (
         "Tuesday tutorial at 9:00"
     )
-    assert archive.sections[1].activities[0].metadata["content_tables"][0][
+    assert archive.sections[1].activities[0].content_tables[0][
         "caption"
     ] == "Timetable"
     assert archive.stats.activity_types == {"assign": 1, "forum": 1, "resource": 1}

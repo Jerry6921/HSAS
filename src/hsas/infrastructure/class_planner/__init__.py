@@ -1,6 +1,6 @@
 """HKU Class Planner browser authentication and snapshot collection."""
 
-from .synchronize_calendar import (
+from .gateway import (
     ClassPlannerBrowserGateway,
     class_planner_status,
 )

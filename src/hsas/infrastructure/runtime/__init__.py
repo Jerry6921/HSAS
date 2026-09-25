@@ -19,7 +19,7 @@ def __getattr__(name: str) -> Any:
         "get_runtime_paths",
         "hku_portal_profile_dir",
     }:
-        from .resolve_paths import (
+        from .paths import (
             RuntimePaths,
             ensure_resources_layout,
             get_runtime_paths,

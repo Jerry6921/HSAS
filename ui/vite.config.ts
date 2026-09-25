@@ -9,7 +9,7 @@ export default defineConfig({
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   build: {
-    outDir: resolve(__dirname, "../src/hsas/ui/web/modern-assets"),
+    outDir: resolve(__dirname, "../src/hsas/web/static/modern-assets"),
     emptyOutDir: true,
     cssCodeSplit: false,
     lib: {

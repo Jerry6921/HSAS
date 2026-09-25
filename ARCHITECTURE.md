@@ -51,13 +51,14 @@ flowchart LR
 
 ```text
 src/hsas/
-├── core/             业务模块及唯一公开 HIQSPort
+├── core/             稳定 Port、façade、服务容器与同步编排
 ├── mcp/              面向 AI 的 MCP tools
-├── ui/               面向用户的本地 HTTP API 与生产静态资源
+├── web/              面向用户的本地 HTTP API 与生产静态资源
 ├── domain/           CORE 内部纯模型与规则
 ├── application/      CORE 内部用例
 ├── infrastructure/   CORE 内部来源、存储和运行时适配器
-└── interfaces/       旧导入路径与 CLI 兼容层
+├── cli/              Typer CLI 入口与命令组
+└── codegen/          JSON Schema 衍生代码生成器
 ui/                    React + TypeScript 前端源码
 ```
 
@@ -82,9 +83,11 @@ domain ← application ← infrastructure/composition ← CORE implements HIQSPo
 取消、精确重试和结果持久化。`DashboardProjectionService` 组合规范事实与各来源状态，生成
 Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`PersonalInboxService` 与
 `MaterialQueryService` 分别负责规范记录变更、来源审阅游标、个人草稿和只读材料证据。它们
-使用注入的 repository，并由 `HIQSCore` 组合。CORE façade 只维持稳定 Port、跨能力事务和
-兼容入口。旧 `interfaces` 包保留 CLI 与兼容 import；CLI 的通用查询入口通过 CORE，仍需
-终端交互回调的 collector 命令保留专用适配器。新增 AI 和用户入口必须分别放入 `mcp` 与 `ui`。
+使用注入的 repository，并由 `HIQSCore` 组合。应用更新与本地证据操作分别由
+`ApplicationLifecycleService`、`LocalEvidenceOperationService` 负责；同步来源命令由
+`InstitutionalSourceService` 负责，具体 gateway 在 `source_factories.py` 组合边界创建。
+CORE façade 只维持稳定 Port、服务装配和兼容入口。CLI 的通用查询入口通过 CORE，仍需
+终端交互回调的 collector 命令保留专用适配器。新增 AI 和用户入口必须分别放入 `mcp` 与 `web`。
 
 “需要确认”使用同一条只读链路：Dashboard read model 进入 application 层的确定性 attention
 用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
@@ -100,24 +103,26 @@ Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`Person
 
 ```mermaid
 flowchart LR
-    Discover[发现课程活动] --> Map[保存 Moodle state]
-    Map --> Download[下载所有可访问文件]
-    Download --> PDF[提取 PDF 文本]
+    Discover[发现链接与候选资源] --> Download[认证下载响应]
+    Download --> Parse[解析惰性 HTML 证据]
+    Parse --> PDF[提取 PDF 文本]
     PDF --> Office[提取 DOCX PPTX 文本与备注]
     Office --> Changes[比较文件和活动变化]
     Changes --> Validate[验证 CourseArchive]
     Validate --> Publish[原子发布]
 ```
 
-下载器接受 Moodle `pluginfile.php` 附件及各类文件响应，并通过响应类型与来源规则确认
-文件。文件受最大大小、超时和并发配置约束。原始字节仅写入本地存储。
+采集实现拆成可独立测试、可注入的发现、下载、解析三阶段。下载阶段接受 Moodle
+`pluginfile.php` 附件及各类文件响应，并通过响应类型与来源规则确认文件；解析阶段只处理
+已取得的惰性 HTML，不执行脚本，并以 Trafilatura 作为正文提取 fallback。文件受最大大小、
+超时和并发配置约束。原始字节仅写入本地存储。
 
 对 URL、Page、Label 和其他 HTML 活动，下载器会从活动页开始做有界递归采集：跟随同源
 Moodle 内容页、`pluginfile.php` 及文档链接，并解析中间 HTML 页的正文作为 Agent 证据。
 默认最多 6 层、100 个中间页面和 200 个文件（可由 `MOODLE_MAX_LINK_DEPTH`、
 `MOODLE_MAX_LINKED_PAGES`、`MOODLE_MAX_LINKED_FILES` 或 TOML 配置覆盖）。同一 URL 只
 访问一次，Moodle 导航页、外部普通链接和超出预算的分支不会继续爬取；若触及上限，活动
-会标记 `metadata.recursive_collection_truncated` 并保留实际限制，避免 Agent 把不完整
+会标记 `collection_report.truncated` 并在正式证据模型中保留实际限制，避免 Agent 把不完整
 结果误认为完整清单。
 
 Google Workspace 链接是受控例外：`docs.google.com/document`、`presentation` 和
@@ -142,17 +147,24 @@ Google Workspace 链接是受控例外：`docs.google.com/document`、`presentat
 - DOCX 包含正文及可见的页眉、页脚、脚注、尾注和批注文本。
 
 Moodle 页面自身的 Text and media area、活动说明等可见正文保存在对应 activity 的
-`metadata.content_text`。HTML 表格不保存为可执行页面，而是转换为
-`metadata.content_tables` 的 caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。
-这些页面证据与文件 sidecar 一同进入本地检索；正文或表格变化也会生成增量审阅记录。
+`content_text`。HTML 表格不保存为可执行页面，而是转换为 `content_tables` 的
+caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。递归页面保存在
+`linked_pages`，范围与截断信息保存在 `collection_report`。旧 archive 中对应的 metadata
+字段只在模型载入时迁移，业务代码不再读取这些兼容键。正文或表格变化也会生成增量审阅记录。
+
+每个活动可确定性投影为 `EvidenceNode` / `EvidenceEdge` 图：活动、嵌套 HTML 页面、原文件与
+提取文本各有稳定 evidence ID，并用 `links_to`、`contains`、`derived_from` 连接。MCP
+`get_evidence` 与 Dashboard `GET /api/evidence/<id>` 返回节点、相邻节点和完整性状态，Agent
+可以从搜索命中追溯到原始来源，而不需要理解存储实现。
 
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
 
-检索第一次读取课程快照时会建立本地 SQLite FTS5 索引，之后按课程快照和 sidecar 的签名
-复用索引；搜索结果仍返回课程、活动、文件、页码和文本副本路径。索引是可删除的派生缓存，
-不会改变 canonical `course.json` 或个人资料。
+检索第一次读取课程快照时会建立本地 SQLite FTS5 索引。每份文档以 evidence ID 和内容指纹
+登记；刷新时只删除、重建已变化或已移除的证据行，未变化行保持原 rowid。活动、嵌套页面及
+提取文本的搜索命中直接携带对应证据图节点 ID，同时返回课程、活动、文件、页码和文本副本
+路径。索引是可删除的派生缓存，不会改变 canonical `course.json` 或个人资料。
 
 HKU SIS 课程页面保存在 `sis-course-info/courses/<COURSE_CODE>/latest.txt` 与
 `latest.html`。采集器只截取可见课程正文、移除 PeopleSoft 导航和会话状态，并记录安全的
@@ -254,7 +266,7 @@ SIS Course Information 与 Class Planner；单一进度条显示阶段、当前�
 集中本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异。日历作为
 独立侧栏页面。React 岛使用 shadcn/ui 风格的本地组件、FullCalendar 和 Motion 呈现月、周、日
 视图；旧 JavaScript 日历保留为静态资源缺失时的回退。两套视图共享课程与全文筛选，日期待确认
-事项单独列出。前端构建产物固定写入 `src/hsas/ui/web/modern-assets/`，运行应用不依赖 Node。
+事项单独列出。前端构建产物固定写入 `src/hsas/web/static/modern-assets/`，运行应用不依赖 Node。
 
 课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
 `information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from hsas.infrastructure.storage.persist_data import write_bytes, write_json, write_text
+from hsas.infrastructure.storage.json_store import write_bytes, write_json, write_text
 
 
 def test_file_store_writes_json_text_and_bytes_atomically(tmp_path: Path) -> None:

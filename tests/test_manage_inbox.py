@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from hsas.application.manage_inbox import (
+from hsas.application.inbox import (
     PersonalInboxError,
     add_personal_inbox_entry,
     apply_personal_inbox_entry,
     load_personal_inbox,
     personal_inbox_snapshot,
 )
-from hsas.application.update_information import apply_information_update
+from hsas.application.information import apply_information_update
 from hsas.core import HIQSCore, HIQSPortError
 from hsas.infrastructure.storage import (
     JsonInformationRepository,

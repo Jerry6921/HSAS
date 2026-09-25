@@ -3,7 +3,7 @@ from threading import Event
 import pytest
 
 from hsas.core import HIQSPortError
-from hsas.core.orchestrate_sync import CourseSyncController
+from hsas.core.sync.controller import CourseSyncController
 
 
 def test_sync_controller_starts_and_exposes_job() -> None:

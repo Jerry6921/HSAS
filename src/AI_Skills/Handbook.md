@@ -62,8 +62,8 @@ resource index before opening the linked files. The default traversal budget is
 `MOODLE_MAX_LINK_DEPTH`, `MOODLE_MAX_LINKED_PAGES`, and
 `MOODLE_MAX_LINKED_FILES` settings. Navigation pages, cycles, ordinary external
 links, and branches beyond the budget are excluded. If a budget is reached,
-inspect `metadata.recursive_collection_truncated` and
-`metadata.recursive_collection_limits` before claiming the collection is
+inspect `collection_report.truncated` and the remaining
+`collection_report` limits before claiming the collection is
 complete. Common extensions include documents, presentations, spreadsheets,
 PDFs, images, audio, video, archives, source code and notebooks.
 
@@ -177,9 +177,9 @@ older pending batch and prompts creation of a fresh batch.
 status, statistics and unassigned activities. Always inspect
 `unassigned_activities`; real files and assessments may live there.
 
-Rendered activity evidence appears under `activities[].metadata.content_text`.
+Rendered activity evidence appears under `activities[].content_text`.
 When a Moodle activity contains an HTML table,
-`activities[].metadata.content_tables` preserves its caption, rows, cells,
+`activities[].content_tables` preserves its caption, rows, cells,
 header flags and spans without preserving executable HTML. A changed rendered
 body or table enters the incremental review queue and points the agent back to
 the current `course.json`.

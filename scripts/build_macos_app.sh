@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 PROJECT_ROOT=${SCRIPT_DIR:h}
 PYTHON_BIN=${PYTHON_BIN:-"$PROJECT_ROOT/.venv/bin/python"}
-HSAS_BIN="$PROJECT_ROOT/.venv/bin/hsas"
 OUTPUT_ROOT=${HIQS_APP_OUTPUT_DIR:-"$PROJECT_ROOT/dist"}
 APP_ROOT="$OUTPUT_ROOT/HIQS.app"
 CONTENTS_ROOT="$APP_ROOT/Contents"
@@ -16,7 +15,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   print -u2 "HIQS.app can only be built on macOS."
   exit 1
 fi
-if [[ ! -x "$PYTHON_BIN" || ! -x "$HSAS_BIN" ]]; then
+if [[ ! -x "$PYTHON_BIN" ]]; then
   print -u2 "Project environment not found. Create $PROJECT_ROOT/.venv and install HIQS first."
   exit 1
 fi

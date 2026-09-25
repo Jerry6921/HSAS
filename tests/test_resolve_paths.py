@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from hsas.infrastructure.moodle.load_settings import DEFAULT_CONFIG, DEFAULT_SELECTORS, Settings
-from hsas.infrastructure.runtime.resolve_paths import RuntimePaths, ensure_resources_layout, get_runtime_paths
+from hsas.infrastructure.moodle.settings import DEFAULT_CONFIG, DEFAULT_SELECTORS, Settings
+from hsas.infrastructure.runtime.paths import RuntimePaths, ensure_resources_layout, get_runtime_paths
 
 
 def _runtime(root: Path) -> RuntimePaths:

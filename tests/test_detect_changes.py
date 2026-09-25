@@ -2,9 +2,9 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.detect_changes import compare_course_archives
-from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.change_detection import compare_course_archives
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
 
 
 ROOT = Path(__file__).parents[1]
@@ -56,22 +56,22 @@ def test_change_set_detects_rendered_moodle_content_and_table_changes() -> None:
         raw_state_path="courses/138907/raw/course-state.json",
     )
     activity = previous.sections[0].activities[0]
-    activity.metadata["content_text"] = "Tuesday lecture at 10:00"
-    activity.metadata["content_tables"] = [
+    activity.content_text = "Tuesday lecture at 10:00"
+    activity.content_tables = [
         {"caption": "Timetable", "rows": [{"cells": [{"text": "10:00"}]}]}
     ]
     current = previous.model_copy(deep=True)
     current.collected_at = previous.collected_at + timedelta(hours=1)
     current_activity = current.sections[0].activities[0]
-    current_activity.metadata["content_text"] = "Tuesday lecture at 11:00"
-    current_activity.metadata["content_tables"][0]["rows"][0]["cells"][0][
+    current_activity.content_text = "Tuesday lecture at 11:00"
+    current_activity.content_tables[0]["rows"][0]["cells"][0][
         "text"
     ] = "11:00"
 
     result = compare_course_archives(previous, current)
 
     assert {(change.kind, change.field) for change in result.changes} == {
-        ("activity", "metadata.content_text"),
-        ("activity", "metadata.content_tables"),
+        ("activity", "content_text"),
+        ("activity", "content_tables"),
     }
     assert result.summary == {"activity": 2}

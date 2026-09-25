@@ -1,13 +1,15 @@
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from hsas.application.retrieve_materials import list_materials, search_materials
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.define_documents import PdfAnalysis
-from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.infrastructure.storage.persist_data import write_model, write_text
+from hsas.application.material_search import list_materials, search_materials
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.documents import PdfAnalysis
+from hsas.domain.courses.evidence import LinkedPageEvidence, linked_page_evidence_id
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.infrastructure.storage.json_store import write_model, write_text
 
 
 ROOT = Path(__file__).parents[1]
@@ -55,6 +57,7 @@ def test_local_search_returns_page_and_activity_provenance(tmp_path: Path) -> No
     result = search_materials(resources, "thalamic bridge sensory", course_ids={"138907"})
     assert result.indexed_document_count == 1
     assert result.hits[0].activity_name == "Thalamic Bridge Reading"
+    assert result.hits[0].evidence_id == f"text:{activity.module_id}:{text_relative}"
     assert result.hits[0].filename == "bridge.pdf"
     assert result.hits[0].page_start == 2
     assert result.hits[0].source_unit_label == "Page"
@@ -118,10 +121,10 @@ def test_local_search_indexes_rendered_moodle_activity_text(tmp_path: Path) -> N
     activity = archive.sections[0].activities[0]
     activity.name = "Timetable"
     activity.module = "label"
-    activity.metadata["content_text"] = (
+    activity.content_text = (
         "Timetable Tuesday 9:00-9:50 Tutorial MB167 Friday 10:00 Lecture A CYCC501"
     )
-    activity.metadata["content_tables"] = [
+    activity.content_tables = [
         {
             "caption": "Timetable",
             "rows": [
@@ -154,3 +157,56 @@ def test_local_search_indexes_rendered_moodle_activity_text(tmp_path: Path) -> N
     assert result.hits[0].content_tables[0]["caption"] == "Timetable"
     assert manifest["page_content_count"] == 1
     assert manifest["page_content"][0]["content_tables"][0]["caption"] == "Timetable"
+
+
+def test_linked_page_search_hit_resolves_to_graph_node(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Calculus Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    activity = archive.sections[0].activities[0]
+    activity.linked_pages.append(LinkedPageEvidence(
+        url="https://moodle.example.edu/mod/page/view.php?id=22",
+        depth=1,
+        title="Tutorial registration",
+        content_text="Register for the Tuesday tutorial in room MB167.",
+    ))
+    write_model(resources / "courses/138907/course.json", archive)
+
+    result = search_materials(resources, "Tuesday tutorial MB167")
+
+    assert result.hits[0].evidence_id == linked_page_evidence_id(
+        activity.module_id, activity.linked_pages[0]
+    )
+
+
+def test_fts_refresh_preserves_unchanged_evidence_rows(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Calculus Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    first, second = archive.sections[0].activities[:2]
+    first.content_text = "alpha calculus unchanged evidence"
+    write_model(resources / "courses/138907/course.json", archive)
+    search_materials(resources, "alpha calculus")
+    index_path = resources / "index/materials.sqlite3"
+    with sqlite3.connect(index_path) as connection:
+        before = connection.execute(
+            "SELECT rowid FROM chunks WHERE evidence_id = ?", (f"activity:{first.module_id}",)
+        ).fetchone()[0]
+
+    second.content_text = "beta differential equation new evidence"
+    write_model(resources / "courses/138907/course.json", archive)
+    search_materials(resources, "beta differential")
+    with sqlite3.connect(index_path) as connection:
+        after = connection.execute(
+            "SELECT rowid FROM chunks WHERE evidence_id = ?", (f"activity:{first.module_id}",)
+        ).fetchone()[0]
+        updated = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'updated_document_count'"
+        ).fetchone()[0]
+
+    assert after == before
+    assert updated == "1"

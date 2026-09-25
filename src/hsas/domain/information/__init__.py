@@ -1,6 +1,6 @@
 """Validated course-information contracts for AI-authored data."""
 
-from .define_information import (
+from .models import (
     CourseMaterialSection,
     CourseRecord,
     InformationItem,
@@ -12,7 +12,7 @@ from .define_information import (
     WeeklyRecurrence,
     moodle_source_course_ids,
 )
-from .define_attention import (
+from .attention import (
     AttentionAction,
     AttentionEvidence,
     AttentionItem,
@@ -20,7 +20,7 @@ from .define_attention import (
     AttentionSeverity,
     AttentionSnapshot,
 )
-from .define_inbox import PersonalInbox, PersonalInboxEntry
+from .inbox import PersonalInbox, PersonalInboxEntry
 
 __all__ = [
     "AttentionAction",

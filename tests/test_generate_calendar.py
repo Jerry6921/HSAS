@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from hsas.domain.information import InformationStore
-from hsas.domain.information.generate_calendar import build_ics
+from hsas.domain.information.calendar import build_ics
 
 
 def test_ics_exports_recurrence_exclusions_additions_and_changed_instance() -> None:

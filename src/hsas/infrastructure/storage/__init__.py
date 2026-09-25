@@ -1,5 +1,5 @@
 """Atomic persistence and course snapshot publication."""
-from .implement_repositories import (
+from .repositories import (
     JsonChangeQueueRepository,
     JsonInformationRepository,
     JsonPersonalInboxRepository,

@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from hsas.core import HIQSCore, HIQSPortError
-from hsas.infrastructure.moodle.load_settings import Settings
-from hsas.infrastructure.moodle.display_moodle_page import (
+from hsas.infrastructure.moodle.settings import Settings
+from hsas.infrastructure.moodle.page_preview import (
     MoodlePreviewError,
     validate_moodle_url,
 )

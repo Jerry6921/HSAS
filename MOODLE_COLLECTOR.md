@@ -25,7 +25,11 @@ Moodle API / HTML fallback
         ↓
 保存原始 course state
         ↓
-下载所有可访问附件和非 HTML 文件
+发现同源页面与候选文件
+        ↓
+通过认证会话下载响应
+        ↓
+解析惰性 HTML 正文与下一层链接
         ↓
 PDF 文本提取
         ↓
@@ -40,6 +44,9 @@ DOCX / PPTX 文本与 speaker notes 提取
 
 AI 在默认同步管线中承担课程事实归纳，并通过
 `hsas information validate/apply` 写入课程事实。
+
+发现、下载、解析由三个独立服务执行。解析器不执行页面脚本，并在通用 DOM 文本不足时使用
+Trafilatura 提取正文；每一阶段均可单独测试或替换。
 
 ## 文件覆盖
 
@@ -82,6 +89,10 @@ Google Workspace 是唯一默认允许尝试下载的外部来源：
 
 `StoredFile` 保存本地路径、已清理 URL、MIME、大小、SHA-256、下载时间、ETag、
 Last-Modified、最近校验时间及可选文本分析。
+
+活动正文、表格、递归页面与采集范围分别写入 `content_text`、`content_tables`、
+`linked_pages` 和 `collection_report`。它们连同文件和提取文本投影为稳定证据图，搜索命中
+携带 evidence ID，Agent 可通过 `get_evidence` 追溯来源和完整性。
 
 增量同步使用 HTTP validator 和 SHA-256 复用未变文件。每门课程在 staging 中构建；只有
 下载、分析和模型校验完成后才通过目录交换发布。中断或失败会保留上一份有效快照。

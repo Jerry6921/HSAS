@@ -6,7 +6,7 @@ from hsas.application.ports import (
     SyncBatchResult,
     SyncCourseResult,
 )
-from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.application.moodle_sync import CourseSynchronizationService
 
 
 class FakeCourseGateway:

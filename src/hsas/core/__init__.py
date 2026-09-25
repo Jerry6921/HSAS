@@ -1,6 +1,6 @@
 """Public CORE boundary for every HIQS delivery adapter."""
 
-from .define_port import (
+from .ports import (
     ApplicationLifecyclePort,
     CourseSyncPort,
     HIQSPort,
@@ -8,7 +8,7 @@ from .define_port import (
     InformationCommandPort,
     InformationQueryPort,
 )
-from .implement_port import HIQSCore, build_port
+from .facade import HIQSCore, build_port
 
 __all__ = [
     "ApplicationLifecyclePort",

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from hsas.infrastructure.moodle.load_settings import SelectorConfig
-from hsas.infrastructure.moodle.parse_html import parse_course
+from hsas.infrastructure.moodle.settings import SelectorConfig
+from hsas.infrastructure.moodle.html_parser import parse_course
 
 
 ROOT = Path(__file__).parents[1]

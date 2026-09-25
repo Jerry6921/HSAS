@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from hsas.infrastructure.class_planner.fetch_calendar import (
+from hsas.infrastructure.class_planner.client import (
     APP_URL,
     _calendar_payload_from_app,
     _is_authenticated_portal_page,
@@ -12,14 +12,14 @@ from hsas.infrastructure.class_planner.fetch_calendar import (
     _resume_after_portal_login,
     capture_calendar_response_in_context,
 )
-from hsas.infrastructure.class_planner.synchronize_calendar import (
+from hsas.infrastructure.class_planner.gateway import (
     ClassPlannerBrowserGateway,
     _diff,
     _sanitize,
     _summary,
     class_planner_status,
 )
-from hsas.infrastructure.storage.persist_data import write_json
+from hsas.infrastructure.storage.json_store import write_json
 
 
 def payload(course_title: str = "Engineering Fundamentals") -> dict:
@@ -140,7 +140,7 @@ def test_visible_login_reuses_and_foregrounds_persistent_blank_page(
 
     page = Page()
     monkeypatch.setattr(
-        "hsas.infrastructure.class_planner.fetch_calendar._resume_after_portal_login",
+        "hsas.infrastructure.class_planner.client._resume_after_portal_login",
         resume,
     )
 
@@ -190,7 +190,7 @@ def test_authenticated_app_reloads_only_once_to_retrigger_calendar(
 
     future = None
     monkeypatch.setattr(
-        "hsas.infrastructure.class_planner.fetch_calendar.APP_RETRY_DELAY_SECONDS",
+        "hsas.infrastructure.class_planner.client.APP_RETRY_DELAY_SECONDS",
         0,
     )
     result, reload_count = asyncio.run(run())
@@ -235,7 +235,7 @@ def test_portal_login_persists_captured_calendar_before_closing(
         return payload()
 
     monkeypatch.setattr(
-        "hsas.infrastructure.class_planner.synchronize_calendar.capture_calendar_response",
+        "hsas.infrastructure.class_planner.gateway.capture_calendar_response",
         capture,
     )
 

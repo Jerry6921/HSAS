@@ -23,6 +23,7 @@ def test_mcp_server_exposes_port_use_cases() -> None:
         "get_attention",
         "get_information",
         "get_information_update_schema",
+        "get_evidence",
         "get_pending_changes",
         "get_personal_inbox_entry",
         "get_status",

@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from hsas.infrastructure.moodle.fetch_moodle import (
+from hsas.infrastructure.moodle.client import (
     MoodleAjaxError,
     decode_ajax_response,
     discover_all_course_states,
     enrich_course_state_from_html,
     parse_discovered_courses,
 )
-from hsas.infrastructure.moodle.load_settings import SelectorConfig
+from hsas.infrastructure.moodle.settings import SelectorConfig
 
 
 ROOT = Path(__file__).parents[1]
@@ -128,7 +128,7 @@ def test_discover_all_course_states_keeps_per_course_failures(monkeypatch) -> No
         return fixture_state()
 
     monkeypatch.setattr(
-        "hsas.infrastructure.moodle.fetch_moodle.fetch_course_state",
+        "hsas.infrastructure.moodle.client.fetch_course_state",
         fake_fetch,
     )
     results = asyncio.run(

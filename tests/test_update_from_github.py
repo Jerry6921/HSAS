@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from hsas.infrastructure.update_from_github import (
+from hsas.infrastructure.updates.github import (
     ApplicationUpdateError,
     GitHubUpdateService,
 )

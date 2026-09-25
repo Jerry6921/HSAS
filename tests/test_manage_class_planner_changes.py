@@ -3,14 +3,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from hsas.infrastructure.class_planner.manage_changes import (
+from hsas.infrastructure.class_planner.review import (
     ClassPlannerReviewError,
     acknowledge_class_planner_changes,
     collect_class_planner_changes,
     validate_class_planner_batch,
 )
-from hsas.infrastructure.storage.persist_data import write_json
-from hsas.interfaces.run_cli import app
+from hsas.infrastructure.storage.json_store import write_json
+from hsas.cli.app import app
 
 
 def _snapshot(synced_at: str, course_key: str) -> dict:

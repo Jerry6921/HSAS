@@ -8,13 +8,13 @@ under the MIT License with the Commons Clause restriction described by the
 Canvas UI project. HIQS uses it as an interface effect and does not resell or
 redistribute the component as a standalone library.
 
-The vendored source is stored at `src/hsas/interfaces/web/ripple.js`. TypeScript
+The vendored source is stored at `src/hsas/web/static/ripple.js`. TypeScript
 annotations were mechanically removed so the component can run in HIQS without
 adding a JavaScript build toolchain.
 
 ## Modern calendar UI
 
-The browser bundle under `src/hsas/ui/web/modern-assets/` includes React,
+The browser bundle under `src/hsas/web/static/modern-assets/` includes React,
 React DOM, FullCalendar Standard, Motion, Radix Slot, class-variance-authority,
 clsx and tailwind-merge under their respective permissive licenses. It also
 includes Lucide icons under the ISC License. HIQS uses only FullCalendar

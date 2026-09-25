@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,11 @@ from hsas.core import (
     InformationQueryPort,
     build_port,
 )
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.infrastructure.storage.json_store import write_model
+
+
+ROOT = Path(__file__).parents[1]
 
 
 def test_core_implements_public_port(tmp_path: Path) -> None:
@@ -75,3 +81,19 @@ def test_core_rejects_string_as_course_id_list(tmp_path: Path) -> None:
 
     with pytest.raises(HIQSPortError, match="list of strings"):
         core.search_materials({"query": "calculus", "course_ids": "142655"})
+
+
+def test_core_resolves_stable_evidence_node(tmp_path: Path) -> None:
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    activity = archive.sections[0].activities[0]
+    write_model(tmp_path / "courses/138907/course.json", archive)
+    core = HIQSCore(resources_dir=tmp_path)
+
+    result = core.get_evidence(f"activity:{activity.module_id}")
+
+    assert result["status"] == "found"
+    assert result["node"]["evidence_id"] == f"activity:{activity.module_id}"
+    assert result["course_id"] == "138907"

@@ -1,25 +1,25 @@
 import asyncio
 from pathlib import Path
 
-from hsas.infrastructure.sis_course_info.manage_changes import (
+from hsas.infrastructure.sis.course_info.review import (
     acknowledge_sis_course_info_changes,
     collect_sis_course_info_changes,
 )
-from hsas.infrastructure.sis_course_info.synchronize_course_pages import (
+from hsas.infrastructure.sis.course_info.gateway import (
     cleaned_visible_text,
     course_identity,
     isolate_course_content,
     safe_rendered_html,
 )
-from hsas.infrastructure.sis_course_info.fetch_course_pages import (
+from hsas.infrastructure.sis.course_info.client import (
     LOGIN_URL,
     open_login_until_authenticated,
     restore_sis_session,
     save_sis_session,
 )
 from hsas.infrastructure.class_planner import ClassPlannerBrowserGateway
-from hsas.infrastructure.sis_course_info import SisCourseInfoBrowserGateway
-from hsas.infrastructure.storage.persist_data import write_json
+from hsas.infrastructure.sis.course_info import SisCourseInfoBrowserGateway
+from hsas.infrastructure.storage.json_store import write_json
 
 
 def test_course_identity_splits_standard_moodle_course_codes() -> None:

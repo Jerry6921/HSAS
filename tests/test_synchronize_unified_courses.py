@@ -3,8 +3,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from hsas.application.synchronize_unified_courses import UnifiedCourseSyncService
-from hsas.infrastructure.manage_browser_session import BrowserSessionBroker
+from hsas.application.unified_course_sync import UnifiedCourseSyncService
+from hsas.infrastructure.browser.session import BrowserSessionBroker
 
 
 def test_unified_sync_uses_one_session_and_runs_collectors_concurrently() -> None:
@@ -135,15 +135,15 @@ def test_browser_broker_restores_and_saves_one_shared_context(
         lifecycle.append(("save", value))
 
     monkeypatch.setattr(
-        "hsas.infrastructure.manage_browser_session.persistent_context",
+        "hsas.infrastructure.browser.session.persistent_context",
         fake_persistent_context,
     )
     monkeypatch.setattr(
-        "hsas.infrastructure.manage_browser_session.restore_sis_session",
+        "hsas.infrastructure.browser.session.restore_sis_session",
         fake_restore,
     )
     monkeypatch.setattr(
-        "hsas.infrastructure.manage_browser_session.save_sis_session",
+        "hsas.infrastructure.browser.session.save_sis_session",
         fake_save,
     )
     settings = SimpleNamespace(profile_dir=tmp_path / "browser-profile")

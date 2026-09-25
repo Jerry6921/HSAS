@@ -23,10 +23,11 @@ calendar changes require API and browser-level rendering checks.
 Pull requests run the Python suite, frontend typecheck/component tests/build,
 wheel construction, and a generated-bundle drift check in GitHub Actions.
 
-Place code under the architectural `hsas/core`, `hsas/mcp`, `hsas/ui`,
-`hsas/interfaces`, `hsas/application`, `hsas/domain`, or `hsas/infrastructure`
-hierarchy. Name ordinary Python modules
-with an action-oriented `verb_object.py` responsibility such as
-`update_information.py` or `persist_data.py`; only Python-required modules such as
-`__init__.py` and `__main__.py` are exempt. Tests retain pytest's action prefix
-and use `test_<verb_object>.py`.
+Place code under the architectural `hsas/domain`, `hsas/application`,
+`hsas/infrastructure`, `hsas/core`, `hsas/cli`, `hsas/web`, `hsas/mcp`, or
+`hsas/codegen` hierarchy. Use responsibility-oriented, lowercase snake_case module
+names such as `material_search.py`, `change_tracking.py`, `course_publisher.py`, or
+`session_store.py`. Generic action prefixes such as `define_`, `manage_`, `build_`,
+and `run_` are reserved for function names rather than module names. Group related
+adapters and services into focused subpackages instead of adding loose modules at
+the package root. Tests retain pytest's `test_*.py` naming convention.

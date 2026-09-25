@@ -1,6 +1,6 @@
 """Run the unified HIQS command-line interface."""
 
-from .interfaces.run_cli import app
+from .cli.app import app
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hsas.infrastructure.moodle.record_session import (
+from hsas.infrastructure.moodle.session_store import (
     load_moodle_session_status,
     record_moodle_session_status,
 )

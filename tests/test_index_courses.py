@@ -2,15 +2,15 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hsas.domain.courses.index_courses import (
+from hsas.domain.courses.archive_index import (
     ArchiveIndex,
     ArchiveIndexError,
     iter_activities,
     iter_files,
 )
-from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.calculate_statistics import refresh_archive_stats
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.statistics import refresh_archive_stats
 import pytest
 
 

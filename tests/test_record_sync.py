@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from hsas.infrastructure.storage.persist_data import read_json
-from hsas.infrastructure.moodle.record_sync import record_sync_operation, sync_warnings
+from hsas.infrastructure.storage.json_store import read_json
+from hsas.infrastructure.moodle.sync_store import record_sync_operation, sync_warnings
 
 
 def test_sync_report_preserves_per_course_status_across_scopes(tmp_path: Path) -> None:

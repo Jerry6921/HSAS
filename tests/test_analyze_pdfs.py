@@ -3,8 +3,8 @@ from zipfile import ZipFile
 
 from pypdf import PdfWriter
 
-from hsas.infrastructure.documents.analyze_pdfs import analyze_pdf
-from hsas.infrastructure.documents.analyze_office_documents import analyze_office_document
+from hsas.infrastructure.documents.pdf import analyze_pdf
+from hsas.infrastructure.documents.office import analyze_office_document
 
 
 def test_blank_pdf_is_marked_for_ocr(tmp_path: Path) -> None:

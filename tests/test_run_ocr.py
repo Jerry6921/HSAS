@@ -2,11 +2,11 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.define_documents import PdfAnalysis
-from hsas.infrastructure.documents.run_ocr import collect_ocr_queue, run_ocr_queue
-from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.infrastructure.storage.persist_data import write_model
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.documents import PdfAnalysis
+from hsas.infrastructure.documents.ocr import collect_ocr_queue, run_ocr_queue
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.infrastructure.storage.json_store import write_model
 
 
 def test_batch_ocr_updates_sidecar_and_archive_atomically(tmp_path: Path) -> None:

@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let process = Process()
         let pipe = Pipe()
         process.executableURL = launch.executable
-        process.arguments = ["ui", "--port", "0", "--no-open"]
+        process.arguments = launch.arguments + ["ui", "--port", "0", "--no-open"]
         process.currentDirectoryURL = launch.workingDirectory
         process.standardOutput = pipe
         process.standardError = pipe
@@ -124,10 +124,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }
     }
 
-    private func backendLaunch(resources: URL) -> (executable: URL, workingDirectory: URL?)? {
+    private func backendLaunch(
+        resources: URL
+    ) -> (executable: URL, workingDirectory: URL?, arguments: [String])? {
         let bundled = resources.appendingPathComponent("backend/hiqs-backend")
         if FileManager.default.isExecutableFile(atPath: bundled.path) {
-            return (bundled, nil)
+            return (bundled, nil, [])
         }
 
         guard let rootPath = Bundle.main.object(forInfoDictionaryKey: "HIQSProjectRoot") as? String,
@@ -136,14 +138,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             return nil
         }
         let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-        let executable = root.appendingPathComponent(".venv/bin/hsas")
+        let executable = root.appendingPathComponent(".venv/bin/python")
         let project = root.appendingPathComponent("pyproject.toml")
         guard FileManager.default.fileExists(atPath: project.path),
               FileManager.default.isExecutableFile(atPath: executable.path) else {
             showStartupError("找不到项目环境。请保留源码目录和 .venv，或重新构建 HIQS.app。")
             return nil
         }
-        return (executable, root)
+        return (executable, root, ["-m", "hsas"])
     }
 
     private func openLog() -> FileHandle? {

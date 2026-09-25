@@ -5,22 +5,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from hsas.application.manage_changes import (
+from hsas.application.change_tracking import (
     ChangeQueueError,
     acknowledge_change_batch,
     collect_pending_changes,
 )
-from hsas.application.update_information import apply_information_update
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.detect_changes import compare_course_archives
+from hsas.application.information import apply_information_update
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.change_detection import compare_course_archives
 from hsas.domain.information import InformationStore
-from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
     JsonInformationRepository,
 )
-from hsas.infrastructure.storage.persist_data import write_json, write_model
-from hsas.interfaces.run_cli import app
+from hsas.infrastructure.storage.json_store import write_json, write_model
+from hsas.cli.app import app
 
 
 ROOT = Path(__file__).parents[1]
@@ -152,7 +152,7 @@ def test_rendered_moodle_content_change_reaches_incremental_review(
     resources = tmp_path / "resources"
     first_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
     previous = _archive(resources, first_at, "a")
-    previous.sections[0].activities[0].metadata["content_text"] = (
+    previous.sections[0].activities[0].content_text = (
         "Tuesday lecture at 10:00"
     )
     write_model(resources / "courses/138907/course.json", previous)
@@ -165,7 +165,7 @@ def test_rendered_moodle_content_change_reaches_incremental_review(
 
     current = previous.model_copy(deep=True)
     current.collected_at = first_at + timedelta(hours=1)
-    current.sections[0].activities[0].metadata["content_text"] = (
+    current.sections[0].activities[0].content_text = (
         "Tuesday lecture at 11:00"
     )
     write_model(resources / "courses/138907/course.json", current)
@@ -178,7 +178,7 @@ def test_rendered_moodle_content_change_reaches_incremental_review(
 
     assert pending.courses[0].mode == "incremental"
     assert [change.field for change in pending.courses[0].changes] == [
-        "metadata.content_text"
+        "content_text"
     ]
     assert [(item.filename, item.change_action) for item in pending.courses[0].files] == [
         ("course.json", "modified")

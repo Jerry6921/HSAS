@@ -1,6 +1,6 @@
 """Application-owned contracts implemented by outer-layer adapters."""
 
-from .define_gateways import (
+from .gateways import (
     ClassPlannerGateway,
     ClassPlannerSessionResult,
     ClassPlannerSyncResult,
@@ -14,7 +14,7 @@ from .define_gateways import (
     SyncBatchResult,
     SyncCourseResult,
 )
-from .define_repositories import ChangeQueueRepository, InformationRepository
+from .repositories import ChangeQueueRepository, InformationRepository
 
 __all__ = [
     "ClassPlannerGateway",

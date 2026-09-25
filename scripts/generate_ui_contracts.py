@@ -8,8 +8,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hsas.application.retrieve_materials import MaterialSearchResult
-from hsas.domain.information.define_attention import AttentionSnapshot
+from hsas.application.material_search import MaterialSearchResult
+from hsas.domain.information.attention import AttentionSnapshot
 
 
 def ts_type(schema: dict[str, Any]) -> str:

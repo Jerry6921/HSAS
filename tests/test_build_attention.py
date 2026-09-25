@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from hsas.application.build_attention import build_attention_snapshot
+from hsas.application.attention import build_attention_snapshot
 
 
 NOW = datetime(2026, 9, 24, 4, 0, tzinfo=UTC)

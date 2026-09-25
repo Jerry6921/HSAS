@@ -5,13 +5,13 @@ from zoneinfo import ZoneInfo
 
 from typer.testing import CliRunner
 
-from hsas.application.retrieve_course_context import build_course_question_context
-from hsas.domain.courses.define_courses import StoredFile
-from hsas.domain.courses.define_documents import PdfAnalysis
+from hsas.application.course_context import build_course_question_context
+from hsas.domain.courses.models import StoredFile
+from hsas.domain.courses.documents import PdfAnalysis
 from hsas.domain.information import InformationStore
-from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.infrastructure.storage.persist_data import write_model, write_text
-from hsas.interfaces.run_cli import app
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+from hsas.infrastructure.storage.json_store import write_model, write_text
+from hsas.cli.app import app
 
 
 ROOT = Path(__file__).parents[1]

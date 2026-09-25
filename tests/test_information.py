@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from hsas.application.update_information import (
+from hsas.application.information import (
     InformationServiceError,
     apply_information_update,
     build_information_template,
 )
 from hsas.infrastructure.storage import JsonInformationRepository
-from hsas.interfaces.run_cli import app
+from hsas.cli.app import app
 
 
 REPOSITORY = JsonInformationRepository()

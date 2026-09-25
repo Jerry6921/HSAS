@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from hsas.infrastructure.fetch_sis_enrollment import (
+from hsas.infrastructure.sis.enrollment.client import (
     SisEnrollmentBrowserGateway,
     SisEnrollmentParseError,
     parse_enrollment_text,
 )
-from hsas.infrastructure.manage_sis_enrollment import (
+from hsas.infrastructure.sis.enrollment.review import (
     SisEnrollmentReviewError,
     acknowledge_sis_enrollment_changes,
     collect_sis_enrollment_changes,
@@ -190,7 +190,7 @@ def test_enrollment_sync_opens_shared_sis_login_after_short_probe(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    import hsas.infrastructure.fetch_sis_enrollment as module
+    import hsas.infrastructure.sis.enrollment.client as module
 
     headless_modes = []
     timeouts = []

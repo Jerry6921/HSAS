@@ -1,15 +1,19 @@
-from hsas.domain.courses.define_evidence import (
+import asyncio
+from pathlib import Path
+
+from hsas.domain.courses.evidence import (
     LinkedPageEvidence,
     RecursiveCollectionReport,
 )
-from hsas.domain.courses.define_courses import CourseActivity
+from hsas.domain.courses.models import CourseActivity
 from hsas.domain.information import InformationUpdate
-from hsas.infrastructure.moodle.download_files import (
+from hsas.infrastructure.moodle.activity_downloader import (
     MoodleDiscoveryService,
+    MoodleDownloadService,
     MoodleParseService,
     parse_html_evidence,
 )
-from hsas.interfaces.generate_typescript import schema_to_typescript
+from hsas.codegen.typescript import schema_to_typescript
 
 
 def test_evidence_contracts_validate_recursive_metadata() -> None:
@@ -56,8 +60,13 @@ def test_parse_stage_is_pure_and_returns_next_frontier() -> None:
 
 
 def test_collection_stages_are_independently_callable() -> None:
-    discovery = MoodleDiscoveryService()
-    parser = MoodleParseService(discovery)
+    discovery = MoodleDiscoveryService(
+        lambda _html, _page_url, _base_url: [],
+        lambda _html, _page_url, _base_url: [
+            "https://moodle.hku.hk/mod/page/view.php?id=3"
+        ],
+    )
+    parser = MoodleParseService(discovery, lambda url: url)
     result = parser.parse(
         '<a href="/mod/page/view.php?id=3">Next</a>',
         "https://moodle.hku.hk/mod/page/view.php?id=1",
@@ -68,6 +77,22 @@ def test_collection_stages_are_independently_callable() -> None:
         "https://moodle.hku.hk/mod/page/view.php?id=1",
         "https://moodle.hku.hk",
     )
+
+    calls: list[str] = []
+
+    async def fetcher(_context, url: str, **_kwargs):
+        calls.append(url)
+        return None, None
+
+    download = MoodleDownloadService(fetcher)
+    assert asyncio.run(download.fetch(
+        object(),
+        "https://moodle.hku.hk/pluginfile.php/1/a.pdf",
+        previous=None,
+        storage_root=Path("."),
+        timeout_ms=1000,
+    )) == (None, None)
+    assert calls == ["https://moodle.hku.hk/pluginfile.php/1/a.pdf"]
 
 
 def test_schema_to_typescript_is_deterministic() -> None:

@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from hsas.infrastructure.storage.persist_data import write_json, write_model
-from hsas.infrastructure.storage.publish_courses import (
+from hsas.infrastructure.storage.json_store import write_json, write_model
+from hsas.infrastructure.storage.course_publisher import (
     CourseSnapshotTransaction,
     _recover_interrupted_publish,
 )
-from hsas.infrastructure.moodle.map_courses import build_course_archive
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
 
 
 ROOT = Path(__file__).parents[1]

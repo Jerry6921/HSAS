@@ -21,6 +21,7 @@ from hsas.core.manage_reviews import SourceReviewService
 from hsas.domain.courses import ArchiveIndex, PendingChangeBatch, iter_activities, iter_files
 from hsas.domain.courses.define_change_queue import CourseReview
 from hsas.domain.information import CourseRecord, InformationStore
+from hsas.domain.information import moodle_source_course_ids
 from hsas.domain.information.generate_calendar import build_ics
 from hsas.infrastructure.class_planner import class_planner_status
 from hsas.infrastructure.documents.run_ocr import collect_ocr_queue, ocr_capabilities
@@ -278,10 +279,20 @@ class DashboardProjectionService:
             {"id": "write", "label": "校验写入", "state": "complete" if store.courses else "pending"},
             {"id": "checkpoint", "label": "Checkpoint", "state": "complete" if int(counts["ai_review"]) == 0 else "pending", "count": int(counts["ai_review"])},
         ]
-        course_lines = [
-            f"- {course.course_title} ({course.course_id})：{course.mode}，{len(course.files)} 个文件，{len(course.changes)} 项变更"
-            for course in pending.courses
-        ] or ["- 当前 Moodle 队列没有待审阅课程"]
+        course_lines = []
+        for course in pending.courses:
+            source_ids = course.related_moodle_course_ids or [course.course_id]
+            manifest_command = "hsas materials list " + " ".join(
+                f"--course {shlex.quote(value)}" for value in source_ids
+            )
+            canonical = course.information_course_id or "待建立课程记录"
+            course_lines.append(
+                f"- {course.course_title}（Moodle {course.course_id}；信息课程 {canonical}）："
+                f"{course.mode}，{len(course.files)} 个文件，{len(course.changes)} 项变更；"
+                f"关联 Moodle 资料课程 {', '.join(source_ids)}；运行 `{manifest_command}`"
+            )
+        if not course_lines:
+            course_lines = ["- 当前 Moodle 队列没有待审阅课程"]
         prompt = "\n".join(
             [
                 "请处理本机 HIQS 的新增课程资料并完成信息闭环。",
@@ -290,6 +301,7 @@ class DashboardProjectionService:
                 "先完整阅读 src/AI_Skills/SKILL.md，并严格按其中的 validate、apply 与 checkpoint 流程操作。",
                 "只整理待审阅或发生变化的来源；不要求 Moodle、SIS 与 Class Planner 同时提供同一事实。缺少来源不构成冲突，有可用证据即可写入；只有来源实际矛盾时才按优先级处理，并以 Moodle 资料为最高优先级。",
                 "同时核对每门课程的完整 Moodle 材料清单，将每份课件写入 courses[].material_sections；栏位名称由你根据课程内容与组织方式自由归纳，不使用程序预设分类。",
+                "课程若列出多个关联 Moodle 资料课程，必须把所有 ID 一并写入 additional_moodle_course_ids（主 Moodle ID 除外），并联合核对全部 manifest；遗漏仍存在的关联课程或课件会被 validate/apply 拒绝。",
                 "待处理课程：",
                 *course_lines,
                 f"另有 SIS/注册来源待整理 {max(0, int(counts['ai_review']) - pending.pending_change_count)} 项，OCR {counts['ocr']} 项，Google 授权 {counts['google_authorization']} 项。",
@@ -372,18 +384,27 @@ class DashboardProjectionService:
         entries = []
         matched_archive_ids: set[str] = set()
         for record in store.courses:
-            index = matching_archive(record, archives, matched_archive_ids)
-            if index is not None:
-                matched_archive_ids.add(index.archive.course.course_id)
-            entries.append((record.course_id, record, index))
+            indexes = [
+                archives[source_id]
+                for source_id in moodle_source_course_ids(record)
+                if source_id in archives and source_id not in matched_archive_ids
+            ]
+            if not indexes:
+                index = matching_archive(record, archives, matched_archive_ids)
+                if index is not None:
+                    indexes = [index]
+            matched_archive_ids.update(
+                index.archive.course.course_id for index in indexes
+            )
+            entries.append((record.course_id, record, indexes))
         entries.extend(
-            (course_id, None, index)
+            (course_id, None, [index])
             for course_id, index in archives.items()
             if course_id not in matched_archive_ids
         )
         result: list[dict[str, Any]] = []
-        for course_id, record, index in entries:
-            archive = index.archive if index else None
+        for course_id, record, indexes in entries:
+            archive = indexes[0].archive if indexes else None
             if record is not None:
                 value = record.model_dump(mode="json")
             else:
@@ -419,8 +440,12 @@ class DashboardProjectionService:
             ]
             value["materials"] = _course_materials(
                 self.resources_dir,
-                index,
-                pending_by_course.get(archive.course.course_id) if archive else None,
+                indexes,
+                [
+                    pending_by_course[index.archive.course.course_id]
+                    for index in indexes
+                    if index.archive.course.course_id in pending_by_course
+                ],
                 record,
                 course_id=value["course_id"],
                 course_code=value["code"],
@@ -430,10 +455,9 @@ class DashboardProjectionService:
                 "recent_lecture_materials": _recent_lecture_materials_prompt(
                     self.resources_dir,
                     course_id=value["course_id"],
-                    moodle_course_id=(
-                        archive.course.course_id
-                        if archive
-                        else value.get("moodle_course_id")
+                    moodle_course_ids=(
+                        [index.archive.course.course_id for index in indexes]
+                        or [value.get("moodle_course_id") or value["course_id"]]
                     ),
                     course_code=value["code"],
                     course_title=value["title"],
@@ -442,6 +466,9 @@ class DashboardProjectionService:
             value["moodle"] = (
                 {
                     "url": str(archive.course.url),
+                    "source_course_ids": [
+                        index.archive.course.course_id for index in indexes
+                    ],
                     "collected_at": archive.collected_at.isoformat(),
                     "activity_count": archive.stats.activity_count,
                     "downloaded_file_count": archive.stats.downloaded_file_count,
@@ -561,6 +588,8 @@ def _pending_updates(batch: PendingChangeBatch) -> dict[str, Any]:
             {
                 "course_id": review.course_id,
                 "course_title": review.course_title,
+                "information_course_id": review.information_course_id,
+                "related_moodle_course_ids": review.related_moodle_course_ids,
                 "mode": review.mode,
                 "acknowledge_through": review.acknowledge_through.isoformat(),
                 "changes": [change.model_dump(mode="json") for change in review.changes],
@@ -586,8 +615,8 @@ def _course_color(course_id: str) -> str:
 
 def _course_materials(
     resources: Path,
-    index: ArchiveIndex | None,
-    review: CourseReview | None,
+    indexes: list[ArchiveIndex],
+    reviews: list[CourseReview],
     record: CourseRecord | None,
     *,
     course_id: str,
@@ -599,13 +628,34 @@ def _course_materials(
         "unclassified": [],
         "all": [],
     }
-    if index is None:
+    if not indexes:
+        return grouped
+    if len(indexes) > 1:
+        for index in indexes:
+            nested = _course_materials(
+                resources,
+                [index],
+                [
+                    review
+                    for review in reviews
+                    if review.course_id == index.archive.course.course_id
+                ],
+                record,
+                course_id=course_id,
+                course_code=course_code,
+                course_title=course_title,
+            )
+            grouped["sections"].extend(nested["sections"])
+            grouped["unclassified"].extend(nested["unclassified"])
+            grouped["all"].extend(nested["all"])
         return grouped
     changed = {
         item.relative_path: item.change_action
-        for item in (review.files if review else [])
+        for review in reviews
+        for item in review.files
         if item.relative_path != "course.json"
     }
+    index = indexes[0]
     archive = index.archive
     section_titles = {
         activity.module_id: section.title
@@ -746,19 +796,22 @@ def _recent_lecture_materials_prompt(
     resources: Path,
     *,
     course_id: str,
-    moodle_course_id: str | None,
+    moodle_course_ids: list[str],
     course_code: str,
     course_title: str,
 ) -> str:
-    moodle_scope = moodle_course_id or course_id
+    moodle_scope = list(dict.fromkeys(moodle_course_ids or [course_id]))
+    manifest_command = "hsas materials list " + " ".join(
+        f"--course {shlex.quote(value)}" for value in moodle_scope
+    )
     return "\n".join(
         [
             "请定位本机 HIQS 项目并完整阅读 src/AI_Skills/SKILL.md。",
             f"课程：{course_code} · {course_title}",
-            f"课程记录 ID：{course_id}；Moodle 课程 ID：{moodle_scope}",
+            f"课程记录 ID：{course_id}；关联 Moodle 课程 ID：{', '.join(moodle_scope)}",
             f"资料目录：{resources}",
             "以 Asia/Hong_Kong 当前日期为准，从 information.json 的课程活动和重复日程中确定最近一次已经发生的 Lecture；若标题没有使用 Lecture 字样，请结合课程类型、时间和来源判断并说明依据。",
-            f"运行 hsas information show，并运行 hsas materials list --course {moodle_scope}。读取该 Lecture 的主题、周次、说明和来源，再检查相关课件的文本 sidecar 或原文件。",
+            f"运行 hsas information show，并运行 {manifest_command}。读取该 Lecture 的主题、周次、说明和来源，再检查相关课件的文本 sidecar 或原文件。",
             "列出与该 Lecture 最相关的课件，按相关性排序；对每项说明匹配依据、相对路径以及相关页码或 slide。不要仅根据文件名判断，也不要改写 information.json。",
             "如果无法确认最近 Lecture 或找不到可靠关联，请明确指出缺少的证据。",
         ]

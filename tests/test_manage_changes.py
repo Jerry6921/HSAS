@@ -10,11 +10,15 @@ from hsas.application.manage_changes import (
     acknowledge_change_batch,
     collect_pending_changes,
 )
+from hsas.application.update_information import apply_information_update
 from hsas.domain.courses.define_courses import StoredFile
 from hsas.domain.courses.detect_changes import compare_course_archives
 from hsas.domain.information import InformationStore
 from hsas.infrastructure.moodle.map_courses import build_course_archive
-from hsas.infrastructure.storage import JsonChangeQueueRepository
+from hsas.infrastructure.storage import (
+    JsonChangeQueueRepository,
+    JsonInformationRepository,
+)
 from hsas.infrastructure.storage.persist_data import write_json, write_model
 from hsas.interfaces.run_cli import app
 
@@ -101,6 +105,45 @@ def test_first_review_is_full_then_only_changed_files_are_pending(tmp_path: Path
     assert {item.change_action for item in pending.courses[0].files} == {
         "modified"
     }
+
+
+def test_pending_review_maps_shared_moodle_archive_to_information_course(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    _archive(resources, datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc), "a")
+    information = InformationStore.model_validate(
+        {
+            "courses": [
+                {
+                    "course_id": "MATH1851-S1",
+                    "code": "MATH1851",
+                    "title": "Calculus",
+                    "moodle_course_id": "142655",
+                    "additional_moodle_course_ids": ["138907"],
+                }
+            ],
+            "items": [
+                {
+                    "item_id": "math-test",
+                    "course_id": "MATH1851-S1",
+                    "title": "Test",
+                    "category": "exam",
+                }
+            ],
+        }
+    )
+
+    review = collect_pending_changes(
+        resources,
+        REPOSITORY,
+        information=information,
+    ).courses[0]
+
+    assert review.course_id == "138907"
+    assert review.information_course_id == "MATH1851-S1"
+    assert review.related_moodle_course_ids == ["142655", "138907"]
+    assert review.affected_information_item_ids == ["math-test"]
 
 
 def test_rendered_moodle_content_change_reaches_incremental_review(
@@ -340,7 +383,26 @@ def test_information_apply_can_acknowledge_exact_review_batch(tmp_path: Path) ->
     write_json(batch_path, batch.model_dump(mode="json"))
     write_json(
         update_path,
-        {"courses": [{"course_id": "138907", "code": "DEMO", "title": "Demo"}]},
+        {
+            "courses": [
+                {
+                    "course_id": "138907",
+                    "code": "DEMO",
+                    "title": "Demo",
+                    "material_sections": [
+                        {
+                            "title": "Current materials",
+                            "materials": [
+                                {
+                                    "title": "brief.docx",
+                                    "relative_path": "courses/138907/files/brief.docx",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
     )
 
     result = CliRunner().invoke(
@@ -360,6 +422,97 @@ def test_information_apply_can_acknowledge_exact_review_batch(tmp_path: Path) ->
     assert result.exit_code == 0
     assert "acknowledged" in result.stdout
     assert collect_pending_changes(resources, REPOSITORY).courses == []
+
+
+def test_information_apply_rejects_incomplete_live_material_manifest(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    _archive(resources, datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc), "a")
+    update_path = tmp_path / "update.json"
+    write_json(
+        update_path,
+        {"courses": [{"course_id": "138907", "code": "DEMO", "title": "Demo"}]},
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--resources",
+            str(resources),
+            "information",
+            "apply",
+            str(update_path),
+            "--confirmed",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "material coverage is incomplete" in result.output
+
+
+def test_information_apply_rejects_dropping_a_live_linked_moodle_archive(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    _archive(resources, datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc), "a")
+    information_path = resources / "information.json"
+    apply_information_update(
+        information_path,
+        {
+            "courses": [
+                {
+                    "course_id": "MATH1851",
+                    "code": "MATH1851",
+                    "title": "Calculus",
+                    "moodle_course_id": "142655",
+                    "additional_moodle_course_ids": ["138907"],
+                    "material_sections": [
+                        {
+                            "title": "Shared materials",
+                            "materials": [
+                                {
+                                    "title": "brief.docx",
+                                    "relative_path": "courses/138907/files/brief.docx",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
+    )
+    update_path = tmp_path / "drop-linked-course.json"
+    write_json(
+        update_path,
+        {
+            "courses": [
+                {
+                    "course_id": "MATH1851",
+                    "code": "MATH1851",
+                    "title": "Calculus",
+                    "moodle_course_id": "142655",
+                }
+            ]
+        },
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--resources",
+            str(resources),
+            "information",
+            "apply",
+            str(update_path),
+            "--confirmed",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "would drop linked Moodle archive(s): 138907" in result.output
 
 
 def test_no_information_change_requires_explicit_acknowledgement(tmp_path: Path) -> None:

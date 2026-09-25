@@ -10,6 +10,7 @@ from .define_information import (
     RecurrenceException,
     SourceReference,
     WeeklyRecurrence,
+    moodle_source_course_ids,
 )
 from .define_attention import (
     AttentionAction,
@@ -39,4 +40,5 @@ __all__ = [
     "RecurrenceException",
     "SourceReference",
     "WeeklyRecurrence",
+    "moodle_source_course_ids",
 ]

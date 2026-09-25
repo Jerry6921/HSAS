@@ -44,7 +44,7 @@ class BrowserSyncSession:
     planner: ClassPlannerBrowserGateway
     _moodle_catalog_ready: asyncio.Event = field(default_factory=asyncio.Event)
     _moodle_catalog_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    _available_by_code: dict[str, CourseCatalogEntry] = field(default_factory=dict)
+    _available_by_code: dict[str, list[CourseCatalogEntry]] = field(default_factory=dict)
     _moodle_catalog_error: Exception | None = None
 
     @staticmethod
@@ -96,8 +96,8 @@ class BrowserSyncSession:
                 total=len(courses),
                 detail=f"Moodle 课程资料 · {code}",
             )
-            entry = self._available_by_code.get(code)
-            if entry is None:
+            entries = self._available_by_code.get(code, [])
+            if not entries:
                 failure = {
                     "course_code": code,
                     "error": "Moodle 中未找到与当前 enrolment 对应的课程",
@@ -112,7 +112,8 @@ class BrowserSyncSession:
                     }
                 )
             else:
-                try:
+                course_failed = False
+                for entry in entries:
                     def report_activity(
                         state: str,
                         activity: object,
@@ -134,36 +135,40 @@ class BrowserSyncSession:
                             ),
                         )
 
-                    result = await self.moodle.sync_course_in_context(
-                        self.context,
-                        entry.course_id,
-                        cancel_requested=cancel_requested,
-                        progress_callback=report_activity,
-                    )
-                except Exception as exc:
-                    failure = {
-                        "course_code": code,
-                        "error": f"{type(exc).__name__}: {str(exc)[:240]}",
-                    }
-                    failures.append(failure)
-                    course_results.append(
-                        {
+                    try:
+                        result = await self.moodle.sync_course_in_context(
+                            self.context,
+                            entry.course_id,
+                            cancel_requested=cancel_requested,
+                            progress_callback=report_activity,
+                        )
+                    except Exception as exc:
+                        course_failed = True
+                        failure = {
+                            "course_code": code,
                             "course_id": entry.course_id,
-                            "course": entry.title,
-                            "succeeded": False,
-                            "error": failure["error"],
+                            "error": f"{type(exc).__name__}: {str(exc)[:240]}",
                         }
-                    )
-                else:
+                        failures.append(failure)
+                        course_results.append(
+                            {
+                                "course_id": entry.course_id,
+                                "course": entry.title,
+                                "succeeded": False,
+                                "error": failure["error"],
+                            }
+                        )
+                    else:
+                        course_results.append(
+                            {
+                                "course_id": result.course_id,
+                                "course": result.course_title,
+                                "succeeded": True,
+                                "change_count": result.change_count,
+                            }
+                        )
+                if not course_failed:
                     completed += 1
-                    course_results.append(
-                        {
-                            "course_id": result.course_id,
-                            "course": result.course_title,
-                            "succeeded": True,
-                            "change_count": result.change_count,
-                        }
-                    )
             processed += 1
             self._report(
                 progress_callback,
@@ -198,7 +203,8 @@ class BrowserSyncSession:
         await self._load_moodle_catalog()
         selected = []
         for course in courses:
-            entry = self._available_by_code.get(course["course_code"])
+            entries = self._available_by_code.get(course["course_code"], [])
+            entry = entries[0] if entries else None
             selected.append(
                 {
                     "course_code": course["course_code"],
@@ -257,7 +263,9 @@ class BrowserSyncSession:
                     for entry in catalog.available:
                         identity = course_identity(entry.title)
                         if identity is not None and entry.course_id.isdigit():
-                            self._available_by_code.setdefault(identity[0], entry)
+                            entries = self._available_by_code.setdefault(identity[0], [])
+                            if all(value.course_id != entry.course_id for value in entries):
+                                entries.append(entry)
                 except Exception as exc:
                     self._moodle_catalog_error = exc
                 finally:

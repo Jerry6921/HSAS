@@ -24,6 +24,8 @@ from hsas.application.manage_changes import (
 from hsas.application.update_information import (
     InformationServiceError,
     apply_information_update as apply_validated_information_update,
+    load_information,
+    validate_material_coverage,
     validate_information_update as validate_information_payload,
 )
 from hsas.infrastructure.documents.run_ocr import (
@@ -220,6 +222,11 @@ class HIQSCore:
         raw_update = payload.get("update", payload)
         try:
             update = validate_information_payload(raw_update)
+            current = load_information(
+                self.resources_dir / "information.json",
+                INFORMATION_REPOSITORY,
+            )
+            validate_material_coverage(self.resources_dir, current, update)
         except (ValueError, ValidationError, InformationServiceError) as exc:
             raise DashboardError(str(exc)) from exc
         return {
@@ -255,6 +262,7 @@ class HIQSCore:
                     update.model_dump(mode="json"),
                     confirmed=True,
                     repository=INFORMATION_REPOSITORY,
+                    resources_dir=self.resources_dir,
                 )
                 checkpoints = self.review_service.acknowledge_validated_batches(
                     validated_batches

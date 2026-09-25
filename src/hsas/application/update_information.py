@@ -10,11 +10,13 @@ from typing import Any, TypeVar
 from pydantic import ValidationError
 
 from hsas.application.ports.define_repositories import InformationRepository
+from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.domain.information import (
     CourseRecord,
     InformationItem,
     InformationStore,
     InformationUpdate,
+    moodle_source_course_ids,
 )
 
 
@@ -61,6 +63,7 @@ def apply_information_update(
     *,
     confirmed: bool,
     repository: InformationRepository,
+    resources_dir: Path | None = None,
 ) -> InformationApplyResult:
     if not confirmed:
         raise InformationServiceError(
@@ -68,6 +71,8 @@ def apply_information_update(
         )
     update = validate_information_update(payload)
     current = load_information(path, repository)
+    if resources_dir is not None:
+        validate_material_coverage(resources_dir, current, update)
 
     courses, created_courses, updated_courses = _upsert(
         current.courses,
@@ -101,6 +106,67 @@ def apply_information_update(
     )
 
 
+def validate_material_coverage(
+    resources_dir: Path,
+    current: InformationStore,
+    update: InformationUpdate,
+) -> None:
+    """Reject course replacements that lose a live Moodle archive or its files."""
+    current_by_id = {course.course_id: course for course in current.courses}
+    for course in update.courses:
+        source_ids = moodle_source_course_ids(course)
+        previous = current_by_id.get(course.course_id)
+        if previous is not None:
+            previous_ids = moodle_source_course_ids(previous)
+            dropped_ids = [value for value in previous_ids if value not in source_ids]
+            live_dropped = [
+                value
+                for value in dropped_ids
+                if (resources_dir / "courses" / value / "course.json").is_file()
+            ]
+            if live_dropped:
+                raise InformationServiceError(
+                    f"Course {course.course_id} would drop linked Moodle archive(s): "
+                    f"{', '.join(live_dropped)}. Preserve them in "
+                    "additional_moodle_course_ids and review their materials."
+                )
+
+        expected_paths: set[str] = set()
+        missing_archives: list[str] = []
+        for source_id in source_ids:
+            archive_path = resources_dir / "courses" / source_id / "course.json"
+            if not archive_path.is_file():
+                if source_id in course.additional_moodle_course_ids:
+                    missing_archives.append(source_id)
+                continue
+            archive = ArchiveIndex.from_json(archive_path).archive
+            expected_paths.update(
+                stored_file.relative_path
+                for _activity, stored_file in iter_files(archive)
+            )
+        if missing_archives:
+            raise InformationServiceError(
+                f"Course {course.course_id} references missing linked Moodle archive(s): "
+                f"{', '.join(missing_archives)}. Synchronize them before applying."
+            )
+
+        reviewed_paths = {
+            material.relative_path
+            for section in course.material_sections
+            for material in section.materials
+            if material.relative_path
+        }
+        missing_paths = sorted(expected_paths - reviewed_paths)
+        if missing_paths:
+            preview = ", ".join(missing_paths[:3])
+            suffix = "" if len(missing_paths) <= 3 else f" and {len(missing_paths) - 3} more"
+            raise InformationServiceError(
+                f"Course {course.course_id} material coverage is incomplete: "
+                f"{len(missing_paths)} current Moodle file(s) are missing from "
+                f"material_sections ({preview}{suffix})."
+            )
+
+
 def build_information_template() -> InformationUpdate:
     """Return a schema-valid example that an AI can copy and replace."""
     return InformationUpdate.model_validate(
@@ -114,6 +180,7 @@ def build_information_template() -> InformationUpdate:
                     "code": "MATH1851",
                     "title": "Calculus and ordinary differential equations",
                     "moodle_course_id": None,
+                    "additional_moodle_course_ids": [],
                     "semester": "2026-27 Semester 1",
                     "starts_on": "2026-09-01",
                     "ends_on": "2026-11-30",

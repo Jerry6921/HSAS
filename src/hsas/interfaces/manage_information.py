@@ -13,6 +13,7 @@ from hsas.application.update_information import (
     apply_information_update,
     build_information_template,
     load_information,
+    validate_material_coverage,
     validate_information_update,
 )
 from hsas.application.manage_changes import (
@@ -69,6 +70,7 @@ def information_show(
 
 @information_app.command("validate")
 def information_validate(
+    ctx: typer.Context,
     update_path: Annotated[
         Path,
         typer.Argument(help="AI-authored information update JSON"),
@@ -77,6 +79,9 @@ def information_validate(
     """Validate an update without changing the local database."""
     try:
         update = validate_information_update(read_json(update_path))
+        resources = _resources(ctx)
+        current = load_information(resources / "information.json", INFORMATION_REPOSITORY)
+        validate_material_coverage(resources, current, update)
     except (OSError, ValueError, InformationServiceError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(
@@ -187,6 +192,7 @@ def information_apply(
             payload,
             confirmed=confirmed,
             repository=INFORMATION_REPOSITORY,
+            resources_dir=resources,
         )
     except (
         OSError,

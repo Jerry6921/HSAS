@@ -18,7 +18,11 @@ from hsas.domain.courses.define_change_queue import (
     ReviewFile,
 )
 from hsas.domain.courses.detect_changes import CourseChange, CourseChangeSet
-from hsas.domain.information import InformationStore
+from hsas.domain.information import (
+    CourseRecord,
+    InformationStore,
+    moodle_source_course_ids,
+)
 
 
 CHECKPOINT_PATH = Path("ai-state/change-checkpoint.json")
@@ -45,17 +49,28 @@ def collect_pending_changes(
         if course_ids and course_id not in course_ids:
             continue
         processed = checkpoint.courses.get(course_id)
+        information_course = _information_course_for_moodle(information, course_id)
+        information_course_id = (
+            information_course.course_id if information_course is not None else None
+        )
+        related_moodle_course_ids = (
+            moodle_source_course_ids(information_course)
+            if information_course is not None
+            else [course_id]
+        )
         if processed is None:
             reviews.append(
                 CourseReview(
                     course_id=course_id,
                     course_title=archive.course.title,
+                    information_course_id=information_course_id,
+                    related_moodle_course_ids=related_moodle_course_ids,
                     mode="full",
                     acknowledge_through=archive.collected_at,
                     files=_full_review_files(resources, index),
                     affected_information_item_ids=_all_course_items(
                         information,
-                        course_id,
+                        information_course_id or course_id,
                     ),
                 )
             )
@@ -82,6 +97,8 @@ def collect_pending_changes(
             CourseReview(
                 course_id=course_id,
                 course_title=archive.course.title,
+                information_course_id=information_course_id,
+                related_moodle_course_ids=related_moodle_course_ids,
                 mode="incremental",
                 acknowledge_through=archive.collected_at,
                 changes=changes,
@@ -90,6 +107,22 @@ def collect_pending_changes(
             )
         )
     return PendingChangeBatch(resources_dir=str(resources), courses=reviews)
+
+
+def _information_course_for_moodle(
+    information: InformationStore | None,
+    moodle_course_id: str,
+) -> CourseRecord | None:
+    if information is None:
+        return None
+    return next(
+        (
+            course
+            for course in information.courses
+            if moodle_course_id in moodle_source_course_ids(course)
+        ),
+        None,
+    )
 
 
 def validate_change_batch(

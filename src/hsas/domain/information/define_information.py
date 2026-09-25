@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time
+import re
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -112,6 +113,13 @@ class CourseRecord(StrictModel):
         default=None,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
+    additional_moodle_course_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional shared or meta-course Moodle archives whose materials "
+            "belong to this information course"
+        ),
+    )
     semester: str | None = None
     starts_on: date | None = Field(
         default=None,
@@ -154,6 +162,20 @@ class CourseRecord(StrictModel):
         section_titles = [section.title.strip().casefold() for section in self.material_sections]
         if len(section_titles) != len(set(section_titles)):
             raise ValueError("material section titles must be unique within a course")
+        primary_moodle_id = self.moodle_course_id or self.course_id
+        if len(self.additional_moodle_course_ids) != len(
+            set(self.additional_moodle_course_ids)
+        ):
+            raise ValueError("additional Moodle course IDs must be unique")
+        if primary_moodle_id in self.additional_moodle_course_ids:
+            raise ValueError(
+                "additional Moodle course IDs must not repeat the primary Moodle course ID"
+            )
+        if any(
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value) is None
+            for value in self.additional_moodle_course_ids
+        ):
+            raise ValueError("additional Moodle course IDs contain an invalid ID")
         seen_materials: set[str] = set()
         for section in self.material_sections:
             for material in section.materials:
@@ -168,6 +190,26 @@ class CourseRecord(StrictModel):
                     )
                 seen_materials.add(identity)
         return self
+
+
+def moodle_source_course_ids(course: CourseRecord) -> list[str]:
+    """Return every local Moodle archive that supplies one information course.
+
+    Explicit aliases are canonical. Legacy records are also upgraded safely in
+    memory by recognizing their existing course source and material paths.
+    """
+    values = [course.moodle_course_id or course.course_id]
+    values.extend(course.additional_moodle_course_ids)
+    for source in course.sources:
+        match = re.match(r"^courses/([^/]+)/course[.]json$", source.relative_path or "")
+        if match:
+            values.append(match.group(1))
+    for section in course.material_sections:
+        for material in section.materials:
+            match = re.match(r"^courses/([^/]+)/", material.relative_path or "")
+            if match:
+                values.append(match.group(1))
+    return list(dict.fromkeys(values))
 
 
 class RecurrenceException(StrictModel):

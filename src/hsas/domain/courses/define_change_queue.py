@@ -37,6 +37,8 @@ class ChangeReference(StrictModel):
 class CourseReview(StrictModel):
     course_id: str
     course_title: str
+    information_course_id: str | None = None
+    related_moodle_course_ids: list[str] = Field(default_factory=list)
     mode: Literal["full", "incremental"]
     acknowledge_through: AwareDatetime
     changes: list[ChangeReference] = Field(default_factory=list)

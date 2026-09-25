@@ -7,10 +7,11 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import re
+from typing import Any, Literal
 
 from pydantic import Field
 
-from hsas.domain.courses import ArchiveIndex, StrictModel, iter_files
+from hsas.domain.courses import ArchiveIndex, StrictModel, iter_activities, iter_files
 
 
 UNIT_MARKER = re.compile(
@@ -26,6 +27,7 @@ class MaterialHit(StrictModel):
     course_title: str
     activity_id: str
     activity_name: str
+    source_kind: Literal["file", "moodle_activity"] = "file"
     filename: str
     relative_text_path: str
     page_start: int | None = None
@@ -35,6 +37,7 @@ class MaterialHit(StrictModel):
     source_unit_end: int | None = None
     chunk_index: int = Field(ge=0)
     text: str
+    content_tables: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MaterialSearchResult(StrictModel):
@@ -54,11 +57,29 @@ def list_materials(
     """Return a machine-readable manifest of locally downloaded materials."""
     selected = set(course_ids or [])
     documents: list[dict[str, object]] = []
+    page_content: list[dict[str, object]] = []
     for archive_path in sorted((resources_dir / "courses").glob("*/course.json")):
         index = ArchiveIndex.from_json(archive_path)
         course_id = index.archive.course.course_id
         if selected and course_id not in selected:
             continue
+        course_relative_path = archive_path.relative_to(resources_dir).as_posix()
+        for activity in iter_activities(index.archive):
+            content_text = activity.metadata.get("content_text")
+            if not isinstance(content_text, str) or not content_text.strip():
+                continue
+            page_content.append(
+                {
+                    "course_id": course_id,
+                    "course_title": index.archive.course.title,
+                    "activity_id": activity.module_id,
+                    "activity_name": activity.name,
+                    "module": activity.module,
+                    "relative_path": course_relative_path,
+                    "content_text": content_text,
+                    "content_tables": activity.metadata.get("content_tables", []),
+                }
+            )
         for activity, stored_file in iter_files(index.archive):
             analysis = stored_file.analysis
             documents.append(
@@ -89,6 +110,8 @@ def list_materials(
         "resources_dir": str(resources_dir.resolve()),
         "document_count": len(documents),
         "documents": documents,
+        "page_content_count": len(page_content),
+        "page_content": page_content,
     }
 
 
@@ -98,6 +121,7 @@ class _Chunk:
     course_title: str
     activity_id: str
     activity_name: str
+    source_kind: Literal["file", "moodle_activity"]
     filename: str
     relative_text_path: str
     page_start: int | None
@@ -108,6 +132,7 @@ class _Chunk:
     chunk_index: int
     text: str
     tokens: tuple[str, ...]
+    content_tables: list[dict[str, Any]]
 
 
 def search_materials(
@@ -134,6 +159,26 @@ def search_materials(
         course_id = index.archive.course.course_id
         if course_ids and course_id not in course_ids:
             continue
+        course_relative_path = archive_path.relative_to(resources_dir).as_posix()
+        for activity in iter_activities(index.archive):
+            content_text, content_tables = _activity_evidence(activity.metadata)
+            if not content_text:
+                continue
+            document_count += 1
+            chunks.extend(
+                _chunk_document(
+                    content_text,
+                    course_id=course_id,
+                    course_title=index.archive.course.title,
+                    activity_id=activity.module_id,
+                    activity_name=activity.name,
+                    filename=f"Moodle activity · {activity.name}",
+                    relative_text_path=course_relative_path,
+                    default_unit_label="Moodle activity",
+                    source_kind="moodle_activity",
+                    content_tables=content_tables,
+                )
+            )
         for activity, stored_file in iter_files(index.archive):
             analysis = stored_file.analysis
             if analysis is None or not analysis.extracted_text_path:
@@ -165,6 +210,7 @@ def search_materials(
             course_title=chunk.course_title,
             activity_id=chunk.activity_id,
             activity_name=chunk.activity_name,
+            source_kind=chunk.source_kind,
             filename=chunk.filename,
             relative_text_path=chunk.relative_text_path,
             page_start=chunk.page_start,
@@ -174,6 +220,7 @@ def search_materials(
             source_unit_end=chunk.source_unit_end,
             chunk_index=chunk.chunk_index,
             text=chunk.text,
+            content_tables=chunk.content_tables,
         )
         for score, chunk in scored[:limit]
     ]
@@ -198,12 +245,16 @@ def _chunk_document(
     relative_text_path: str,
     words_per_chunk: int = 260,
     overlap_words: int = 40,
+    default_unit_label: str | None = None,
+    source_kind: Literal["file", "moodle_activity"] = "file",
+    content_tables: list[dict[str, Any]] | None = None,
 ) -> list[_Chunk]:
     units = _split_units(text)
     chunks: list[_Chunk] = []
     chunk_index = 0
     step = max(words_per_chunk - overlap_words, 1)
     for unit_label, unit_number, unit_text in units:
+        effective_unit_label = unit_label or default_unit_label
         words = unit_text.split()
         for start in range(0, len(words), step):
             selected = words[start : start + words_per_chunk]
@@ -225,22 +276,58 @@ def _chunk_document(
                     course_title=course_title,
                     activity_id=activity_id,
                     activity_name=activity_name,
+                    source_kind=source_kind,
                     filename=filename,
                     relative_text_path=relative_text_path,
                     page_start=unit_number if unit_label == "Page" else None,
                     page_end=unit_number if unit_label == "Page" else None,
-                    source_unit_label=unit_label,
+                    source_unit_label=effective_unit_label,
                     source_unit_start=unit_number,
                     source_unit_end=unit_number,
                     chunk_index=chunk_index,
                     text=content,
                     tokens=tokens,
+                    content_tables=content_tables or [],
                 )
             )
             chunk_index += 1
             if start + words_per_chunk >= len(words):
                 break
     return chunks
+
+
+def _activity_evidence(
+    metadata: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]]]:
+    content_text = metadata.get("content_text")
+    text = content_text.strip() if isinstance(content_text, str) else ""
+    raw_tables = metadata.get("content_tables")
+    tables = (
+        [table for table in raw_tables if isinstance(table, dict)]
+        if isinstance(raw_tables, list)
+        else []
+    )
+    table_lines = []
+    for table in tables:
+        caption = table.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            table_lines.append(caption.strip())
+        rows = table.get("rows")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            cells = row.get("cells") if isinstance(row, dict) else None
+            if not isinstance(cells, list):
+                continue
+            values = [
+                str(cell.get("text") or "").strip()
+                for cell in cells
+                if isinstance(cell, dict)
+            ]
+            if any(values):
+                table_lines.append(" | ".join(values))
+    table_text = "\n".join(table_lines)
+    return "\n".join(value for value in (text, table_text) if value), tables
 
 
 def _split_units(text: str) -> list[tuple[str | None, int | None, str]]:

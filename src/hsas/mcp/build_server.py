@@ -32,6 +32,11 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         return port.status_snapshot()
 
     @server.tool()
+    def get_attention(horizon_days: int = 14) -> dict[str, Any]:
+        """Return ranked attention signals with evidence and allowed actions."""
+        return port.attention_snapshot(horizon_days)
+
+    @server.tool()
     def get_information_update_schema() -> dict[str, Any]:
         """Return the exact JSON schema accepted for validated information writes."""
         return port.information_update_schema()

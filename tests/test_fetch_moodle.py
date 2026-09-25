@@ -45,14 +45,28 @@ def test_enrich_course_state_retains_full_rendered_label_text() -> None:
     <li id="module-42">
       <div>Assessment and Weighting</div>
       <div>Final Exam -- 60%</div>
+      <table>
+        <caption>Timetable</caption>
+        <tr><th scope="col"></th><th scope="col">Monday</th><th scope="col">Tuesday</th></tr>
+        <tr><th scope="row">9:00-9:50</th><td></td><td rowspan="2">Tutorial (MB167)</td></tr>
+      </table>
     </li>
     """
 
     enriched = enrich_course_state_from_html(state, html)
 
-    assert enriched["cm"][0]["content_text"] == (
-        "Assessment and Weighting\nFinal Exam -- 60%"
-    )
+    assert "Assessment and Weighting\nFinal Exam -- 60%" in enriched["cm"][0][
+        "content_text"
+    ]
+    table = enriched["cm"][0]["content_tables"][0]
+    assert table["caption"] == "Timetable"
+    assert [cell["text"] for cell in table["rows"][0]["cells"]] == [
+        "",
+        "Monday",
+        "Tuesday",
+    ]
+    assert table["rows"][1]["cells"][1]["text"] == ""
+    assert table["rows"][1]["cells"][2]["rowspan"] == 2
 
 
 def test_parse_discovered_courses_deduplicates_dashboard_links() -> None:

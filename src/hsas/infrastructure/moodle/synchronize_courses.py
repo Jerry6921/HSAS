@@ -150,6 +150,9 @@ async def _persist_course(
                 max_download_bytes=settings.max_download_bytes,
                 timeout_ms=settings.navigation_timeout_ms,
                 concurrency=settings.download_concurrency,
+                max_link_depth=settings.max_link_depth,
+                max_linked_pages=settings.max_linked_pages,
+                max_linked_files=settings.max_linked_files,
                 previous_archive=previous_archive,
                 progress_callback=(
                     progress.download_callback(progress_task)

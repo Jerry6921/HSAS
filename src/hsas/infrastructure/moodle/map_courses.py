@@ -61,6 +61,7 @@ def map_activity(raw: dict[str, Any]) -> CourseActivity:
             "timeclose",
             "scheduled_at",
             "content_text",
+            "content_tables",
         }
     }
     return CourseActivity(

@@ -11,9 +11,23 @@ from .define_information import (
     SourceReference,
     WeeklyRecurrence,
 )
+from .define_attention import (
+    AttentionAction,
+    AttentionEvidence,
+    AttentionItem,
+    AttentionReason,
+    AttentionSeverity,
+    AttentionSnapshot,
+)
 from .define_inbox import PersonalInbox, PersonalInboxEntry
 
 __all__ = [
+    "AttentionAction",
+    "AttentionEvidence",
+    "AttentionItem",
+    "AttentionReason",
+    "AttentionSeverity",
+    "AttentionSnapshot",
     "CourseRecord",
     "CourseMaterialSection",
     "InformationItem",

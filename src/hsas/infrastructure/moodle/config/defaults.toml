@@ -6,3 +6,6 @@ headless = true
 navigation_timeout_ms = 30000
 max_download_bytes = 104857600
 download_concurrency = 3
+max_link_depth = 6
+max_linked_pages = 100
+max_linked_files = 200

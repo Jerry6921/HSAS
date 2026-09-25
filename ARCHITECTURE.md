@@ -86,6 +86,14 @@ Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`Person
 兼容入口。旧 `interfaces` 包保留 CLI 与兼容 import；CLI 的通用查询入口通过 CORE，仍需
 终端交互回调的 collector 命令保留专用适配器。新增 AI 和用户入口必须分别放入 `mcp` 与 `ui`。
 
+“需要确认”使用同一条只读链路：Dashboard read model 进入 application 层的确定性 attention
+用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
+`InformationQueryPort.attention_snapshot()` 同时暴露给 MCP 和 UI。当前时间由 CORE 注入，
+以便测试固定 14 天窗口；前端不重新判断风险。`GET /api/attention` 独立于首页主数据请求，
+因此摘要失败不会阻断日历和资料。暂时忽略只写浏览器偏好，指纹变化后自动重新出现，绝不
+修改 `information.json`。来源未覆盖不会产生冲突；只有既有 warning 明确记录的矛盾才生成
+`SOURCE_CONFLICT`。
+
 ## Moodle Collector
 
 一次同步在 staging 目录内完成，成功后才替换上一份课程快照：
@@ -103,6 +111,14 @@ flowchart LR
 
 下载器接受 Moodle `pluginfile.php` 附件及各类文件响应，并通过响应类型与来源规则确认
 文件。文件受最大大小、超时和并发配置约束。原始字节仅写入本地存储。
+
+对 URL、Page、Label 和其他 HTML 活动，下载器会从活动页开始做有界递归采集：跟随同源
+Moodle 内容页、`pluginfile.php` 及文档链接，并解析中间 HTML 页的正文作为 Agent 证据。
+默认最多 6 层、100 个中间页面和 200 个文件（可由 `MOODLE_MAX_LINK_DEPTH`、
+`MOODLE_MAX_LINKED_PAGES`、`MOODLE_MAX_LINKED_FILES` 或 TOML 配置覆盖）。同一 URL 只
+访问一次，Moodle 导航页、外部普通链接和超出预算的分支不会继续爬取；若触及上限，活动
+会标记 `metadata.recursive_collection_truncated` 并保留实际限制，避免 Agent 把不完整
+结果误认为完整清单。
 
 Google Workspace 链接是受控例外：`docs.google.com/document`、`presentation` 和
 `spreadsheets` 链接分别尝试导出 DOCX、PPTX、XLSX。若导出返回登录页或权限页，活动
@@ -124,6 +140,11 @@ Google Workspace 链接是受控例外：`docs.google.com/document`、`presentat
 - PDF 使用 `--- Page N ---`；
 - PPTX 使用 `--- Slide N ---` 并附 speaker notes；
 - DOCX 包含正文及可见的页眉、页脚、脚注、尾注和批注文本。
+
+Moodle 页面自身的 Text and media area、活动说明等可见正文保存在对应 activity 的
+`metadata.content_text`。HTML 表格不保存为可执行页面，而是转换为
+`metadata.content_tables` 的 caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。
+这些页面证据与文件 sidecar 一同进入本地检索；正文或表格变化也会生成增量审阅记录。
 
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
@@ -224,7 +245,7 @@ Inbox 条目标为 applied。
 ## Dashboard
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
-store。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
+store，并通过独立的 `GET /api/attention` 获取只读的“需要确认”摘要。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
 SIS Course Information 与 Class Planner；单一进度条显示阶段、当前课程和完成数量。同时
 集中本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异。日历作为
 独立侧栏页面。React 岛使用 shadcn/ui 风格的本地组件、FullCalendar 和 Motion 呈现月、周、日

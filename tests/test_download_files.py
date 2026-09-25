@@ -5,6 +5,7 @@ from pathlib import Path
 
 from hsas.infrastructure.moodle.download_files import (
     _file_candidates,
+    _page_candidates,
     _google_workspace_export_url,
     _is_storable,
     _save_response,
@@ -56,6 +57,49 @@ class FakeRequest:
 class FakeContext:
     def __init__(self) -> None:
         self.request = FakeRequest()
+
+
+class RecursiveResponse:
+    def __init__(self, url: str, body: bytes, content_type: str) -> None:
+        self.url = url
+        self.status = 200
+        self.ok = True
+        self.headers = {"content-type": content_type, "content-length": str(len(body))}
+        self._body = body
+
+    async def text(self) -> str:
+        return self._body.decode("utf-8")
+
+    async def body(self) -> bytes:
+        return self._body
+
+    async def dispose(self) -> None:
+        return None
+
+
+class RecursiveRequest:
+    async def get(self, url: str, **_kwargs):
+        pages = {
+            "https://moodle.example.edu/mod/url/view.php?id=7&redirect=1": (
+                '<a href="/mod/url/view.php?id=8">details</a>', "text/html"
+            ),
+            "https://moodle.example.edu/mod/url/view.php?id=8": (
+                '<a href="/mod/resource/view.php?id=9">resource</a>', "text/html"
+            ),
+            "https://moodle.example.edu/mod/resource/view.php?id=9": (
+                '<a href="/pluginfile.php/1/tutorial.pdf">file</a>', "text/html"
+            ),
+            "https://moodle.example.edu/pluginfile.php/1/tutorial.pdf": (
+                "%PDF-1.7 tutorial", "application/pdf"
+            ),
+        }
+        body, content_type = pages[url]
+        return RecursiveResponse(url, body.encode() if isinstance(body, str) else body, content_type)
+
+
+class RecursiveContext:
+    def __init__(self) -> None:
+        self.request = RecursiveRequest()
 
 
 def test_incremental_download_reuses_unchanged_file_and_path(tmp_path: Path) -> None:
@@ -174,7 +218,7 @@ def test_conditional_get_reuses_local_file_on_http_304(tmp_path: Path) -> None:
         previous_activity=old_activity,
     ))
 
-    assert activity.download_status == "downloaded"
+    assert activity.download_status == "downloaded", activity.download_error
     assert activity.files[0].relative_path == previous.relative_path
     assert activity.files[0].validated_at is not None
     _, kwargs = context.request.calls[0]
@@ -198,3 +242,50 @@ def test_generic_moodle_files_and_google_workspace_exports_are_supported() -> No
         "https://moodle.example.edu/mod/url/view.php?id=7",
         "https://moodle.example.edu",
     ) == ["https://docs.google.com/document/d/doc_123/export?format=docx"]
+
+
+def test_recursive_page_candidates_follow_content_but_not_moodle_navigation() -> None:
+    html = """
+    <a href="/mod/url/view.php?id=8">Tutorial details</a>
+    <a href="/course/view.php?id=123">Course home</a>
+    <a href="/my/">Dashboard</a>
+    <a href="https://external.example/file.pdf">External PDF</a>
+    <a href="/pluginfile.php/1/handout.pdf">Handout</a>
+    """
+
+    assert _page_candidates(
+        html,
+        "https://moodle.example.edu/mod/url/view.php?id=7",
+        "https://moodle.example.edu",
+    ) == ["https://moodle.example.edu/mod/url/view.php?id=8"]
+
+
+def test_download_activity_recursively_collects_files_through_html_pages(tmp_path: Path) -> None:
+    activity = CourseActivity(
+        module_id="7",
+        name="Tutorial Information",
+        category="url",
+        module="url",
+        url="https://moodle.example.edu/mod/url/view.php?id=7",
+        download_status="pending",
+    )
+
+    destination = tmp_path / "files"
+    destination.mkdir()
+    asyncio.run(download_activity_files(
+        RecursiveContext(),
+        activity,
+        base_url="https://moodle.example.edu",
+        destination_dir=destination,
+        storage_root=tmp_path,
+        max_download_bytes=1024 * 1024,
+        timeout_ms=1000,
+        max_link_depth=6,
+    ))
+
+    assert activity.download_status == "downloaded", activity.download_error
+    assert [str(file.source_url) for file in activity.files] == [
+        "https://moodle.example.edu/pluginfile.php/1/tutorial.pdf"
+    ]
+    assert len(activity.metadata["linked_pages"]) == 3
+    assert "Linked page depth=2" in activity.metadata["content_text"]

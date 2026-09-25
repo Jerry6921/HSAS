@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from hsas.application.retrieve_materials import search_materials
+from hsas.application.retrieve_materials import list_materials, search_materials
 from hsas.domain.courses.define_courses import StoredFile
 from hsas.domain.courses.define_documents import PdfAnalysis
 from hsas.infrastructure.moodle.map_courses import build_course_archive
@@ -105,3 +105,51 @@ def test_local_search_returns_slide_provenance(tmp_path: Path) -> None:
     assert result.hits[0].source_unit_label == "Speaker notes"
     assert result.hits[0].source_unit_start == 1
     assert result.hits[0].page_start is None
+
+
+def test_local_search_indexes_rendered_moodle_activity_text(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state,
+        course_title="Calculus Demo",
+        raw_state_path="courses/138907/raw/course-state.json",
+    )
+    activity = archive.sections[0].activities[0]
+    activity.name = "Timetable"
+    activity.module = "label"
+    activity.metadata["content_text"] = (
+        "Timetable Tuesday 9:00-9:50 Tutorial MB167 Friday 10:00 Lecture A CYCC501"
+    )
+    activity.metadata["content_tables"] = [
+        {
+            "caption": "Timetable",
+            "rows": [
+                {
+                    "cells": [
+                        {"text": "9:00-9:50"},
+                        {"text": ""},
+                        {"text": "Tutorial (MB167)"},
+                    ]
+                }
+            ],
+        }
+    ]
+    write_model(resources / "courses/138907/course.json", archive)
+
+    result = search_materials(
+        resources,
+        "Tuesday tutorial MB167",
+        course_ids={"138907"},
+    )
+    manifest = list_materials(resources, course_ids={"138907"})
+
+    assert result.indexed_document_count == 1
+    assert result.hits[0].activity_id == activity.module_id
+    assert result.hits[0].source_kind == "moodle_activity"
+    assert result.hits[0].filename == "Moodle activity · Timetable"
+    assert result.hits[0].relative_text_path == "courses/138907/course.json"
+    assert result.hits[0].source_unit_label == "Moodle activity"
+    assert result.hits[0].content_tables[0]["caption"] == "Timetable"
+    assert manifest["page_content_count"] == 1
+    assert manifest["page_content"][0]["content_tables"][0]["caption"] == "Timetable"

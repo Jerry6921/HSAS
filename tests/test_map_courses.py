@@ -11,6 +11,10 @@ ROOT = Path(__file__).parents[1]
 def test_build_course_archive_preserves_structure_and_types() -> None:
     state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
     state["cm"][2]["duedate"] = 1794733200
+    state["cm"][2]["content_text"] = "Tuesday tutorial at 9:00"
+    state["cm"][2]["content_tables"] = [
+        {"caption": "Timetable", "rows": [{"cells": [{"text": "9:00"}]}]}
+    ]
     archive = build_course_archive(
         state,
         course_title="Demo Course",
@@ -24,6 +28,12 @@ def test_build_course_archive_preserves_structure_and_types() -> None:
     assert archive.sections[0].activities[1].download_status == "pending"
     assert archive.sections[1].activities[0].category == "assignment"
     assert archive.sections[1].activities[0].metadata["duedate"] == 1794733200
+    assert archive.sections[1].activities[0].metadata["content_text"] == (
+        "Tuesday tutorial at 9:00"
+    )
+    assert archive.sections[1].activities[0].metadata["content_tables"][0][
+        "caption"
+    ] == "Timetable"
     assert archive.stats.activity_types == {"assign": 1, "forum": 1, "resource": 1}
 
 

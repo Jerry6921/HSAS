@@ -124,7 +124,7 @@ body.hiqs-modern-home-ready #home-view > :not(#modern-home-root) { display: none
 .hiqs-home-stages strong { font-size: .78rem; }
 .hiqs-home-stages small { color: var(--hiqs-muted); font-size: .67rem; }
 .hiqs-home-retry { display: flex; align-items: center; gap: .4rem; margin: .85rem 0 0; color: #9a6531; font-size: .72rem; }
-.hiqs-home-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .65rem; margin-top: 1rem; }
+.hiqs-home-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin-top: 1rem; }
 .hiqs-home-metrics article, .hiqs-home-counts article { display: grid; gap: .2rem; min-width: 0; padding: 1rem; border: 1px solid var(--hiqs-line); background: var(--hiqs-paper); }
 .hiqs-home-metrics span, .hiqs-home-counts span { color: var(--hiqs-muted); font-size: .72rem; }
 .hiqs-home-metrics strong { color: var(--hiqs-rust-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 2rem; }

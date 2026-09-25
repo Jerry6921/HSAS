@@ -55,6 +55,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, value)
             return
+        if path == "/api/attention":
+            query = parse_qs(urlparse(self.path).query)
+            try:
+                horizon_days = int(query.get("horizon_days", ["14"])[0])
+                value = self.server.dashboard_service.attention_snapshot(horizon_days)
+            except (DashboardError, ValueError) as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self._send_json(HTTPStatus.OK, value)
+            return
         if path == "/api/update/status":
             self._send_json(
                 HTTPStatus.OK,
@@ -140,6 +150,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "/api/sis-course-info/sync",
             "/api/ocr/run",
             "/api/inbox/apply",
+            "/api/attention/draft",
             "/api/courses/add",
             "/api/courses/delete",
             "/api/courses/delete-many",
@@ -183,6 +194,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 result = self.server.dashboard_service.delete_calendar_event(payload)
             elif path == "/api/update/apply":
                 result = self.server.dashboard_service.apply_application_update(payload)
+            elif path == "/api/attention/draft":
+                result = self.server.dashboard_service.add_attention_draft(payload)
             else:
                 result = self.server.dashboard_service.apply_personal_inbox(payload)
         except DashboardError as exc:

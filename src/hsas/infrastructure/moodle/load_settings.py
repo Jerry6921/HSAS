@@ -26,6 +26,9 @@ ENV_FIELDS = {
     "MOODLE_NAVIGATION_TIMEOUT_MS": "navigation_timeout_ms",
     "MOODLE_MAX_DOWNLOAD_BYTES": "max_download_bytes",
     "MOODLE_DOWNLOAD_CONCURRENCY": "download_concurrency",
+    "MOODLE_MAX_LINK_DEPTH": "max_link_depth",
+    "MOODLE_MAX_LINKED_PAGES": "max_linked_pages",
+    "MOODLE_MAX_LINKED_FILES": "max_linked_files",
 }
 
 
@@ -57,6 +60,9 @@ class Settings(BaseModel):
     navigation_timeout_ms: int = Field(default=30_000, ge=1_000)
     max_download_bytes: int = Field(default=104_857_600, ge=1_024)
     download_concurrency: int = Field(default=3, ge=1, le=8)
+    max_link_depth: int = Field(default=6, ge=0, le=12)
+    max_linked_pages: int = Field(default=100, ge=1, le=500)
+    max_linked_files: int = Field(default=200, ge=1, le=1_000)
 
     @classmethod
     def load(cls, **overrides) -> "Settings":

@@ -61,6 +61,7 @@ ACTIVITY_DATE_KEYS = (
     "timeclose",
     "scheduled_at",
 )
+ACTIVITY_CONTENT_KEYS = ("content_text", "content_tables")
 
 
 def compare_course_archives(
@@ -150,6 +151,22 @@ def _compare_activities(
                 changes.append(
                     CourseChange(
                         kind="deadline",
+                        action="modified",
+                        entity_id=activity_id,
+                        title=after.name,
+                        field=f"metadata.{key}",
+                        before=old_value,
+                        after=new_value,
+                        source_url=str(after.url) if after.url else None,
+                    )
+                )
+        for key in ACTIVITY_CONTENT_KEYS:
+            old_value = _json_value(before.metadata.get(key))
+            new_value = _json_value(after.metadata.get(key))
+            if old_value != new_value:
+                changes.append(
+                    CourseChange(
+                        kind="activity",
                         action="modified",
                         entity_id=activity_id,
                         title=after.name,

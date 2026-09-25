@@ -103,6 +103,45 @@ def test_first_review_is_full_then_only_changed_files_are_pending(tmp_path: Path
     }
 
 
+def test_rendered_moodle_content_change_reaches_incremental_review(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    first_at = datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc)
+    previous = _archive(resources, first_at, "a")
+    previous.sections[0].activities[0].metadata["content_text"] = (
+        "Tuesday lecture at 10:00"
+    )
+    write_model(resources / "courses/138907/course.json", previous)
+    acknowledge_change_batch(
+        resources,
+        collect_pending_changes(resources, REPOSITORY),
+        REPOSITORY,
+        confirmed=True,
+    )
+
+    current = previous.model_copy(deep=True)
+    current.collected_at = first_at + timedelta(hours=1)
+    current.sections[0].activities[0].metadata["content_text"] = (
+        "Tuesday lecture at 11:00"
+    )
+    write_model(resources / "courses/138907/course.json", current)
+    write_model(
+        resources / "courses/138907/changes/history/content.json",
+        compare_course_archives(previous, current),
+    )
+
+    pending = collect_pending_changes(resources, REPOSITORY)
+
+    assert pending.courses[0].mode == "incremental"
+    assert [change.field for change in pending.courses[0].changes] == [
+        "metadata.content_text"
+    ]
+    assert [(item.filename, item.change_action) for item in pending.courses[0].files] == [
+        ("course.json", "modified")
+    ]
+
+
 def test_pending_review_hides_transient_remove_restore_of_identical_material(
     tmp_path: Path,
 ) -> None:

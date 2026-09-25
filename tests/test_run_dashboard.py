@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import time
+from threading import Thread
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -82,6 +84,7 @@ def test_dashboard_assets_include_application_calendar_and_source_preview() -> N
     assert 'target="_blank" rel="noopener noreferrer">打开 Moodle 来源'.encode() in loaded["/"][0]
     assert b'window.location.protocol === "file:"' in loaded["/assets/app.js"][0]
     assert b"/api/information" in loaded["/assets/app.js"][0]
+    assert b"/api/attention?horizon_days=14" in loaded["/assets/app.js"][0]
     assert b"/api/source-preview" in loaded["/assets/app.js"][0]
     assert "PDF 预览为空？查看已提取文本".encode() in loaded["/assets/app.js"][0]
     assert b'"/api/sync/start"' in loaded["/assets/app.js"][0]
@@ -842,6 +845,61 @@ def test_write_request_requires_local_marker() -> None:
 def test_server_rejects_non_loopback_binding(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="loopback"):
         build_dashboard_server(tmp_path, host="0.0.0.0")
+
+
+def test_attention_endpoint_exposes_the_shared_port_snapshot(tmp_path: Path) -> None:
+    server = build_dashboard_server(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        with urlopen(  # noqa: S310 - loopback-only test server
+            f"http://127.0.0.1:{port}/api/attention?horizon_days=7"
+        ) as response:
+            payload = json.load(response)
+        assert payload["horizon_days"] == 7
+        assert payload["items"][0]["reason_codes"] == ["LOGIN_REQUIRED"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_attention_draft_endpoint_stages_without_applying(tmp_path: Path) -> None:
+    apply_information_update(
+        tmp_path / "information.json",
+        {
+            "courses": [{"course_id": "DEMO-S1", "code": "DEMO1001", "title": "Demo"}],
+            "items": [{
+                "item_id": "demo-report", "course_id": "DEMO-S1", "title": "Report",
+                "category": "report", "date_status": "unknown",
+            }],
+        },
+        confirmed=True,
+        repository=JsonInformationRepository(),
+    )
+    server = build_dashboard_server(tmp_path, port=0)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = Request(  # noqa: S310 - loopback-only test server
+            f"http://127.0.0.1:{server.server_address[1]}/api/attention/draft",
+            data=json.dumps({
+                "item_id": "demo-report",
+                "fields": {"due_at": "2026-10-01T23:59"},
+                "source_note": "Student checked the course notice",
+            }).encode(),
+            headers={"Content-Type": "application/json", "X-HIQS-Request": "1"},
+            method="POST",
+        )
+        with urlopen(request) as response:  # noqa: S310 - loopback-only test server
+            preview = json.load(response)
+        assert preview["changes"][0]["record_id"] == "demo-report"
+        assert JsonInformationRepository().load(tmp_path / "information.json").items[0].due_at is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_course_overview_combines_ai_facts_and_local_moodle_materials(

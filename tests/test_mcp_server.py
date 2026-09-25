@@ -20,6 +20,7 @@ def test_mcp_server_exposes_port_use_cases() -> None:
         "cancel_course_sync",
         "delete_courses",
         "get_calendar",
+        "get_attention",
         "get_information",
         "get_information_update_schema",
         "get_pending_changes",

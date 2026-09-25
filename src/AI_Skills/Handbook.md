@@ -47,10 +47,19 @@ Use `hsas list-status` to discover the actual resources directory. Respect
 
 ## 4. Download coverage
 
-The downloader follows same-origin Moodle activity pages and all discovered
-`pluginfile.php` links. It stores non-HTML file responses within configured
-size and timeout limits. Common extensions include documents, presentations,
-spreadsheets, PDFs, images, audio, video, archives, source code and notebooks.
+The downloader follows same-origin Moodle activity pages recursively and stores
+all discovered file responses within configured size, timeout, and traversal
+limits. It records intermediate HTML pages as bounded `linked_pages` evidence
+and adds their visible text to `content_text`, so an Agent can reason over a
+resource index before opening the linked files. The default traversal budget is
+6 link levels, 100 HTML pages, and 200 files; override it with the corresponding
+`MOODLE_MAX_LINK_DEPTH`, `MOODLE_MAX_LINKED_PAGES`, and
+`MOODLE_MAX_LINKED_FILES` settings. Navigation pages, cycles, ordinary external
+links, and branches beyond the budget are excluded. If a budget is reached,
+inspect `metadata.recursive_collection_truncated` and
+`metadata.recursive_collection_limits` before claiming the collection is
+complete. Common extensions include documents, presentations, spreadsheets,
+PDFs, images, audio, video, archives, source code and notebooks.
 
 An allowlisted external exception attempts direct export for:
 
@@ -114,7 +123,11 @@ keywords and reading estimates and atomically updates the course archive.
 
 The local materials search indexes every file that has an
 `extracted_text_path`, regardless of whether the original was PDF, DOCX or
-PPTX.
+PPTX. It also indexes visible Moodle activity text stored in `course.json`.
+For Text and media areas, rendered HTML tables are stored as inert row/cell
+records with empty cells, header roles, `rowspan`, and `colspan` preserved;
+search hits identify these records with `source_kind: moodle_activity` and
+include the structured table evidence for an agent to interpret.
 
 ## 7. Atomic synchronization
 
@@ -157,6 +170,18 @@ older pending batch and prompts creation of a fresh batch.
 `CourseArchive` contains course identity, sections, activities, files, download
 status, statistics and unassigned activities. Always inspect
 `unassigned_activities`; real files and assessments may live there.
+
+Rendered activity evidence appears under `activities[].metadata.content_text`.
+When a Moodle activity contains an HTML table,
+`activities[].metadata.content_tables` preserves its caption, rows, cells,
+header flags and spans without preserving executable HTML. A changed rendered
+body or table enters the incremental review queue and points the agent back to
+the current `course.json`.
+
+For recursively discovered pages, inspect `activities[].metadata.linked_pages`
+for the sanitized source URL, crawl depth, title, and bounded page text. Files
+reached through those pages remain ordinary entries in the activity's `files`
+list with their source URL and local text sidecar when extraction is supported.
 
 Important download states:
 

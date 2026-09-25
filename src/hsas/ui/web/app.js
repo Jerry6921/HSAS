@@ -114,6 +114,7 @@ const state = {
   homeQuery: "",
   applicationUpdate: null,
   syncJob: null,
+  attentionSnapshot: { state: "loading", items: [] },
   operationRunning: false,
 };
 
@@ -2369,8 +2370,7 @@ function renderModernHome(occurrences) {
       { label: "课程", value: state.selectedCourses.size, note: "统一课程目录" },
       { label: "信息事项", value: filteredItems.length, note: "课程、tutorial 与 assessment" },
       { label: "本月日程", value: occurrences.filter((value) => value.key.startsWith(monthPrefix)).length, note: "含每周重复时间" },
-      { label: "日期待确认", value: filteredItems.filter((item) => item.date_status === "unknown").length, note: "保留并等待来源核实" },
-      { label: "待 AI 整理", value: counts.ai_review || 0, note: "仅处理新增或变化资料" },
+      { label: "待 Agent 整理", value: counts.ai_review || 0, note: "新增或变化资料" },
     ],
     stages: closure.stages || [],
     retrySummary: retryTasks.length
@@ -2404,6 +2404,7 @@ function renderModernHome(occurrences) {
     updateCount: state.data.pending_review?.change_count || 0,
     updates: updateCourses,
     syncJob: state.syncJob,
+    attentionSnapshot: state.attentionSnapshot,
     onOpenNext: (itemId, selectedDateKey) => {
       const item = state.data?.items.find((value) => value.item_id === itemId);
       if (item) renderDetail(item, selectedDateKey || null);
@@ -2437,6 +2438,30 @@ function renderModernHome(occurrences) {
       if (entry) applyInboxEntry(entry);
     },
     onOpenSource: openSourcePreview,
+    onAttentionAction: (attentionItem, action) => {
+      if (action === "open_item") {
+        const item = state.data?.items.find((value) => value.item_id === attentionItem.information_item_id);
+        if (item) renderDetail(item, primaryDateKey(item));
+      } else if (action === "open_evidence") {
+        const evidence = attentionItem.evidence?.[0];
+        if (evidence) openSourcePreview(evidence);
+      } else if (action === "retry_source") {
+        retryFailures();
+      } else if (action === "login_source") {
+        startWorkflow();
+      }
+    },
+    onCreateAttentionDraft: async (attentionItem, fields, sourceNote) => {
+      const result = await runLocalMutation(
+        "/api/attention/draft",
+        { item_id: attentionItem.information_item_id, fields, source_note: sourceNote },
+        "正在校验补充信息并建立待确认草稿…",
+      );
+      if (!result) return false;
+      await loadInformation();
+      setOperationState(false, "补充信息已加入个人草稿；请预览后再确认写入。");
+      return true;
+    },
   });
 }
 
@@ -2528,12 +2553,27 @@ async function loadInformation() {
     renderDataViews();
     renderModernOverlay();
     renderModernShell();
+    void loadAttention();
   } catch (error) {
     const alert = byId("global-error");
     alert.textContent = error.message;
     alert.classList.remove("hidden");
     renderModernShell();
   }
+}
+
+async function loadAttention() {
+  state.attentionSnapshot = { state: "loading", items: [] };
+  if (state.data) renderModernHome(buildOccurrences());
+  try {
+    const response = await fetch("/api/attention?horizon_days=14", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "无法读取需要确认摘要");
+    state.attentionSnapshot = { state: "ready", items: payload.items || [] };
+  } catch (error) {
+    state.attentionSnapshot = { state: "error", items: [], error: error.message };
+  }
+  if (state.data) renderModernHome(buildOccurrences());
 }
 
 function renderApplicationUpdate(value) {

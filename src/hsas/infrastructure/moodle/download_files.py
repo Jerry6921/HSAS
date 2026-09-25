@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import hashlib
 import mimetypes
 import re
@@ -239,7 +240,65 @@ def _file_candidates(html: str, page_url: str, base_url: str) -> list[str]:
         if clean not in seen:
             seen.add(clean)
             candidates.append(clean)
-    return candidates[:20]
+    # The activity-level budget is enforced by ``download_activity_files``.
+    # Do not truncate here: a timetable, reading list, or resource index can
+    # legitimately expose more than twenty files on a single page.
+    return candidates
+
+
+def _page_candidates(html: str, page_url: str, base_url: str) -> list[str]:
+    """Find same-origin content pages without crawling Moodle navigation."""
+    soup = BeautifulSoup(html, "html.parser")
+    candidates: list[str] = []
+    seen: set[str] = set()
+    excluded_prefixes = (
+        "/admin/", "/calendar/", "/course/index", "/course/view", "/grade/", "/login/",
+        "/message/", "/my/", "/user/",
+    )
+    current = sanitize_source_url(page_url)
+    for node, attribute in [
+        *[(node, "href") for node in soup.select("a[href]")],
+        *[(node, "src") for node in soup.select("iframe[src]")],
+        *[(node, "data") for node in soup.select("object[data]")],
+    ]:
+        raw_url = node.get(attribute)
+        if not raw_url:
+            continue
+        url = sanitize_source_url(urljoin(page_url, raw_url))
+        parts = urlsplit(url)
+        if url == current or not _same_origin(url, base_url):
+            continue
+        path = parts.path.casefold()
+        if path.startswith(excluded_prefixes) or "pluginfile.php" in path:
+            continue
+        if PurePosixPath(path).suffix in DOCUMENT_EXTENSIONS:
+            continue
+        if url not in seen:
+            seen.add(url)
+            candidates.append(url)
+    return candidates
+
+
+def _record_linked_page(activity: CourseActivity, url: str, depth: int, html: str) -> None:
+    """Persist bounded inert evidence for intermediate pages in a link chain."""
+    soup = BeautifulSoup(html, "html.parser")
+    text = "\n".join(
+        line for line in (" ".join(line.split()) for line in soup.get_text("\n").splitlines())
+        if line
+    ).strip()
+    pages = activity.metadata.setdefault("linked_pages", [])
+    if isinstance(pages, list):
+        pages.append({
+            "url": sanitize_source_url(url),
+            "depth": depth,
+            "title": soup.title.get_text(" ", strip=True) if soup.title else None,
+            "content_text": text[:20_000],
+        })
+    existing = activity.metadata.get("content_text")
+    marker = f"\n\n[Linked page depth={depth} url={sanitize_source_url(url)}]\n"
+    combined = f"{existing or ''}{marker}{text}" if text else str(existing or "")
+    if combined:
+        activity.metadata["content_text"] = combined[:20_000]
 
 
 async def _save_response(
@@ -307,6 +366,9 @@ async def download_activity_files(
     max_download_bytes: int,
     timeout_ms: int,
     previous_activity: CourseActivity | None = None,
+    max_link_depth: int = 6,
+    max_linked_pages: int = 100,
+    max_linked_files: int = 200,
 ) -> None:
     if not activity.url or activity.download_status != "pending":
         return
@@ -327,107 +389,83 @@ async def download_activity_files(
             if activity.module in {"resource", "url"}
             else activity_url
         )
-        initial_previous = _previous_for_url(
-            initial_url,
-            previous_files,
-            use_single_fallback=activity.module == "resource",
-        )
-        response, reused = await _get_with_validation(
-            context,
-            initial_url,
-            previous=initial_previous,
-            storage_root=storage_root,
-            timeout_ms=timeout_ms,
-        )
-        if reused is not None:
-            activity.files.append(reused)
-            activity.download_status = "downloaded"
-            return
-        assert response is not None
-        if not response.ok:
-            raise RuntimeError(f"HTTP {response.status}")
-
-        redirected_google_export = _google_workspace_export_url(response.url)
-        if google_export_url is None and redirected_google_export is not None:
-            await response.dispose()
-            google_export_url = redirected_google_export
+        # HTML pages can enqueue both files and more content pages; visited URLs
+        # make cycles harmless while the activity-level budgets bound the crawl.
+        queue: deque[tuple[str, int]] = deque([(initial_url, 0)])
+        visited: set[str] = set()
+        linked_pages = 0
+        linked_files = 0
+        while queue and linked_pages < max_linked_pages and linked_files < max_linked_files:
+            url, depth = queue.popleft()
+            clean_url = sanitize_source_url(url)
+            if clean_url in visited:
+                continue
+            visited.add(clean_url)
+            previous = _previous_for_url(
+                clean_url,
+                previous_files,
+                use_single_fallback=(activity.module == "resource" and depth == 0),
+            )
             response, reused = await _get_with_validation(
                 context,
-                google_export_url,
-                previous=None,
+                clean_url,
+                previous=previous,
                 storage_root=storage_root,
                 timeout_ms=timeout_ms,
             )
             if reused is not None:
+                claimed_paths.add(storage_root / reused.relative_path)
                 activity.files.append(reused)
-                activity.download_status = "downloaded"
-                return
-            assert response is not None
-            if not response.ok:
-                raise RuntimeError(f"Google Workspace export HTTP {response.status}")
-
-        content_type = _content_type(response)
-        if google_export_url and content_type in {"text/html", "application/xhtml+xml"}:
-            await response.dispose()
-            activity.download_status = "external"
-            activity.download_error = (
-                "Google Workspace export was not downloadable; open the link and grant access first."
-            )
-            return
-        if content_type not in {"text/html", "application/xhtml+xml"}:
-            stored = await _save_response(
-                response,
-                activity=activity,
-                index=1,
-                destination_dir=destination_dir,
-                storage_root=storage_root,
-                max_download_bytes=max_download_bytes,
-                previous_files=previous_files,
-                source_url_override=google_export_url,
-                claimed_paths=claimed_paths,
-            )
-            await response.dispose()
-            if stored:
-                activity.files.append(stored)
-        else:
-            html = await response.text()
-            final_url = response.url
-            await response.dispose()
-            for index, candidate in enumerate(
-                _file_candidates(html, final_url, base_url), start=1
-            ):
-                candidate_previous = _previous_for_url(candidate, previous_files)
-                file_response, reused = await _get_with_validation(
-                    context,
-                    candidate,
-                    previous=candidate_previous,
-                    storage_root=storage_root,
-                    timeout_ms=timeout_ms,
-                )
-                if reused is not None:
-                    claimed_paths.add(storage_root / reused.relative_path)
-                    activity.files.append(reused)
+                linked_files += 1
+                continue
+            if response is None:
+                continue
+            try:
+                if not response.ok:
                     continue
-                assert file_response is not None
-                if file_response.ok:
+                content_type = _content_type(response)
+                if content_type not in {"text/html", "application/xhtml+xml"}:
                     stored = await _save_response(
-                        file_response,
+                        response,
                         activity=activity,
-                        index=index,
+                        index=len(activity.files) + 1,
                         destination_dir=destination_dir,
                         storage_root=storage_root,
                         max_download_bytes=max_download_bytes,
                         previous_files=previous_files,
                         source_url_override=(
-                            candidate
-                            if urlsplit(candidate).netloc == "docs.google.com"
+                            clean_url
+                            if urlsplit(clean_url).netloc == "docs.google.com"
                             else None
                         ),
                         claimed_paths=claimed_paths,
                     )
                     if stored:
                         activity.files.append(stored)
-                await file_response.dispose()
+                        linked_files += 1
+                    continue
+
+                html = await response.text()
+                final_url = sanitize_source_url(response.url)
+                linked_pages += 1
+                _record_linked_page(activity, final_url, depth, html)
+                for candidate in _file_candidates(html, final_url, base_url):
+                    if candidate not in visited and linked_files < max_linked_files:
+                        queue.append((candidate, depth + 1))
+                if depth < max_link_depth and linked_pages < max_linked_pages:
+                    for candidate in _page_candidates(html, final_url, base_url):
+                        if candidate not in visited:
+                            queue.append((candidate, depth + 1))
+            finally:
+                await response.dispose()
+
+        if queue:
+            activity.metadata["recursive_collection_truncated"] = True
+            activity.metadata["recursive_collection_limits"] = {
+                "max_link_depth": max_link_depth,
+                "max_linked_pages": max_linked_pages,
+                "max_linked_files": max_linked_files,
+            }
 
         activity.download_status = "downloaded" if activity.files else "skipped"
     except Exception as exc:
@@ -448,6 +486,9 @@ async def download_course_files(
     previous_archive: CourseArchive | None = None,
     progress_callback: DownloadProgressCallback | None = None,
     cancel_requested: Callable[[], bool] | None = None,
+    max_link_depth: int = 6,
+    max_linked_pages: int = 100,
+    max_linked_files: int = 200,
 ) -> None:
     semaphore = asyncio.Semaphore(concurrency)
     jobs = []
@@ -476,6 +517,9 @@ async def download_course_files(
                 max_download_bytes=max_download_bytes,
                 timeout_ms=timeout_ms,
                 previous_activity=previous_activities.get(activity.module_id),
+                max_link_depth=max_link_depth,
+                max_linked_pages=max_linked_pages,
+                max_linked_files=max_linked_files,
             )
             raise_if_cancelled(cancel_requested)
             async with completion_lock:

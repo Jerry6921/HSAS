@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,17 @@ def test_core_exposes_information_schema_and_empty_material_manifest(tmp_path: P
     assert schema["title"] == "InformationUpdate"
     assert manifest["document_count"] == 0
     assert manifest["documents"] == []
+
+
+def test_core_exposes_attention_through_public_query_port(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 24, tzinfo=UTC)
+    core = HIQSCore(resources_dir=tmp_path, clock=lambda: now)
+
+    snapshot = core.attention_snapshot()
+
+    assert snapshot["generated_at"] == "2026-09-24T00:00:00Z"
+    assert snapshot["horizon_days"] == 14
+    assert snapshot["items"][0]["reason_codes"] == ["LOGIN_REQUIRED"]
 
 
 def test_core_rejects_string_as_course_id_list(tmp_path: Path) -> None:

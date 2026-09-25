@@ -26,7 +26,9 @@ Pending values stay pending. An absent date keeps the deadline status open for v
 1. Run `hsas list-status` to locate resources and check material coverage.
 2. Resolve the exact course and run `hsas query "QUESTION" --course COURSE_ID`.
 3. Use structured matches for exact course facts and material excerpts for
-   requirements or course content.
+   requirements or course content. Material evidence with
+   `source_kind: moodle_activity` comes from visible Moodle page text; inspect
+   its `content_tables` cells when row/column position affects the meaning.
 4. Answer the question directly with nearby source citations.
 5. Name pending or tentative fields.
 6. Cite the stored source title, page, path or URL when available.
@@ -35,6 +37,17 @@ Pending values stay pending. An absent date keeps the deadline status open for v
 For time-sensitive questions, compare `last_verified_at`, source
 `observed_at`, and the database `updated_at`. Label older values with their
 verification date.
+
+### Attention workflow
+
+When the HIQS MCP server is available, call `get_attention` to obtain the same
+ranked “需要确认” packet used by the UI. Interpret `reason_codes`,
+`missing_fields`, `evidence`, and `actions` directly; do not recreate attention
+rules from UI text. The result is a read-only projection, so follow an action
+only when the user asks and continue to require the normal confirmation for any
+write or synchronization. Missing source coverage is never a conflict, and
+`OVERDUE_UNRESOLVED` appears only when existing warnings explicitly say the
+past item remains unresolved.
 
 ## 4. Source-to-database workflow
 

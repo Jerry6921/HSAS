@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, time
+from math import isfinite
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from hsas.application.manage_inbox import (
     PersonalInboxError,
@@ -13,7 +17,9 @@ from hsas.application.manage_inbox import (
     apply_personal_inbox_entry,
     load_personal_inbox,
     personal_inbox_snapshot,
+    preview_personal_inbox_entry,
 )
+from hsas.application.update_information import load_information
 from hsas.application.ports.define_repositories import (
     InformationRepository,
     PersonalInboxRepository,
@@ -103,6 +109,93 @@ class PersonalInboxService:
             except (OSError, ValueError, PersonalInboxError) as exc:
                 raise HIQSPortError(str(exc)) from exc
         return entry.model_dump(mode="json")
+
+    def add_attention_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Stage only explicit student-supplied fields on a complete existing item."""
+        item_id = payload.get("item_id")
+        fields = payload.get("fields")
+        note = payload.get("source_note")
+        if not isinstance(item_id, str) or not item_id.strip():
+            raise HIQSPortError("请选择需要补充的课程事项。")
+        if not isinstance(fields, dict) or not fields:
+            raise HIQSPortError("请至少填写一项缺失信息。")
+        if set(fields) - {"due_at", "due_time", "submission_method", "submission_link", "weight_percent"}:
+            raise HIQSPortError("表单包含不支持的字段。")
+        if not isinstance(note, str) or not 3 <= len(note.strip()) <= 500:
+            raise HIQSPortError("请填写 3–500 字的信息来源或核对说明。")
+
+        with self.mutation_lock:
+            try:
+                current = load_information(self.resources_dir / "information.json", self.information_repository)
+                item = next((entry for entry in current.items if entry.item_id == item_id.strip()), None)
+                if item is None:
+                    raise HIQSPortError("课程事项已不存在，请刷新资料后重试。")
+                values = item.model_dump(mode="json")
+                timezone = ZoneInfo(current.timezone)
+                if "due_at" in fields:
+                    if item.date_status == "confirmed" and item.due_at is not None:
+                        raise HIQSPortError("已确认的截止时间不能通过缺项表单覆盖。")
+                    raw = fields["due_at"]
+                    if not isinstance(raw, str) or not raw.strip():
+                        raise HIQSPortError("请填写有效的截止日期与时间。")
+                    try:
+                        parsed = datetime.strptime(raw, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone)
+                    except ValueError as exc:
+                        raise HIQSPortError("截止日期与时间格式无效。") from exc
+                    values["due_at"] = parsed.isoformat()
+                    values["date_status"] = "tentative"
+                if "due_time" in fields:
+                    if "due_at" in fields or item.due_on is None or item.due_at is not None:
+                        raise HIQSPortError("仅日期已知、时间缺失的事项可以补充截止时间。")
+                    raw = fields["due_time"]
+                    if not isinstance(raw, str):
+                        raise HIQSPortError("请填写有效的截止时间。")
+                    try:
+                        parsed_time = time.fromisoformat(raw)
+                    except ValueError as exc:
+                        raise HIQSPortError("截止时间格式无效。") from exc
+                    if parsed_time.tzinfo is not None or len(raw) != 5:
+                        raise HIQSPortError("截止时间须采用 HH:MM 格式。")
+                    values["due_at"] = datetime.combine(item.due_on, parsed_time, timezone).isoformat()
+                    values["date_status"] = "tentative"
+                if "submission_method" in fields:
+                    raw = fields["submission_method"]
+                    if item.submission_method or not isinstance(raw, str) or not 1 <= len(raw.strip()) <= 200:
+                        raise HIQSPortError("仅可补充缺失的提交方式，长度为 1–200 字。")
+                    values["submission_method"] = raw.strip()
+                if "submission_link" in fields:
+                    raw = fields["submission_link"]
+                    parsed_url = urlparse(raw) if isinstance(raw, str) else None
+                    if item.links or parsed_url is None or parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                        raise HIQSPortError("仅可补充缺失的有效 HTTP(S) 提交链接。")
+                    values["links"] = [*values["links"], {"label": "提交入口（学生手动补充）", "url": raw.strip()}]
+                if "weight_percent" in fields:
+                    if item.weight_percent is not None or isinstance(fields["weight_percent"], bool):
+                        raise HIQSPortError("仅可补充缺失的占分。")
+                    try:
+                        weight = float(fields["weight_percent"])
+                    except (TypeError, ValueError) as exc:
+                        raise HIQSPortError("占分必须是 0–100 的数字。") from exc
+                    if not isfinite(weight) or not 0 <= weight <= 100:
+                        raise HIQSPortError("占分必须是 0–100 的数字。")
+                    values["weight_percent"] = weight
+
+                values["sources"] = [*values["sources"], {
+                    "source_type": "manual",
+                    "title": "学生手动补充（待核对）",
+                    "observed_at": datetime.now(UTC).isoformat(),
+                    "note": note.strip(),
+                }]
+                entry = add_personal_inbox_entry(
+                    self.resources_dir,
+                    {"updated_by": "manual", "items": [values]},
+                    title=f"补充待确认事项：{item.title}",
+                    note="学生填写的补充信息；核对预览后才可写入课程资料。",
+                    repository=self.inbox_repository,
+                )
+                return preview_personal_inbox_entry(entry, current)
+            except (OSError, ValueError, PersonalInboxError) as exc:
+                raise HIQSPortError(str(exc)) from exc
 
     def get(self, entry_id: str) -> dict[str, Any]:
         try:

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
 from hsas.application.synchronize_courses import CourseSynchronizationService
+from hsas.application.build_attention import build_attention_snapshot
 from hsas.application.synchronize_unified_courses import UnifiedCourseSyncService
 from hsas.application.synchronize_class_planner import (
     ClassPlannerSynchronizationService,
@@ -100,6 +102,10 @@ DashboardError = HIQSPortError
 @dataclass(slots=True)
 class HIQSCore:
     resources_dir: Path
+    clock: Callable[[], datetime] = field(
+        default=lambda: datetime.now(UTC),
+        repr=False,
+    )
     update_service: GitHubUpdateService = field(
         default_factory=lambda: GitHubUpdateService(PROJECT_ROOT), repr=False
     )
@@ -192,6 +198,17 @@ class HIQSCore:
             "sis_course_info": snapshot["sis_course_info"],
             "sync": self.course_sync_status(),
         }
+
+    def attention_snapshot(self, horizon_days: int = 14) -> dict[str, Any]:
+        """Return deterministic, read-only attention signals for agents and UI."""
+        try:
+            return build_attention_snapshot(
+                self.information_snapshot(),
+                now=self.clock(),
+                horizon_days=horizon_days,
+            )
+        except (TypeError, ValueError) as exc:
+            raise DashboardError(str(exc)) from exc
 
     def information_update_schema(self) -> dict[str, Any]:
         """Return the exact validated write schema accepted by CORE."""
@@ -353,6 +370,10 @@ class HIQSCore:
     def add_personal_inbox(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Stage a validated personal update without applying it."""
         return self.personal_inbox_service.add(payload)
+
+    def add_attention_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Stage student-entered missing details for later inbox review."""
+        return self.personal_inbox_service.add_attention_draft(payload)
 
     def personal_inbox_entry(self, entry_id: str) -> dict[str, Any]:
         """Return one complete validated personal draft."""

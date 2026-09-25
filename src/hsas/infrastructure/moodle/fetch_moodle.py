@@ -210,7 +210,66 @@ def enrich_course_state_from_html(
         content_text = "\n".join(line for line in lines if line).strip()
         if content_text:
             activity["content_text"] = content_text[:20_000]
+        content_tables = _extract_content_tables(node)
+        if content_tables:
+            activity["content_tables"] = content_tables
     return state
+
+
+def _extract_content_tables(node: Any) -> list[dict[str, Any]]:
+    """Preserve inert table cells and spans without storing executable HTML."""
+    tables: list[dict[str, Any]] = []
+    total_cells = 0
+    total_characters = 0
+    for table in node.select("table")[:20]:
+        rows: list[dict[str, Any]] = []
+        for row in table.find_all("tr")[:500]:
+            if row.find_parent("table") is not table:
+                continue
+            cells = []
+            for cell in row.find_all(["th", "td"], recursive=False)[:50]:
+                if total_cells >= 5_000 or total_characters >= 100_000:
+                    break
+                available = min(2_000, 100_000 - total_characters)
+                text = " ".join(cell.get_text(" ", strip=True).split())[:available]
+                cells.append(
+                    {
+                        "text": text,
+                        "header": cell.name == "th",
+                        "scope": cell.get("scope"),
+                        "colspan": _bounded_span(cell.get("colspan")),
+                        "rowspan": _bounded_span(cell.get("rowspan")),
+                    }
+                )
+                total_cells += 1
+                total_characters += len(text)
+            if cells:
+                rows.append({"cells": cells})
+            if total_cells >= 5_000 or total_characters >= 100_000:
+                break
+        if not rows:
+            continue
+        caption = table.find("caption", recursive=False)
+        tables.append(
+            {
+                "caption": (
+                    " ".join(caption.get_text(" ", strip=True).split())[:500]
+                    if caption is not None
+                    else None
+                ),
+                "rows": rows,
+            }
+        )
+        if total_cells >= 5_000 or total_characters >= 100_000:
+            break
+    return tables
+
+
+def _bounded_span(value: Any) -> int:
+    try:
+        return min(max(int(value or 1), 1), 100)
+    except (TypeError, ValueError):
+        return 1
 
 
 async def get_live_sesskey(page: Page) -> str:

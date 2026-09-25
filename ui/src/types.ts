@@ -148,6 +148,52 @@ export interface HomeSyncJob {
   cancel_requested?: boolean;
 }
 
+export type AttentionReason =
+  | "DUE_DATE_TENTATIVE"
+  | "DUE_DATE_UNKNOWN"
+  | "SUBMISSION_DETAILS_MISSING"
+  | "WEIGHT_UNKNOWN"
+  | "SOURCE_CONFLICT"
+  | "SOURCE_SYNC_FAILED"
+  | "SOURCE_CHANGED_REVIEW_PENDING"
+  | "LOGIN_REQUIRED"
+  | "OVERDUE_UNRESOLVED";
+
+export type AttentionActionKind = "open_item" | "open_evidence" | "retry_source" | "login_source" | "review_changes";
+export type AttentionDraftField = "due_at" | "due_time" | "submission_method" | "submission_link" | "weight_percent";
+
+export interface HomeAttentionEvidence extends HomeUpdateSource {
+  source_type: string;
+  page_numbers?: number[];
+  note?: string | null;
+  url?: string | null;
+}
+
+export interface HomeAttentionItem {
+  attention_id: string;
+  fingerprint: string;
+  course_id?: string | null;
+  course_code?: string | null;
+  course_title?: string | null;
+  information_item_id?: string | null;
+  title: string;
+  severity: "high" | "medium" | "low";
+  reason_codes: AttentionReason[];
+  due_at?: string | null;
+  date_status?: string | null;
+  missing_fields: string[];
+  conflicting_sources: string[];
+  affected_source?: string | null;
+  evidence: HomeAttentionEvidence[];
+  actions: Array<{kind: AttentionActionKind; item_id?: string | null; source?: string | null; evidence_index?: number | null}>;
+}
+
+export interface HomeAttentionSnapshot {
+  state: "loading" | "ready" | "error";
+  items: HomeAttentionItem[];
+  error?: string;
+}
+
 export interface ModernHomeOptions {
   today: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
   deadlines: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
@@ -171,6 +217,7 @@ export interface ModernHomeOptions {
   updateCount: number;
   updates: HomeUpdateCourse[];
   syncJob?: HomeSyncJob | null;
+  attentionSnapshot: HomeAttentionSnapshot;
   onOpenNext: (itemId: string, dateKey?: string) => void;
   onStartWorkflow: () => void;
   onRetryFailures: () => void;
@@ -183,6 +230,8 @@ export interface ModernHomeOptions {
   onOpenSearchResult: (index: number) => void;
   onApplyInbox: (entryId: string) => void;
   onOpenSource: (source: HomeUpdateSource) => void;
+  onAttentionAction: (item: HomeAttentionItem, action: AttentionActionKind) => void;
+  onCreateAttentionDraft: (item: HomeAttentionItem, fields: Partial<Record<AttentionDraftField, string | number>>, sourceNote: string) => Promise<boolean>;
 }
 
 export interface ModernHomeBridge {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { motion } from "motion/react";
 import { flowEase, flowTransition, useWorkspaceMotion } from "./lib/motion";
 import {
@@ -6,17 +6,20 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  ChevronDown,
   Copy,
   FileText,
   Inbox,
   RefreshCw,
-  ScanText,
   Search,
-  Sparkles,
 } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import type {
+  HomeAttentionItem,
+  HomeAttentionSnapshot,
+  AttentionActionKind,
+  AttentionDraftField,
   HomeInboxEntry,
   HomeListEntry,
   HomeUpdateChange,
@@ -24,13 +27,47 @@ import type {
   ModernHomeOptions,
 } from "./types";
 
-const countKeys: Array<[string, string]> = [
-  ["ai_review", "等待 AI 整理"],
-  ["ocr", "等待 OCR"],
-  ["google_authorization", "等待授权"],
-  ["date_unknown", "日期待确认"],
-  ["source_conflicts", "来源冲突"],
-];
+const attentionReasonLabels = {
+  DUE_DATE_TENTATIVE: "日期暂定",
+  DUE_DATE_UNKNOWN: "日期未知",
+  SUBMISSION_DETAILS_MISSING: "提交信息不全",
+  WEIGHT_UNKNOWN: "占分未知",
+  SOURCE_CONFLICT: "来源冲突",
+  SOURCE_SYNC_FAILED: "来源同步失败",
+  SOURCE_CHANGED_REVIEW_PENDING: "来源变化待整理",
+  LOGIN_REQUIRED: "需要登录",
+  OVERDUE_UNRESOLVED: "已逾期未解决",
+} as const;
+
+const attentionFieldLabels: Record<AttentionDraftField, string> = {
+  due_at: "截止日期与时间",
+  due_time: "截止时间",
+  submission_method: "提交方式",
+  submission_link: "提交链接",
+  weight_percent: "成绩占比",
+};
+
+function editableAttentionFields(item: HomeAttentionItem): AttentionDraftField[] {
+  if (!item.information_item_id) return [];
+  const fields: AttentionDraftField[] = [];
+  if (item.reason_codes.includes("DUE_DATE_UNKNOWN")) fields.push("due_at");
+  if (!fields.includes("due_at") && item.missing_fields.includes("due_time")) fields.push("due_time");
+  if (item.missing_fields.includes("submission_method")) fields.push("submission_method");
+  if (item.missing_fields.includes("submission_link")) fields.push("submission_link");
+  if (item.reason_codes.includes("WEIGHT_UNKNOWN")) fields.push("weight_percent");
+  return fields;
+}
+
+const ATTENTION_DISMISS_KEY = "hiqs.attention.dismissed.v1";
+
+function readDismissedAttention(): Record<string, string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(ATTENTION_DISMISS_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
 
 function previewValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
@@ -47,6 +84,134 @@ function formatDateTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function AttentionRow({ item, onAction, onReviewChanges, onCreateDraft, onDismiss }: {
+  item: HomeAttentionItem;
+  onAction: (item: HomeAttentionItem, action: AttentionActionKind) => void;
+  onReviewChanges: () => void;
+  onCreateDraft: ModernHomeOptions["onCreateAttentionDraft"];
+  onDismiss: () => void;
+}) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [values, setValues] = useState<Partial<Record<AttentionDraftField, string>>>({});
+  const [sourceNote, setSourceNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const fields = editableAttentionFields(item);
+  const supplementLabels = fields.map((field) => attentionFieldLabels[field]);
+  const statusLabels = item.reason_codes
+    .filter((reason) => !["DUE_DATE_UNKNOWN", "SUBMISSION_DETAILS_MISSING", "WEIGHT_UNKNOWN"].includes(reason))
+    .map((reason) => attentionReasonLabels[reason]);
+  const openItem = () => {
+    const action = item.actions.find((candidate) => candidate.kind === "open_item") ?? item.actions[0];
+    if (!action) return;
+    if (action.kind === "review_changes") onReviewChanges();
+    onAction(item, action.kind);
+  };
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const completed = Object.fromEntries(fields.filter((field) => values[field]?.trim()).map((field) => [field, field === "weight_percent" ? Number(values[field]) : values[field] ?? ""])) as Partial<Record<AttentionDraftField, string | number>>;
+    if (!Object.keys(completed).length) { setError("请至少填写一项信息。"); return; }
+    setBusy(true);
+    setError("");
+    const created = await onCreateDraft(item, completed, sourceNote.trim());
+    setBusy(false);
+    if (created) { setFormOpen(false); setValues({}); setSourceNote(""); }
+    else setError("未能建立草稿，请查看页面提示并重试。");
+  };
+
+  return <article className={`hiqs-attention-row is-${item.severity}`} role="button" tabIndex={0} onClick={(event) => { if ((event.target as HTMLElement).closest("button, input, textarea, select, a")) return; openItem(); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openItem(); } }}>
+    <div className="hiqs-attention-copy">
+      <h3>{item.title}</h3>
+    </div>
+    <div className="hiqs-attention-right">
+      {fields.length > 0 && <div className="hiqs-attention-facts" aria-label="待补充信息">
+        {supplementLabels.map((label) => <span key={label} className={label === "成绩占比" ? "is-weight" : undefined}>{label}</span>)}
+      </div>}
+      {item.due_at && <time className="hiqs-attention-known-date" dateTime={item.due_at}>{formatDateTime(item.due_at)}</time>}
+      {statusLabels.length > 0 && <span className="hiqs-attention-status">{statusLabels.join(" · ")}</span>}
+      <div className="hiqs-attention-actions">
+        {fields.length > 0 && <Button size="sm" variant={formOpen ? "default" : "ghost"} aria-expanded={formOpen} onClick={() => setFormOpen(!formOpen)}>{formOpen ? "收起表单" : "手动补充"}</Button>}
+        <Button size="sm" variant="ghost" onClick={onDismiss}>暂时忽略</Button>
+      </div>
+    </div>
+    {formOpen && <form className="hiqs-attention-form" onSubmit={submit}>
+      <div className="hiqs-attention-form-fields">{fields.map((field) => <label key={field}>{attentionFieldLabels[field]}<input type={field === "due_at" ? "datetime-local" : field === "due_time" ? "time" : field === "submission_link" ? "url" : field === "weight_percent" ? "number" : "text"} min={field === "weight_percent" ? "0" : undefined} max={field === "weight_percent" ? "100" : undefined} step={field === "weight_percent" ? "0.1" : undefined} placeholder={field === "submission_method" ? "例如：Moodle 作业入口" : field === "submission_link" ? "https://…" : undefined} value={values[field] || ""} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
+      <label className="hiqs-attention-source-note">信息来源或核对说明<textarea required minLength={3} maxLength={500} value={sourceNote} onChange={(event) => setSourceNote(event.target.value)} placeholder="例如：课程公告标题及日期；请勿填写密码或令牌。" /></label>
+      <div className="hiqs-attention-form-footer"><small>先保存到个人补充信息草稿；预览并再次确认后才会写入课程资料。</small><Button type="submit" size="sm" disabled={busy}>{busy ? "正在建立草稿…" : "提交补充草稿"}</Button></div>
+      {error && <p className="hiqs-attention-form-error" role="alert">{error}</p>}
+    </form>}
+  </article>;
+}
+
+export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDraft, embedded = false }: {
+  snapshot: HomeAttentionSnapshot;
+  onAction: (item: HomeAttentionItem, action: AttentionActionKind) => void;
+  onReviewChanges: () => void;
+  onCreateDraft: ModernHomeOptions["onCreateAttentionDraft"];
+  embedded?: boolean;
+}) {
+  const [sectionOpen, setSectionOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<Record<string, string>>(readDismissedAttention);
+  const [lastDismissed, setLastDismissed] = useState<HomeAttentionItem | null>(null);
+  const visible = snapshot.items.filter((item) => dismissed[item.attention_id] !== item.fingerprint);
+  const groups = visible.reduce<Array<{ key: string; code: string; title: string; items: HomeAttentionItem[] }>>((result, item) => {
+    const key = item.course_id || `${item.course_code || "source"}:${item.course_title || item.affected_source || "HIQS"}`;
+    const existing = result.find((group) => group.key === key);
+    if (existing) existing.items.push(item);
+    else result.push({
+      key,
+      code: item.course_code || "SOURCE",
+      title: item.course_title || item.affected_source || "系统来源",
+      items: [item],
+    });
+    return result;
+  }, []);
+
+  const dismiss = (item: HomeAttentionItem) => {
+    const next = { ...dismissed, [item.attention_id]: item.fingerprint };
+    setDismissed(next);
+    setLastDismissed(item);
+    window.localStorage.setItem(ATTENTION_DISMISS_KEY, JSON.stringify(next));
+  };
+  const undo = () => {
+    if (!lastDismissed) return;
+    const next = { ...dismissed };
+    delete next[lastDismissed.attention_id];
+    setDismissed(next);
+    setLastDismissed(null);
+    window.localStorage.setItem(ATTENTION_DISMISS_KEY, JSON.stringify(next));
+  };
+
+  const countLabel = snapshot.state === "loading" ? "整理中" : snapshot.state === "error" ? "暂不可用" : `${visible.length} 项`;
+
+  return (
+    <motion.section className={`hiqs-attention ${embedded ? "is-embedded" : ""}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .35 }} aria-labelledby="hiqs-attention-title">
+      <details className="hiqs-attention-fold" open={sectionOpen} onToggle={(event) => setSectionOpen(event.currentTarget.open)}>
+        <summary className="hiqs-attention-heading">
+          <span className="hiqs-attention-index-label">01 / REVIEW</span>
+          <span className="hiqs-attention-heading-copy"><strong id="hiqs-attention-title">待确认</strong><small>未来 14 天内，优先核实会影响安排或提交的事项。</small></span>
+          <span className={`hiqs-attention-count ${snapshot.state !== "ready" ? "is-status" : ""}`} aria-label={countLabel}>{snapshot.state === "ready" ? <><strong>{visible.length}</strong><em>项</em></> : <strong>{countLabel}</strong>}</span>
+          <ChevronDown className="hiqs-attention-chevron" size={17} aria-hidden="true" />
+        </summary>
+        <div className="hiqs-attention-body">
+      {snapshot.state === "loading" && <div className="hiqs-attention-loading" role="status"><i /><i /><i /><span>正在整理需要确认的事项…</span></div>}
+      {snapshot.state === "error" && <div className="hiqs-attention-state is-error" role="status"><AlertTriangle size={16}/><span>风险摘要暂时无法读取；课程资料与日历仍可正常使用。</span></div>}
+      {snapshot.state === "ready" && !visible.length && <div className="hiqs-attention-state"><Check size={16}/><span>未来两周没有需要优先核实的事项。</span>{lastDismissed && <Button size="sm" variant="ghost" onClick={undo}>撤销忽略</Button>}</div>}
+      {snapshot.state === "ready" && visible.length > 0 && <div className="hiqs-attention-groups">
+        {groups.map((group) => <section className="hiqs-attention-course-group" key={group.key}>
+          <header><span>{group.code}</span><h3>{group.title}</h3><small>{group.items.length} 项待处理</small></header>
+          <div className="hiqs-attention-list">
+            {group.items.map((item) => <AttentionRow key={`${item.attention_id}:${item.fingerprint}`} item={item} onAction={onAction} onReviewChanges={onReviewChanges} onCreateDraft={onCreateDraft} onDismiss={() => dismiss(item)} />)}
+          </div>
+        </section>)}
+      </div>}
+      {snapshot.state === "ready" && visible.length > 0 && lastDismissed && <button type="button" className="hiqs-attention-undo" onClick={undo}>已暂时忽略一项 · 撤销</button>}
+        </div>
+      </details>
+    </motion.section>
+  );
 }
 
 function StatusList({ entries, empty, onOpen }: {
@@ -187,23 +352,11 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
       </>}
 
       {workspace && <motion.section className="hiqs-home-command" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={flowTransition}>
-        <header className="hiqs-home-section-heading">
-          <div><p>COMMAND CENTER</p><h2>同步工作台</h2><span>连接课程来源、读取变更，再由你决定哪些信息进入本地资料库。</span></div>
-          <div className="hiqs-home-actions"><Badge><Sparkles size={13} />本地工作区</Badge><Button variant="default" onClick={options.onStartWorkflow} disabled={syncing}>{syncing ? "同步中" : "开始同步"}</Button></div>
-        </header>
-
-        {syncing && (
-          <div className="hiqs-home-sync" role="status">
-            <div><span><RefreshCw className="hiqs-spin" size={15} />{sync?.cancel_requested ? "正在取消" : sync?.detail || "正在同步"}</span><strong>{syncCompleted} / {syncTotal}</strong></div>
-            <progress value={syncCompleted} max={syncTotal} />
-            <Button size="sm" onClick={options.onCancelSync} disabled={Boolean(sync?.cancel_requested)}>取消同步</Button>
-          </div>
-        )}
-
         <div className="hiqs-home-closure">
           <div className="hiqs-home-closure-heading">
             <div><p>INFORMATION CLOSURE</p><h3>资料闭环</h3></div>
             <div>
+              <Button className="hiqs-sync-action" variant="default" size="sm" onClick={options.onStartWorkflow} disabled={syncing}>{syncing ? "同步中" : "开始同步"}</Button>
               {options.hasRetryTasks && <Button size="sm" onClick={options.onRetryFailures}><RefreshCw size={14} />只重试失败项</Button>}
               <Button size="sm" onClick={options.onCopyAgentPrompt} disabled={!options.hasAgentPrompt}><Copy size={14} />复制 Agent 整理指令</Button>
             </div>
@@ -218,7 +371,18 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
             ))}
           </div>
           {options.retrySummary && <p className="hiqs-home-retry"><AlertTriangle size={14} />{options.retrySummary}</p>}
-        </div>
+          <section className="hiqs-home-review">
+            <AttentionRadar embedded snapshot={options.attentionSnapshot} onAction={options.onAttentionAction} onCreateDraft={options.onCreateAttentionDraft} onReviewChanges={() => document.querySelector<HTMLElement>(".hiqs-home-updates")?.scrollIntoView({ behavior: animate ? "smooth" : "auto", block: "start" })} />
+          </section>
+          </div>
+
+        {syncing && (
+          <div className="hiqs-home-sync" role="status">
+            <div><span><RefreshCw className="hiqs-spin" size={15} />{sync?.cancel_requested ? "正在取消" : sync?.detail || "正在同步"}</span><strong>{syncCompleted} / {syncTotal}</strong></div>
+            <progress value={syncCompleted} max={syncTotal} />
+            <Button size="sm" onClick={options.onCancelSync} disabled={Boolean(sync?.cancel_requested)}>取消同步</Button>
+          </div>
+        )}
 
         <div className="hiqs-home-metrics">
           {options.metrics.map((metric) => <article key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}
@@ -226,23 +390,6 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
       </motion.section>}
 
       <div className={`hiqs-home-grid ${workspace ? 'is-workspace' : 'is-today'}`}>
-        {workspace && <section className="hiqs-home-status">
-          <header className="hiqs-home-section-heading compact"><div><p>MATERIAL STATUS</p><h2>资料状态</h2></div><Badge>{options.statusTotal} 项待处理</Badge></header>
-          <div className="hiqs-home-counts">
-            {countKeys.map(([key, label]) => <article key={key}><span>{label}</span><strong>{options.counts[key] || 0}</strong></article>)}
-          </div>
-          <div className="hiqs-home-status-columns">
-            <section>
-              <header><div><h3>OCR 队列</h3><p>{options.ocrCapability}</p></div><Button size="sm" onClick={options.onRunOcr} disabled={!options.canRunOcr}><ScanText size={14} />批量 OCR</Button></header>
-              <StatusList entries={options.ocrQueue} empty="OCR 队列已清空。" onOpen={options.onOpenOcr} />
-            </section>
-            <section>
-              <header><div><h3>需要处理</h3><p>授权、待确认日期与来源冲突</p></div></header>
-              <StatusList entries={options.attention} empty="当前没有需要人工处理的资料状态。" onOpen={options.onOpenAttention} />
-            </section>
-          </div>
-        </section>}
-
         <div className="hiqs-home-side">
           <section className="hiqs-home-search">
             <header><p>LOCAL SEARCH</p><h2>本地问答式搜索</h2><span>在课程事项、课件和来源中查找匹配内容。</span></header>

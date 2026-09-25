@@ -32,6 +32,7 @@ WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
 
 class MaterialHit(StrictModel):
     score: float = Field(ge=0)
+    evidence_id: str
     course_id: str
     course_title: str
     activity_id: str
@@ -74,7 +75,7 @@ def list_materials(
             continue
         course_relative_path = archive_path.relative_to(resources_dir).as_posix()
         for activity in iter_activities(index.archive):
-            content_text = activity.metadata.get("content_text")
+            content_text = activity.content_text or activity.metadata.get("content_text")
             if not isinstance(content_text, str) or not content_text.strip():
                 continue
             page_content.append(
@@ -86,7 +87,7 @@ def list_materials(
                     "module": activity.module,
                     "relative_path": course_relative_path,
                     "content_text": content_text,
-                    "content_tables": activity.metadata.get("content_tables", []),
+                    "content_tables": activity.content_tables or activity.metadata.get("content_tables", []),
                     "evidence_graph": activity_evidence_graph(activity).model_dump(mode="json"),
                 }
             )
@@ -127,6 +128,7 @@ def list_materials(
 
 @dataclass(frozen=True, slots=True)
 class _Chunk:
+    evidence_id: str
     course_id: str
     course_title: str
     activity_id: str
@@ -177,7 +179,7 @@ def search_materials(
             continue
         course_relative_path = archive_path.relative_to(resources_dir).as_posix()
         for activity in iter_activities(index.archive):
-            content_text, content_tables = _activity_evidence(activity.metadata)
+            content_text, content_tables = _activity_evidence(activity)
             if not content_text:
                 continue
             document_count += 1
@@ -193,6 +195,7 @@ def search_materials(
                     default_unit_label="Moodle activity",
                     source_kind="moodle_activity",
                     content_tables=content_tables,
+                    evidence_id=f"activity:{activity.module_id}",
                 )
             )
         for activity, stored_file in iter_files(index.archive):
@@ -215,6 +218,7 @@ def search_materials(
                     activity_name=activity.name,
                     filename=stored_file.filename,
                     relative_text_path=analysis.extracted_text_path,
+                    evidence_id=f"file:{activity.module_id}:{stored_file.relative_path}",
                 )
             )
 
@@ -224,6 +228,7 @@ def search_materials(
         MaterialHit(
             score=round(score, 6),
             course_id=chunk.course_id,
+            evidence_id=chunk.evidence_id,
             course_title=chunk.course_title,
             activity_id=chunk.activity_id,
             activity_name=chunk.activity_name,
@@ -274,11 +279,11 @@ def _result_from_index(
         tables = json.loads(values[-1])
         hits.append(MaterialHit(
             score=round(1.0 / (1.0 + max(float(score), 0.0)), 6),
-            course_id=values[0], course_title=values[1], activity_id=values[2],
-            activity_name=values[3], source_kind=values[4], filename=values[5],
-            relative_text_path=values[6], page_start=values[7], page_end=values[8],
-            source_unit_label=values[9], source_unit_start=values[10],
-            source_unit_end=values[11], chunk_index=values[12], text=values[13],
+            evidence_id=values[0], course_id=values[1], course_title=values[2], activity_id=values[3],
+            activity_name=values[4], source_kind=values[5], filename=values[6],
+            relative_text_path=values[7], page_start=values[8], page_end=values[9],
+            source_unit_label=values[10], source_unit_start=values[11],
+            source_unit_end=values[12], chunk_index=values[13], text=values[14],
             content_tables=tables if isinstance(tables, list) else [],
         ))
     return MaterialSearchResult(
@@ -305,6 +310,7 @@ def _chunk_document(
     default_unit_label: str | None = None,
     source_kind: Literal["file", "moodle_activity"] = "file",
     content_tables: list[dict[str, Any]] | None = None,
+    evidence_id: str,
 ) -> list[_Chunk]:
     units = _split_units(text)
     chunks: list[_Chunk] = []
@@ -329,6 +335,7 @@ def _chunk_document(
                 continue
             chunks.append(
                 _Chunk(
+                    evidence_id=evidence_id,
                     course_id=course_id,
                     course_title=course_title,
                     activity_id=activity_id,
@@ -354,11 +361,16 @@ def _chunk_document(
 
 
 def _activity_evidence(
-    metadata: dict[str, Any],
+    activity: Any,
 ) -> tuple[str, list[dict[str, Any]]]:
-    content_text = metadata.get("content_text")
+    metadata = getattr(activity, "metadata", {})
+    content_text = getattr(activity, "content_text", None)
+    if not isinstance(content_text, str) or not content_text.strip():
+        content_text = metadata.get("content_text") if isinstance(metadata, dict) else None
     text = content_text.strip() if isinstance(content_text, str) else ""
-    raw_tables = metadata.get("content_tables")
+    raw_tables = getattr(activity, "content_tables", None)
+    if not isinstance(raw_tables, list) and isinstance(metadata, dict):
+        raw_tables = metadata.get("content_tables")
     tables = (
         [table for table in raw_tables if isinstance(table, dict)]
         if isinstance(raw_tables, list)

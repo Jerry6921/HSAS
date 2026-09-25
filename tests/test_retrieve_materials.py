@@ -146,6 +146,7 @@ def test_local_search_indexes_rendered_moodle_activity_text(tmp_path: Path) -> N
 
     assert result.indexed_document_count == 1
     assert result.hits[0].activity_id == activity.module_id
+    assert result.hits[0].evidence_id == f"activity:{activity.module_id}"
     assert result.hits[0].source_kind == "moodle_activity"
     assert result.hits[0].filename == "Moodle activity · Timetable"
     assert result.hits[0].relative_text_path == "courses/138907/course.json"

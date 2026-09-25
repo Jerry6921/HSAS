@@ -39,6 +39,8 @@ class InformationQueryPort(Protocol):
         page_numbers: list[int] | None = None,
     ) -> dict[str, Any]: ...
 
+    def moodle_page_preview(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
 
 @runtime_checkable
 class InformationCommandPort(Protocol):

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import Field, HttpUrl, model_validator
 
 from .define_documents import PdfAnalysis
+from .define_evidence import LinkedPageEvidence, RecursiveCollectionReport
 from .define_models import StrictModel
 
 
@@ -97,7 +98,47 @@ class CourseActivity(StrictModel):
     download_status: DownloadStatus = "not_applicable"
     download_error: str | None = None
     files: list[StoredFile] = Field(default_factory=list)
+    # Typed evidence is canonical. ``metadata`` remains only as a migration
+    # compatibility envelope for older course archives.
+    content_text: str | None = None
+    content_tables: list[dict[str, Any]] = Field(default_factory=list)
+    linked_pages: list[LinkedPageEvidence] = Field(default_factory=list)
+    collection_report: RecursiveCollectionReport = Field(
+        default_factory=RecursiveCollectionReport
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def migrate_legacy_evidence(self) -> "CourseActivity":
+        """Read old metadata once and expose it through typed canonical fields."""
+        if not self.content_text and isinstance(self.metadata.get("content_text"), str):
+            self.content_text = self.metadata["content_text"]
+        if not self.content_tables and isinstance(self.metadata.get("content_tables"), list):
+            self.content_tables = [
+                table for table in self.metadata["content_tables"] if isinstance(table, dict)
+            ]
+        if not self.linked_pages:
+            raw_pages = self.metadata.get("linked_pages", [])
+            if isinstance(raw_pages, list):
+                typed_pages: list[LinkedPageEvidence] = []
+                for page in raw_pages:
+                    if not isinstance(page, dict) or not page.get("url"):
+                        continue
+                    try:
+                        typed_pages.append(LinkedPageEvidence.model_validate(page))
+                    except Exception:
+                        continue
+                self.linked_pages = typed_pages
+        if self.collection_report == RecursiveCollectionReport():
+            limits = self.metadata.get("recursive_collection_limits", {})
+            if isinstance(limits, dict):
+                self.collection_report = RecursiveCollectionReport.model_validate({
+                    **limits,
+                    "truncated": bool(self.metadata.get("recursive_collection_truncated", False)),
+                    "discovered_pages": limits.get("discovered_pages", len(self.linked_pages)),
+                    "discovered_files": limits.get("discovered_files", len(self.files)),
+                })
+        return self
 
 
 class CourseSectionV2(StrictModel):

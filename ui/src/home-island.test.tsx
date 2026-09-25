@@ -54,6 +54,18 @@ describe("AttentionRadar", () => {
     expect(markup).not.toContain('class="hiqs-attention-facts" aria-label="待补充信息"><span>来源同步失败');
   });
 
+  it("keeps source workflow states out of the review list", () => {
+    const changed = { ...item(2), title: "Source change", reason_codes: ["SOURCE_CHANGED_REVIEW_PENDING"] } as HomeAttentionItem;
+    const failed = { ...item(3), title: "Source failure", reason_codes: ["SOURCE_SYNC_FAILED"] } as HomeAttentionItem;
+    const actionable = { ...item(4), title: "Missing date", reason_codes: ["DUE_DATE_UNKNOWN", "SOURCE_CHANGED_REVIEW_PENDING"] } as HomeAttentionItem;
+    const markup = render({ state: "ready", items: [changed, failed, actionable] });
+
+    expect(markup).not.toContain("Source change");
+    expect(markup).not.toContain("Source failure");
+    expect(markup).toContain("Missing date");
+    expect(markup).toContain(">1<");
+  });
+
   it("keeps empty and isolated-error states explicit", () => {
     expect(render({ state: "ready", items: [] })).toContain("未来两周没有需要优先核实的事项");
     expect(render({ state: "error", items: [], error: "offline" })).toContain("课程资料与日历仍可正常使用");

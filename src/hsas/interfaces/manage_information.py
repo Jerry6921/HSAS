@@ -41,6 +41,7 @@ from hsas.domain.information import InformationUpdate
 from hsas.infrastructure.runtime import get_runtime_paths
 from hsas.infrastructure.storage import JsonChangeQueueRepository, JsonInformationRepository
 from hsas.infrastructure.storage.persist_data import read_json, write_json
+from hsas.interfaces.generate_typescript import schema_to_typescript
 
 
 information_app = typer.Typer(
@@ -318,6 +319,24 @@ def information_schema(
         raise typer.BadParameter("Output already exists; choose a new path.")
     write_json(output_path, schema)
     typer.echo(f"Information update JSON Schema -> {output_path}")
+
+
+@information_app.command("types")
+def information_types(
+    ctx: typer.Context,
+    output_path: Annotated[
+        Path,
+        typer.Argument(help="Destination TypeScript declaration file"),
+    ] = Path("ui/src/generated/information-schema.ts"),
+    force: Annotated[bool, typer.Option(help="Replace an existing generated file")] = False,
+) -> None:
+    """Generate deterministic TypeScript types from the canonical Pydantic schema."""
+    if output_path.exists() and not force:
+        raise typer.BadParameter("Output already exists; use --force to replace it.")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    schema = InformationUpdate.model_json_schema()
+    output_path.write_text(schema_to_typescript(schema), encoding="utf-8")
+    typer.echo(f"TypeScript types -> {output_path}")
 
 
 def _resources(ctx: typer.Context) -> Path:

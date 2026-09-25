@@ -59,6 +59,7 @@ function editableAttentionFields(item: HomeAttentionItem): AttentionDraftField[]
 }
 
 const ATTENTION_DISMISS_KEY = "hiqs.attention.dismissed.v1";
+const sourceWorkflowReasons = new Set(["SOURCE_SYNC_FAILED", "SOURCE_CHANGED_REVIEW_PENDING"]);
 
 function readDismissedAttention(): Record<string, string> {
   try {
@@ -155,7 +156,10 @@ export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDr
   const [sectionOpen, setSectionOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Record<string, string>>(readDismissedAttention);
   const [lastDismissed, setLastDismissed] = useState<HomeAttentionItem | null>(null);
-  const visible = snapshot.items.filter((item) => dismissed[item.attention_id] !== item.fingerprint);
+  const visible = snapshot.items.filter((item) => (
+    dismissed[item.attention_id] !== item.fingerprint
+    && item.reason_codes.some((reason) => !sourceWorkflowReasons.has(reason))
+  ));
   const groups = visible.reduce<Array<{ key: string; code: string; title: string; items: HomeAttentionItem[] }>>((result, item) => {
     const key = item.course_id || `${item.course_code || "source"}:${item.course_title || item.affected_source || "HIQS"}`;
     const existing = result.find((group) => group.key === key);
@@ -316,6 +320,7 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
   const syncing = sync?.state === "running";
   const syncTotal = Math.max(1, sync?.total || 1);
   const syncCompleted = Math.min(sync?.completed || 0, syncTotal);
+  const syncPercent = Math.round((syncCompleted / syncTotal) * 100);
 
   return (
     <div className="hiqs-modern-home">
@@ -370,19 +375,18 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
               </motion.article>
             ))}
           </div>
+          {syncing && (
+            <div className="hiqs-home-sync" role="status">
+              <div className="hiqs-home-sync-heading"><div><small>SYNC / LIVE STATUS</small><span><RefreshCw className="hiqs-spin" size={15} />{sync?.cancel_requested ? "正在取消同步" : sync?.detail || "正在同步课程资料"}</span></div><strong>{syncPercent}<em>%</em></strong></div>
+              <div className="hiqs-home-sync-track"><progress value={syncCompleted} max={syncTotal} aria-label={`同步进度 ${syncPercent}%`} /><span style={{ width: `${syncPercent}%` }} /></div>
+              <div className="hiqs-home-sync-meta"><span>{syncCompleted} / {syncTotal} 个同步项目</span><Button size="sm" variant="ghost" onClick={options.onCancelSync} disabled={Boolean(sync?.cancel_requested)}>{sync?.cancel_requested ? "等待取消" : "取消同步"}</Button></div>
+            </div>
+          )}
           {options.retrySummary && <p className="hiqs-home-retry"><AlertTriangle size={14} />{options.retrySummary}</p>}
           <section className="hiqs-home-review">
             <AttentionRadar embedded snapshot={options.attentionSnapshot} onAction={options.onAttentionAction} onCreateDraft={options.onCreateAttentionDraft} onReviewChanges={() => document.querySelector<HTMLElement>(".hiqs-home-updates")?.scrollIntoView({ behavior: animate ? "smooth" : "auto", block: "start" })} />
           </section>
           </div>
-
-        {syncing && (
-          <div className="hiqs-home-sync" role="status">
-            <div><span><RefreshCw className="hiqs-spin" size={15} />{sync?.cancel_requested ? "正在取消" : sync?.detail || "正在同步"}</span><strong>{syncCompleted} / {syncTotal}</strong></div>
-            <progress value={syncCompleted} max={syncTotal} />
-            <Button size="sm" onClick={options.onCancelSync} disabled={Boolean(sync?.cancel_requested)}>取消同步</Button>
-          </div>
-        )}
 
         <div className="hiqs-home-metrics">
           {options.metrics.map((metric) => <article key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}

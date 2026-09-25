@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,10 +24,6 @@ from hsas.application.manage_changes import (
 )
 from hsas.application.update_information import (
     InformationServiceError,
-    apply_information_update as apply_validated_information_update,
-    load_information,
-    validate_material_coverage,
-    validate_information_update as validate_information_payload,
 )
 from hsas.infrastructure.documents.run_ocr import (
     run_ocr_queue,
@@ -46,15 +43,16 @@ from hsas.infrastructure.sis_course_info import (
 from hsas.infrastructure.sis_course_info.manage_changes import (
     SisCourseInfoReviewError,
 )
-from hsas.domain.information import (
-    InformationUpdate,
-)
 from hsas.infrastructure.class_planner.manage_changes import (
     ClassPlannerReviewError,
 )
 from hsas.infrastructure.moodle.load_settings import Settings
 from hsas.infrastructure.moodle.record_session import load_moodle_session_status
 from hsas.infrastructure.moodle.synchronize_courses import MoodleCourseGateway
+from hsas.infrastructure.moodle.display_moodle_page import (
+    MoodlePreviewError,
+    preview_moodle_page,
+)
 from hsas.infrastructure.runtime import get_runtime_paths, hku_portal_profile_dir
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
@@ -70,6 +68,9 @@ from hsas.core.manage_records import (
     CourseRecordService,
 )
 from hsas.core.manage_personal_inbox import PersonalInboxService
+from hsas.core.manage_information import InformationContractService
+from hsas.core.define_services import CoreServices
+from hsas.core.build_status import OperationalStatusService
 from hsas.core.manage_reviews import SourceReviewService
 from hsas.core.orchestrate_sync import CourseSyncController
 from hsas.core.build_dashboard import DashboardProjectionService, pending_summary
@@ -126,9 +127,15 @@ class HIQSCore:
     )
     sync_workflow: CourseSyncWorkflow = field(init=False, repr=False)
     attention_service: AttentionService = field(init=False, repr=False)
+    information_contract_service: InformationContractService = field(init=False, repr=False)
+    services: CoreServices = field(init=False, repr=False)
+    status_service: OperationalStatusService = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.record_service = CourseRecordService(self.resources_dir, self.mutation_lock)
+        self.information_contract_service = InformationContractService(
+            self.resources_dir, INFORMATION_REPOSITORY
+        )
         self.review_service = SourceReviewService(self.resources_dir)
         self.personal_inbox_service = PersonalInboxService(
             self.resources_dir,
@@ -154,6 +161,21 @@ class HIQSCore:
         self.attention_service = AttentionService(
             self.information_snapshot,
             self.clock,
+        )
+        self.status_service = OperationalStatusService(
+            self.information_snapshot,
+            self.course_sync_status,
+        )
+        self.services = CoreServices(
+            records=self.record_service,
+            reviews=self.review_service,
+            inbox=self.personal_inbox_service,
+            materials=self.material_query_service,
+            dashboard=self.dashboard_projection_service,
+            sync=self.sync_workflow,
+            attention=self.attention_service,
+            information=self.information_contract_service,
+            status=self.status_service,
         )
 
     @property
@@ -190,21 +212,7 @@ class HIQSCore:
 
     def status_snapshot(self) -> dict[str, Any]:
         """Return one compact operational status packet for agents and schedulers."""
-        snapshot = self.information_snapshot()
-        return {
-            "available": snapshot["available"],
-            "updated_at": snapshot["updated_at"],
-            "summary": snapshot["summary"],
-            "pending_review": snapshot["pending_review"],
-            "material_status": snapshot["material_status"],
-            "review_closure": snapshot["review_closure"],
-            "personal_inbox": snapshot["personal_inbox"],
-            "moodle_session": snapshot["moodle_session"],
-            "sis_enrollment": snapshot["sis_enrollment"],
-            "class_planner": snapshot["class_planner"],
-            "sis_course_info": snapshot["sis_course_info"],
-            "sync": self.course_sync_status(),
-        }
+        return self.status_service.snapshot()
 
     def attention_snapshot(self, horizon_days: int = 14) -> dict[str, Any]:
         """Return deterministic, read-only attention signals for agents and UI."""
@@ -215,58 +223,21 @@ class HIQSCore:
 
     def information_update_schema(self) -> dict[str, Any]:
         """Return the exact validated write schema accepted by CORE."""
-        return InformationUpdate.model_json_schema()
+        return self.information_contract_service.schema()
 
     def validate_information_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Validate an AI-authored update without changing canonical data."""
-        raw_update = payload.get("update", payload)
         try:
-            update = validate_information_payload(raw_update)
-            current = load_information(
-                self.resources_dir / "information.json",
-                INFORMATION_REPOSITORY,
-            )
-            validate_material_coverage(self.resources_dir, current, update)
-        except (ValueError, ValidationError, InformationServiceError) as exc:
+            return self.information_contract_service.validate(payload)
+        except ValueError as exc:
             raise DashboardError(str(exc)) from exc
-        return {
-            "valid": True,
-            "course_count": len(update.courses),
-            "item_count": len(update.items),
-            "update": update.model_dump(mode="json"),
-        }
 
     def apply_information_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Apply reviewed facts, then advance supplied source checkpoints."""
-        if payload.get("confirmed") is not True:
-            raise DashboardError("Information apply requires explicit confirmation.")
-        raw_update = payload.get("update")
-        if not isinstance(raw_update, dict):
-            raise DashboardError("update must be an InformationUpdate object.")
-        review_batches = payload.get("review_batches", {})
-        if not isinstance(review_batches, dict):
-            raise DashboardError("review_batches must be an object.")
         try:
-            update = validate_information_payload(raw_update)
-            validated_batches = self.review_service.validate_review_batches(
-                review_batches
+            result = self.information_contract_service.apply(
+                payload, self.review_service, self.mutation_lock
             )
-            if validated_batches and not update.courses and not update.items:
-                raise DashboardError(
-                    "An empty update cannot acknowledge review batches; use "
-                    "acknowledge_changes after confirming no fact change."
-                )
-            with self.mutation_lock:
-                result = apply_validated_information_update(
-                    self.resources_dir / "information.json",
-                    update.model_dump(mode="json"),
-                    confirmed=True,
-                    repository=INFORMATION_REPOSITORY,
-                    resources_dir=self.resources_dir,
-                )
-                checkpoints = self.review_service.acknowledge_validated_batches(
-                    validated_batches
-                )
         except (
             OSError,
             ValueError,
@@ -279,11 +250,7 @@ class HIQSCore:
         ) as exc:
             raise DashboardError(str(exc)) from exc
         return {
-            "created_courses": result.created_courses,
-            "updated_courses": result.updated_courses,
-            "created_items": result.created_items,
-            "updated_items": result.updated_items,
-            "checkpoints": checkpoints,
+            **result,
             "information": self.information_snapshot(),
         }
 
@@ -419,6 +386,30 @@ class HIQSCore:
     ) -> dict[str, Any]:
         """Return a bounded preview for a source in the current Moodle archive."""
         return self.material_query_service.preview(relative_path, page_numbers)
+
+    def moodle_page_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Render a Moodle URL through the same private profile used for sync."""
+        url = str(payload.get("url", "")).strip()
+        if not url:
+            raise DashboardError("缺少 Moodle 链接。")
+        if self.course_sync_status().get("state") == "running":
+            raise DashboardError("课程同步正在使用浏览器；请在同步完成后再次打开该证据。")
+        if not self.mutation_lock.acquire(blocking=False):
+            raise DashboardError("共享浏览器正在执行另一项操作，请稍后重试。")
+        try:
+            settings = Settings.load(
+                output_dir=self.resources_dir,
+                profile_dir=hku_portal_profile_dir(self.resources_dir),
+            )
+            return asyncio.run(preview_moodle_page(settings, url))
+        except MoodlePreviewError as exc:
+            raise DashboardError(str(exc)) from exc
+        except Exception as exc:
+            raise DashboardError(
+                f"无法打开 Moodle 页面：{type(exc).__name__}: {str(exc)[:240]}"
+            ) from exc
+        finally:
+            self.mutation_lock.release()
 
     def _pending_review_summary(self, information) -> dict[str, int]:
         return pending_summary(self.review_service.pending_batch(information))

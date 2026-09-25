@@ -14,6 +14,30 @@ EvidenceKind = Literal["activity", "html_page", "file", "extracted_text", "table
 EvidenceStatus = Literal["complete", "partial", "not_accessible", "failed"]
 
 
+class LinkedPageEvidence(StrictModel):
+    """Typed representation of an HTML page discovered through an activity."""
+
+    url: HttpUrl
+    depth: int = Field(default=0, ge=0)
+    title: str | None = None
+    content_text: str = ""
+    collected_at: datetime | None = None
+    status: EvidenceStatus = "complete"
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RecursiveCollectionReport(StrictModel):
+    """Stable report for bounded recursive collection."""
+
+    truncated: bool = False
+    max_link_depth: int = Field(default=0, ge=0)
+    max_linked_pages: int = Field(default=0, ge=0)
+    max_linked_files: int = Field(default=0, ge=0)
+    discovered_pages: int = Field(default=0, ge=0)
+    discovered_files: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class EvidenceNode(StrictModel):
     evidence_id: str
     kind: EvidenceKind
@@ -54,19 +78,38 @@ def activity_evidence_graph(activity: object) -> EvidenceGraph:
     )]
     edges: list[EvidenceEdge] = []
     metadata = getattr(activity, "metadata", {})
-    pages = metadata.get("linked_pages", []) if isinstance(metadata, dict) else []
-    for index, page in enumerate(pages if isinstance(pages, list) else []):
-        if not isinstance(page, dict) or not page.get("url"):
+    typed_pages = getattr(activity, "linked_pages", [])
+    pages = typed_pages or (metadata.get("linked_pages", []) if isinstance(metadata, dict) else [])
+    for index, raw_page in enumerate(pages if isinstance(pages, list) else []):
+        if isinstance(raw_page, LinkedPageEvidence):
+            page = raw_page
+        elif isinstance(raw_page, dict) and raw_page.get("url"):
+            try:
+                page = LinkedPageEvidence.model_validate(raw_page)
+            except Exception:
+                # Preserve malformed legacy evidence as a warning instead of dropping it.
+                page = LinkedPageEvidence(
+                    url=raw_page["url"],
+                    depth=max(0, int(raw_page.get("depth", 0))),
+                    title=raw_page.get("title"),
+                    content_text=str(raw_page.get("content_text", "")),
+                    status="partial",
+                    warnings=["legacy linked-page metadata required coercion"],
+                )
+        else:
             continue
         page_id = f"page:{module_id}:{index}"
         nodes.append(EvidenceNode(
             evidence_id=page_id,
             kind="html_page",
-            source_url=page["url"],
+            source_url=page.url,
             parent_id=f"activity:{module_id}",
-            depth=int(page.get("depth", 0)),
-            title=page.get("title"),
-            content_text=page.get("content_text"),
+            depth=page.depth,
+            title=page.title,
+            content_text=page.content_text,
+            status=page.status,
+            collected_at=page.collected_at,
+            warnings=page.warnings,
         ))
         edges.append(EvidenceEdge(
             from_id=f"activity:{module_id}", to_id=page_id, relation="links_to"
@@ -85,7 +128,19 @@ def activity_evidence_graph(activity: object) -> EvidenceGraph:
         edges.append(EvidenceEdge(
             from_id=f"activity:{module_id}", to_id=file_id, relation="contains"
         ))
-    truncated = bool(metadata.get("recursive_collection_truncated")) if isinstance(metadata, dict) else False
+    report = getattr(activity, "collection_report", None)
+    if isinstance(metadata, dict):
+        try:
+            if not report or report == RecursiveCollectionReport():
+                report = RecursiveCollectionReport.model_validate({
+                    **(metadata.get("recursive_collection_limits") or {}),
+                    "truncated": metadata.get("recursive_collection_truncated", False),
+                    "discovered_pages": len(pages) if isinstance(pages, list) else 0,
+                    "discovered_files": len(getattr(activity, "files", [])),
+                })
+        except Exception:
+            report = RecursiveCollectionReport(truncated=True, warnings=["invalid collection report"])
+    truncated = bool(report and report.truncated)
     return EvidenceGraph(
         nodes=nodes,
         edges=edges,

@@ -31,6 +31,16 @@ interface SourcePayload {
   original_relative_path: string;
   page_numbers: number[];
   text?: string | null;
+  final_url?: string | null;
+  screenshot_data_url?: string | null;
+}
+
+function isMoodleUrl(value: string | null): value is string {
+  if (!value) return false;
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host === "moodle.hku.hk" || host.endsWith(".moodle.hku.hk");
+  } catch { return false; }
 }
 
 function Modal({ children, onClose, wide = false }: { children: ReactNode; onClose: () => void; wide?: boolean }) {
@@ -89,32 +99,40 @@ function DetailModal({ detail, options, onClose, onOpenSource }: { detail: Moder
 function SourceModal({ source, onClose }: { source: CourseSource; onClose: () => void }) {
   const [payload, setPayload] = useState<SourcePayload | null>(null);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(Boolean(source.relative_path));
+  const remoteValue = source.url || source.source_url;
+  const remote = remoteValue && /^https?:\/\//i.test(remoteValue) ? remoteValue : null;
+  const moodleRemote = isMoodleUrl(remote);
+  const [loading, setLoading] = useState(Boolean(source.relative_path || moodleRemote));
   useEffect(() => {
     let active = true;
-    setPayload(null); setError(""); setLoading(Boolean(source.relative_path));
-    if (!source.relative_path) return () => { active = false; };
-    const params = new URLSearchParams({ path: source.relative_path });
-    for (const page of source.page_numbers || []) params.append("page", String(page));
-    fetch(`/api/source-preview?${params}`, { cache: "no-store" }).then(async (response) => {
+    setPayload(null); setError(""); setLoading(Boolean(source.relative_path || moodleRemote));
+    if (!source.relative_path && !moodleRemote) return () => { active = false; };
+    let request: Promise<Response>;
+    if (source.relative_path) {
+      const params = new URLSearchParams({ path: source.relative_path });
+      for (const page of source.page_numbers || []) params.append("page", String(page));
+      request = fetch(`/api/source-preview?${params}`, { cache: "no-store" });
+    } else {
+      request = fetch("/api/moodle/preview", { method: "POST", headers: { "Content-Type": "application/json", "X-HIQS-Request": "1" }, body: JSON.stringify({ url: remote }) });
+    }
+    request.then(async (response) => {
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || "无法预览来源");
       if (active) setPayload(value);
     }).catch((reason) => { if (active) setError(reason.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [source]);
-  const remoteValue = source.url || source.source_url;
-  const remote = remoteValue && /^https?:\/\//i.test(remoteValue) ? remoteValue : null;
+  }, [source, moodleRemote, remote]);
   const localUrl = payload ? `/api/material?path=${encodeURIComponent(payload.original_relative_path)}` : "";
   const pageHash = payload?.page_numbers?.length ? `#page=${payload.page_numbers[0]}` : "";
   return <Modal onClose={onClose} wide><ModalHeader eyebrow="SOURCE PREVIEW" title={source.title || source.label || "来源预览"} onClose={onClose} /><p className="hiqs-source-path">{source.relative_path || remote || ""}</p><div className="hiqs-source-body">
-    {loading && <p>正在读取本地来源…</p>}
+    {loading && <p>{moodleRemote ? "正在通过共享 Moodle 会话打开页面…" : "正在读取本地来源…"}</p>}
     {error && <p className="is-error">{error}</p>}
-    {!source.relative_path && <p>该来源保留了 Moodle 链接，可通过下方按钮查看。</p>}
+    {!source.relative_path && !moodleRemote && <p>该来源保留了外部链接，可通过下方按钮查看。</p>}
     {payload?.preview_kind === "pdf" && <><iframe src={`${localUrl}${pageHash}`} title={payload.title} />{payload.text && <details><summary>PDF 预览为空？查看已提取文本</summary><pre>{payload.text}</pre></details>}</>}
     {payload?.preview_kind === "image" && <img src={localUrl} alt={payload.title} />}
-    {payload && !["pdf", "image"].includes(payload.preview_kind) && (payload.text ? <pre>{payload.text}</pre> : <p>该文件可打开原文；当前没有可显示的文本副本。</p>)}
-  </div><div className="hiqs-modal-actions">{payload && <Button asChild variant="default"><a href={localUrl}><FileText size={14} />打开原文</a></Button>}{remote && <Button asChild><a href={remote} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />打开 Moodle 来源</a></Button>}</div></Modal>;
+    {payload?.preview_kind === "web" && payload.screenshot_data_url && <><img className="hiqs-source-web-preview" src={payload.screenshot_data_url} alt={`${payload.title} 页面预览`} />{payload.text && <details><summary>查看页面可读文本</summary><pre>{payload.text}</pre></details>}</>}
+    {payload && !["pdf", "image", "web"].includes(payload.preview_kind) && (payload.text ? <pre>{payload.text}</pre> : <p>该文件可打开原文；当前没有可显示的文本副本。</p>)}
+  </div><div className="hiqs-modal-actions">{payload && payload.preview_kind !== "web" && <Button asChild variant="default"><a href={localUrl}><FileText size={14} />打开原文</a></Button>}{remote && <Button asChild><a href={remote} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />在系统浏览器打开</a></Button>}</div></Modal>;
 }
 
 const categoryOptions = [["class","课程"],["tutorial","Tutorial"],["lab","实验"],["office_hour","Office hour"],["assignment","Assignment"],["quiz","Quiz"],["exam","考试"],["presentation","汇报"],["project","项目"],["report","报告"],["reading","阅读"],["deadline","截止时间"],["other","其他"]];

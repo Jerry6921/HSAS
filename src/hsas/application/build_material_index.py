@@ -11,6 +11,7 @@ from typing import Any, Iterable
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
+    evidence_id UNINDEXED,
     course_id UNINDEXED, course_title UNINDEXED, activity_id UNINDEXED,
     activity_name UNINDEXED, source_kind UNINDEXED, filename UNINDEXED,
     relative_text_path UNINDEXED, page_start UNINDEXED, page_end UNINDEXED,
@@ -35,14 +36,17 @@ def read_signature(path: Path) -> str | None:
 def write_index(path: Path, signature: str, chunks: Iterable[Any], document_count: int, skipped: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(chunks)")}
+        if columns and "evidence_id" not in columns:
+            connection.execute("DROP TABLE chunks")
         connection.executescript(SCHEMA)
         connection.execute("DELETE FROM chunks")
         connection.execute("DELETE FROM metadata")
         connection.executemany(
-            """INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 (
-                    chunk.course_id, chunk.course_title, chunk.activity_id,
+                    chunk.evidence_id, chunk.course_id, chunk.course_title, chunk.activity_id,
                     chunk.activity_name, chunk.source_kind, chunk.filename,
                     chunk.relative_text_path, chunk.page_start, chunk.page_end,
                     chunk.source_unit_label, chunk.source_unit_start,
@@ -69,7 +73,7 @@ def search_index(path: Path, query: str, course_ids: set[str] | None, limit: int
     where = " AND ".join(clauses)
     with sqlite3.connect(path) as connection:
         rows = connection.execute(
-            f"""SELECT bm25(chunks), course_id, course_title, activity_id,
+            f"""SELECT bm25(chunks), evidence_id, course_id, course_title, activity_id,
                 activity_name, source_kind, filename, relative_text_path,
                 page_start, page_end, source_unit_label, source_unit_start,
                 source_unit_end, chunk_index, content, content_tables

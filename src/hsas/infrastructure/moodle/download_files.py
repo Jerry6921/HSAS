@@ -17,6 +17,7 @@ from playwright.async_api import APIResponse, BrowserContext
 from hsas.infrastructure.storage.persist_data import safe_filename, write_bytes
 from hsas.domain.courses.index_courses import iter_activities
 from hsas.domain.courses.define_courses import CourseActivity, CourseArchive, StoredFile
+from hsas.domain.courses.define_evidence import LinkedPageEvidence, RecursiveCollectionReport
 from hsas.domain.courses.calculate_statistics import refresh_archive_stats
 from hsas.infrastructure.moodle.handle_cancellation import MoodleSyncCancelled, raise_if_cancelled
 
@@ -294,44 +295,111 @@ class DiscoveryResult:
     page_urls: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ParseResult:
+    """Output of the parse stage; it has no storage or browser side effects."""
+
+    url: str
+    title: str | None
+    text: str
+    discovered: DiscoveryResult
+
+
+class MoodleDiscoveryService:
+    """Pure discovery stage: HTML in, bounded URL frontier out."""
+
+    def discover(self, html: str, page_url: str, base_url: str) -> DiscoveryResult:
+        return DiscoveryResult(
+            file_urls=tuple(_file_candidates(html, page_url, base_url)),
+            page_urls=tuple(_page_candidates(html, page_url, base_url)),
+        )
+
+
+class MoodleParseService:
+    """Pure parse stage; it never writes files or mutates an activity."""
+
+    def __init__(self, discovery: MoodleDiscoveryService) -> None:
+        self.discovery = discovery
+
+    def parse(self, html: str, page_url: str, base_url: str) -> ParseResult:
+        soup = BeautifulSoup(html, "html.parser")
+        text = "\n".join(
+            line for line in (" ".join(line.split()) for line in soup.get_text("\n").splitlines())
+            if line
+        ).strip()
+        try:
+            from trafilatura import extract
+        except ImportError:
+            extract = None
+        if extract is not None:
+            extracted = extract(html, include_links=False, include_comments=False)
+            if isinstance(extracted, str) and len(extracted.strip()) > len(text) * 0.15:
+                text = extracted.strip()
+        return ParseResult(
+            url=sanitize_source_url(page_url),
+            title=soup.title.get_text(" ", strip=True) if soup.title else None,
+            text=text[:20_000],
+            discovered=self.discovery.discover(html, page_url, base_url),
+        )
+
+
+class MoodleDownloadService:
+    """Download stage boundary for authenticated HTTP and local persistence."""
+
+    async def fetch(
+        self,
+        context: BrowserContext,
+        url: str,
+        *,
+        previous: StoredFile | None,
+        storage_root: Path,
+        timeout_ms: int,
+    ) -> tuple[APIResponse | None, StoredFile | None]:
+        return await _get_with_validation(
+            context, url, previous=previous, storage_root=storage_root, timeout_ms=timeout_ms
+        )
+
+
+DISCOVERY_SERVICE = MoodleDiscoveryService()
+PARSE_SERVICE = MoodleParseService(DISCOVERY_SERVICE)
+DOWNLOAD_SERVICE = MoodleDownloadService()
+
+
+def parse_html_evidence(html: str, page_url: str, base_url: str) -> ParseResult:
+    return PARSE_SERVICE.parse(html, page_url, base_url)
+
+
 def discover_html_links(html: str, page_url: str, base_url: str) -> DiscoveryResult:
-    """Discover the next crawl frontier before the download stage runs."""
-    return DiscoveryResult(
-        file_urls=tuple(_file_candidates(html, page_url, base_url)),
-        page_urls=tuple(_page_candidates(html, page_url, base_url)),
-    )
+    return DISCOVERY_SERVICE.discover(html, page_url, base_url)
 
 
-def _record_linked_page(activity: CourseActivity, url: str, depth: int, html: str) -> None:
+def _record_linked_page(
+    activity: CourseActivity, url: str, depth: int, html: str, base_url: str
+) -> DiscoveryResult:
     """Persist bounded inert evidence for intermediate pages in a link chain."""
-    soup = BeautifulSoup(html, "html.parser")
-    text = "\n".join(
-        line for line in (" ".join(line.split()) for line in soup.get_text("\n").splitlines())
-        if line
-    ).strip()
-    # Trafilatura is optional: Moodle-specific parsing remains authoritative,
-    # while the extractor removes navigation noise on ordinary HTML pages.
-    try:
-        from trafilatura import extract
-    except ImportError:
-        extract = None
-    if extract is not None:
-        extracted = extract(html, include_links=False, include_comments=False)
-        if isinstance(extracted, str) and len(extracted.strip()) > len(text) * 0.15:
-            text = extracted.strip()
+    parsed = parse_html_evidence(html, url, base_url)
+    typed_page = LinkedPageEvidence(
+        url=parsed.url,
+        depth=depth,
+        title=parsed.title,
+        content_text=parsed.text,
+    )
+    activity.linked_pages.append(typed_page)
     pages = activity.metadata.setdefault("linked_pages", [])
     if isinstance(pages, list):
         pages.append({
-            "url": sanitize_source_url(url),
+            "url": parsed.url,
             "depth": depth,
-            "title": soup.title.get_text(" ", strip=True) if soup.title else None,
-            "content_text": text[:20_000],
+            "title": parsed.title,
+            "content_text": parsed.text,
         })
-    existing = activity.metadata.get("content_text")
-    marker = f"\n\n[Linked page depth={depth} url={sanitize_source_url(url)}]\n"
-    combined = f"{existing or ''}{marker}{text}" if text else str(existing or "")
+    existing = activity.content_text or activity.metadata.get("content_text")
+    marker = f"\n\n[Linked page depth={depth} url={parsed.url}]\n"
+    combined = f"{existing or ''}{marker}{parsed.text}" if parsed.text else str(existing or "")
     if combined:
+        activity.content_text = combined[:20_000]
         activity.metadata["content_text"] = combined[:20_000]
+    return parsed.discovered
 
 
 async def _save_response(
@@ -443,7 +511,7 @@ async def download_activity_files(
                 previous_files,
                 use_single_fallback=(activity.module == "resource" and depth == 0),
             )
-            response, reused = await _get_with_validation(
+            response, reused = await DOWNLOAD_SERVICE.fetch(
                 context,
                 clean_url,
                 previous=previous,
@@ -485,11 +553,10 @@ async def download_activity_files(
                 html = await response.text()
                 final_url = sanitize_source_url(response.url)
                 linked_pages += 1
-                _record_linked_page(activity, final_url, depth, html)
+                discovered = _record_linked_page(activity, final_url, depth, html, base_url)
                 final_suffix = PurePosixPath(urlsplit(final_url).path.casefold()).suffix
                 if candidate_kind == "file" and final_suffix not in {".htm", ".html"}:
                     continue
-                discovered = discover_html_links(html, final_url, base_url)
                 for candidate in discovered.file_urls:
                     if candidate not in visited and linked_files < max_linked_files:
                         suffix = PurePosixPath(urlsplit(candidate).path.casefold()).suffix
@@ -504,11 +571,21 @@ async def download_activity_files(
 
         if queue:
             activity.metadata["recursive_collection_truncated"] = True
-            activity.metadata["recursive_collection_limits"] = {
-                "max_link_depth": max_link_depth,
-                "max_linked_pages": max_linked_pages,
-                "max_linked_files": max_linked_files,
-            }
+        activity.metadata["recursive_collection_limits"] = {
+            "max_link_depth": max_link_depth,
+            "max_linked_pages": max_linked_pages,
+            "max_linked_files": max_linked_files,
+            "discovered_pages": linked_pages,
+            "discovered_files": linked_files,
+        }
+        activity.collection_report = RecursiveCollectionReport(
+            truncated=bool(queue),
+            max_link_depth=max_link_depth,
+            max_linked_pages=max_linked_pages,
+            max_linked_files=max_linked_files,
+            discovered_pages=linked_pages,
+            discovered_files=linked_files,
+        )
 
         activity.download_status = "downloaded" if activity.files else "skipped"
     except MoodleSyncCancelled:

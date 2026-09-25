@@ -140,6 +140,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path not in {
             "/api/moodle/login",
+            "/api/moodle/preview",
             "/api/sync",
             "/api/sync/start",
             "/api/sync/retry",
@@ -164,6 +165,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             if path == "/api/moodle/login":
                 result = self.server.dashboard_service.login_moodle(payload)
+            elif path == "/api/moodle/preview":
+                result = self.server.dashboard_service.moodle_page_preview(payload)
             elif path == "/api/sync":
                 result = self.server.dashboard_service.synchronize_courses(payload)
             elif path == "/api/sync/start":

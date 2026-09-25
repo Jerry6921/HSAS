@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 from hsas.infrastructure.class_planner.fetch_calendar import (
+    APP_URL,
     _calendar_payload_from_app,
     _is_authenticated_portal_page,
     _is_calendar_url,
@@ -9,6 +10,7 @@ from hsas.infrastructure.class_planner.fetch_calendar import (
     _is_portal_bridge,
     _is_portal_resume_page,
     _resume_after_portal_login,
+    capture_calendar_response_in_context,
 )
 from hsas.infrastructure.class_planner.synchronize_calendar import (
     ClassPlannerBrowserGateway,
@@ -95,6 +97,65 @@ def test_calendar_payload_recovery_ignores_non_app_pages() -> None:
             raise AssertionError("non-app pages must not be inspected")
 
     assert asyncio.run(_calendar_payload_from_app(Page())) is None
+
+
+def test_visible_login_reuses_and_foregrounds_persistent_blank_page(
+    monkeypatch,
+) -> None:
+    class Page:
+        url = "about:blank"
+        goto_urls: list[str] = []
+        foreground_count = 0
+        closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def bring_to_front(self) -> None:
+            self.foreground_count += 1
+
+        async def goto(self, url: str, **_kwargs) -> None:
+            self.goto_urls.append(url)
+            self.url = url
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class Context:
+        def __init__(self, page: Page) -> None:
+            self.pages = [page]
+            self.listener = None
+
+        async def new_page(self):
+            raise AssertionError("interactive login must reuse the visible blank page")
+
+        def on(self, _event: str, listener) -> None:
+            self.listener = listener
+
+        def remove_listener(self, _event: str, listener) -> None:
+            assert listener is self.listener
+
+    async def resume(*_args, **_kwargs) -> dict:
+        return payload()
+
+    page = Page()
+    monkeypatch.setattr(
+        "hsas.infrastructure.class_planner.fetch_calendar._resume_after_portal_login",
+        resume,
+    )
+
+    result = asyncio.run(
+        capture_calendar_response_in_context(
+            Context(page),
+            headless=False,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result == payload()
+    assert page.goto_urls == [APP_URL]
+    assert page.foreground_count == 2
+    assert page.closed is True
 
 
 def test_authenticated_app_reloads_only_once_to_retrigger_calendar(

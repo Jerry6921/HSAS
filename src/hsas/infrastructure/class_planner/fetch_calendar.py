@@ -326,7 +326,23 @@ async def capture_calendar_response_in_context(
     """Capture the calendar through a broker-owned browser context."""
     if timeout_seconds < 10 or timeout_seconds > 900:
         raise ValueError("Class Planner timeout must be between 10 and 900 seconds")
-    page = await context.new_page()
+    # A persistent Chromium context normally starts with one visible blank
+    # page. Reuse that page for interactive login instead of opening a second
+    # tab: on macOS the newly-created tab can remain detached from the visible
+    # window, leaving the user staring at ``about:blank`` while login waits.
+    page = None
+    if not headless:
+        page = next(
+            (
+                candidate
+                for candidate in context.pages
+                if not candidate.is_closed()
+                and candidate.url in {"", "about:blank", "chrome://newtab/"}
+            ),
+            None,
+        )
+    if page is None:
+        page = await context.new_page()
     try:
         loop = asyncio.get_running_loop()
         payload_future: asyncio.Future[dict[str, Any]] = loop.create_future()
@@ -356,7 +372,11 @@ async def capture_calendar_response_in_context(
             asyncio.create_task(consume(response))
 
         context.on("response", schedule)
+        if not headless:
+            await page.bring_to_front()
         await page.goto(APP_URL, wait_until="domcontentloaded")
+        if not headless:
+            await page.bring_to_front()
         try:
             if headless:
                 deadline = loop.time() + timeout_seconds

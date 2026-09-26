@@ -21,6 +21,83 @@
   与待审变化；同一份结构化摘要也可由 Agent 读取。
 - **日历导出**：将课程安排、Assessment 和 DDL 导入 Apple Calendar 等日历应用。
 
+### 为什么选择 HIQS
+
+HIQS 现在最重要的功能，不是日历、搜索或 Moodle 下载器中的任何一个，而是：
+
+> 把分散、复杂、需要登录的学业信息，转化成 Agent 可以可靠理解、引用、核对并持续更新的
+> 本地证据库。
+
+这是一条完整闭环：
+
+```text
+Moodle / SIS / Class Planner
+        ↓
+发现、下载、递归解析
+        ↓
+EvidenceNode / EvidenceEdge
+        ↓
+FTS5 检索与按需读取
+        ↓
+Agent 提取学业事实
+        ↓
+校验、冲突处理、人工确认
+        ↓
+information.json / 日历 / 风险提醒
+```
+
+#### 最重要的竞争力来源
+
+1. **面向真实大学系统的深度采集**
+
+   HIQS 不只是读取 Moodle 页面文字，还能处理：
+
+   - 登录状态和 HKU SSO
+   - Moodle 活动正文、表格
+   - 页面内嵌链接和递归链接
+   - PDF、PPTX、DOCX、图片与 OCR
+   - SIS、Class Planner 等不同来源
+
+   通用 AI 很难稳定进入这些私有系统并维护长期状态，这是第一层壁垒。
+
+2. **证据可追溯，而不是“把文字塞给 AI”**
+
+   每段内容都尽可能关联课程、活动、文件、页码、表格和来源节点。Agent 不仅知道“答案
+   是什么”，还知道：
+
+   - 信息来自哪里
+   - 对应哪个文件或页面
+   - 是否完整
+   - 是否经过 OCR 或 fallback
+   - 还能按 `evidence_id` 继续读取上下文
+
+   这是 [material_search.py](src/hsas/application/material_search.py) 和统一证据模型最有价值的
+   部分。
+
+3. **Agent 不能随意修改正式数据**
+
+   HIQS 的写入路径是：
+
+   ```text
+   Agent 提议 → Schema 验证 → Apply → 来源 checkpoint → 正式读取验证
+   ```
+
+   这比普通 AI 助手直接生成一个日历可靠得多。错误不会因为一次幻觉就悄悄进入正式课程
+   数据库。
+
+4. **持续对账，而不是一次性总结**
+
+   Moodle、SIS、Class Planner、个人输入之间可以分别保留状态。系统能区分：
+
+   - 新发现的信息
+   - 已处理的信息
+   - 来源冲突
+   - 日期未知
+   - 采集失败
+   - 真正需要用户确认的事项
+
+   因此 HIQS 更接近“学业信息状态管理系统”，而不是课程资料阅读器。
+
 ![HIQS 首页：今日安排、近期考核与课程资料更新](docs/images/ui/home-study-journal.png)
 
 ## 界面功能

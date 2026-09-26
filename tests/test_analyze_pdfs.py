@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+import hashlib
+import json
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -5,6 +8,12 @@ from pypdf import PdfWriter
 
 from hsas.infrastructure.documents.pdf import analyze_pdf
 from hsas.infrastructure.documents.office import analyze_office_document
+from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
+from hsas.domain.courses.models import StoredFile
+from hsas.infrastructure.moodle.course_mapper import build_course_archive
+
+
+ROOT = Path(__file__).parents[1]
 
 
 def test_blank_pdf_is_marked_for_ocr(tmp_path: Path) -> None:
@@ -93,3 +102,61 @@ def test_image_only_pptx_is_marked_for_ocr(tmp_path: Path) -> None:
     assert analysis.ocr_required is True
     assert analysis.page_count == 1
     assert analysis.pages_with_text == 0
+
+
+def test_analysis_pipeline_reuses_content_addressed_cache(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state,
+        course_title="Demo",
+        raw_state_path="courses/138907/raw/course-state.json",
+    )
+    activity = archive.sections[0].activities[0]
+    document = resources / "courses/138907/files/brief.docx"
+    document.parent.mkdir(parents=True)
+    with ZipFile(document, "w") as source:
+        source.writestr(
+            "word/document.xml",
+            """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Cached assignment instructions.</w:t></w:r></w:p></w:body></w:document>""",
+        )
+    digest = hashlib.sha256(document.read_bytes()).hexdigest()
+    activity.files = [
+        StoredFile(
+            filename="brief.docx",
+            relative_path="courses/138907/files/brief.docx",
+            source_url="https://moodle.example.edu/pluginfile.php/brief.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            size_bytes=document.stat().st_size,
+            sha256=digest,
+            downloaded_at=datetime.now(UTC),
+        )
+    ]
+    course_root = resources / "courses/138907"
+    cache_root = resources / "cache/document-analysis"
+
+    first = analyze_course_documents(
+        archive,
+        storage_root=resources,
+        course_root=course_root,
+        cache_root=cache_root,
+        max_workers=2,
+    )
+    text_path = resources / activity.files[0].analysis.extracted_text_path
+    activity.files[0].analysis = None
+    text_path.unlink()
+    second = analyze_course_documents(
+        archive,
+        storage_root=resources,
+        course_root=course_root,
+        cache_root=cache_root,
+        max_workers=2,
+    )
+
+    assert first.processed == 1
+    assert first.cache_hits == 0
+    assert second.processed == 0
+    assert second.cache_hits == 1
+    assert "Cached assignment instructions" in text_path.read_text(encoding="utf-8")

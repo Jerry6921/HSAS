@@ -31,15 +31,15 @@ Moodle API / HTML fallback
         ↓
 解析惰性 HTML 正文与下一层链接
         ↓
-PDF 文本提取
-        ↓
-DOCX / PPTX 文本与 speaker notes 提取
+SHA-256 缓存命中或有界并行提取 PDF / DOCX / PPTX
         ↓
 比较活动及文件变化
         ↓
 加入 AI pending review
         ↓
 验证并原子发布课程快照
+        ↓
+按课程增量更新全局 FTS5
 ```
 
 AI 在默认同步管线中承担课程事实归纳，并通过
@@ -71,7 +71,8 @@ Google Workspace 是唯一默认允许尝试下载的外部来源：
 - 扫描 PDF 或图片型 Office 文件会提示 OCR/视觉读取限制。
 
 旧 `.doc`、`.ppt` 和其他格式会保留原文件；AI 可使用相应的文档工具读取。所有可提取
-文本统一进入 `analysis/text/`，供 `hsas materials search` 查询。
+文本统一进入 `analysis/text/`，供 `hsas materials search` 查询。确定性解析结果以来源
+SHA-256 和 parser version 为键缓存在 `cache/document-analysis/`；重复内容无需再次解析。
 
 ## 输出
 
@@ -92,7 +93,8 @@ Last-Modified、最近校验时间及可选文本分析。
 
 活动正文、表格、递归页面与采集范围分别写入 `content_text`、`content_tables`、
 `linked_pages` 和 `collection_report`。它们连同文件和提取文本投影为稳定证据图，搜索命中
-携带 evidence ID，Agent 可通过 `get_evidence` 追溯来源和完整性。
+携带 evidence ID，Agent 可通过 `get_evidence` 追溯来源和完整性；搜索摘要被截断时可通过
+MCP `get_evidence_content` 仅展开选中的 chunk 及其相邻上下文。
 
 增量同步使用 HTTP validator 和 SHA-256 复用未变文件。每门课程在 staging 中构建；只有
 下载、分析和模型校验完成后才通过目录交换发布。中断或失败会保留上一份有效快照。

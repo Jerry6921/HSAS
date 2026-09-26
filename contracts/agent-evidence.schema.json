@@ -1,0 +1,1710 @@
+{
+  "contracts": {
+    "CourseQuestionContext": {
+      "$defs": {
+        "CourseFactHit": {
+          "additionalProperties": false,
+          "description": "One relevant course-wide record from the canonical information store.",
+          "properties": {
+            "course": {
+              "$ref": "#/$defs/CourseRecord"
+            },
+            "score": {
+              "minimum": 0,
+              "title": "Score",
+              "type": "number"
+            }
+          },
+          "required": [
+            "score",
+            "course"
+          ],
+          "title": "CourseFactHit",
+          "type": "object"
+        },
+        "CourseLink": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "url": {
+              "minLength": 1,
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "url"
+          ],
+          "title": "CourseLink",
+          "type": "object"
+        },
+        "CourseMaterialSection": {
+          "additionalProperties": false,
+          "description": "An AI-authored, freely named shelf in a course's material archive.",
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "materials": {
+              "items": {
+                "$ref": "#/$defs/RelatedMaterial"
+              },
+              "title": "Materials",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "title": "CourseMaterialSection",
+          "type": "object"
+        },
+        "CourseRecord": {
+          "additionalProperties": false,
+          "description": "Queryable course identity and course-wide facts.",
+          "properties": {
+            "additional_moodle_course_ids": {
+              "description": "Additional shared or meta-course Moodle archives whose materials belong to this information course",
+              "items": {
+                "type": "string"
+              },
+              "title": "Additional Moodle Course Ids",
+              "type": "array"
+            },
+            "code": {
+              "minLength": 1,
+              "title": "Code",
+              "type": "string"
+            },
+            "color": {
+              "default": "#2563eb",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "title": "Color",
+              "type": "string"
+            },
+            "course_id": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "title": "Course Id",
+              "type": "string"
+            },
+            "ends_on": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Last teaching date for the course in this semester",
+              "title": "Ends On"
+            },
+            "instructors": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Instructors",
+              "type": "array"
+            },
+            "links": {
+              "items": {
+                "$ref": "#/$defs/CourseLink"
+              },
+              "title": "Links",
+              "type": "array"
+            },
+            "material_sections": {
+              "description": "AI-authored free-form material shelves. Section titles are inferred from course evidence rather than selected from a fixed list.",
+              "items": {
+                "$ref": "#/$defs/CourseMaterialSection"
+              },
+              "title": "Material Sections",
+              "type": "array"
+            },
+            "moodle_course_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Moodle Course Id"
+            },
+            "notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Notes",
+              "type": "array"
+            },
+            "objectives": {
+              "description": "AI-summarized course aims supported by course sources",
+              "items": {
+                "type": "string"
+              },
+              "title": "Objectives",
+              "type": "array"
+            },
+            "overview": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "AI-authored, source-grounded overview of the course",
+              "title": "Overview"
+            },
+            "policies": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Policies",
+              "type": "array"
+            },
+            "semester": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Semester"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/$defs/SourceReference"
+              },
+              "title": "Sources",
+              "type": "array"
+            },
+            "starts_on": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First teaching date for the course in this semester",
+              "title": "Starts On"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "course_id",
+            "code",
+            "title"
+          ],
+          "title": "CourseRecord",
+          "type": "object"
+        },
+        "InformationItem": {
+          "additionalProperties": false,
+          "description": "One timetable, deadline, or assessment fact shown by the query UI.",
+          "properties": {
+            "all_day": {
+              "default": false,
+              "title": "All Day",
+              "type": "boolean"
+            },
+            "assessment_format": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Assessment Format"
+            },
+            "category": {
+              "enum": [
+                "class",
+                "tutorial",
+                "lab",
+                "office_hour",
+                "assignment",
+                "quiz",
+                "exam",
+                "presentation",
+                "project",
+                "report",
+                "reading",
+                "deadline",
+                "other"
+              ],
+              "title": "Category",
+              "type": "string"
+            },
+            "course_id": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "title": "Course Id",
+              "type": "string"
+            },
+            "date_status": {
+              "default": "unknown",
+              "enum": [
+                "confirmed",
+                "tentative",
+                "unknown"
+              ],
+              "title": "Date Status",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "due_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Due At"
+            },
+            "due_on": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Due On"
+            },
+            "ends_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ends At"
+            },
+            "item_id": {
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "title": "Item Id",
+              "type": "string"
+            },
+            "last_verified_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Last Verified At"
+            },
+            "links": {
+              "items": {
+                "$ref": "#/$defs/CourseLink"
+              },
+              "title": "Links",
+              "type": "array"
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Location"
+            },
+            "materials": {
+              "description": "Learning resources that directly support this calendar activity",
+              "items": {
+                "$ref": "#/$defs/RelatedMaterial"
+              },
+              "title": "Materials",
+              "type": "array"
+            },
+            "opens_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Opens At"
+            },
+            "policies": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Policies",
+              "type": "array"
+            },
+            "recurrence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WeeklyRecurrence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "requirements": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Requirements",
+              "type": "array"
+            },
+            "scheduled_on": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Scheduled On"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/$defs/SourceReference"
+              },
+              "title": "Sources",
+              "type": "array"
+            },
+            "starts_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Starts At"
+            },
+            "submission_method": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Submission Method"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Warnings",
+              "type": "array"
+            },
+            "weight_percent": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Weight Percent"
+            },
+            "word_limit": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Word Limit"
+            }
+          },
+          "required": [
+            "item_id",
+            "course_id",
+            "title",
+            "category"
+          ],
+          "title": "InformationItem",
+          "type": "object"
+        },
+        "InformationItemHit": {
+          "additionalProperties": false,
+          "description": "One relevant timetable or assessment record with its stored evidence.",
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/InformationItem"
+            },
+            "score": {
+              "minimum": 0,
+              "title": "Score",
+              "type": "number"
+            }
+          },
+          "required": [
+            "score",
+            "item"
+          ],
+          "title": "InformationItemHit",
+          "type": "object"
+        },
+        "MaterialHit": {
+          "additionalProperties": false,
+          "properties": {
+            "activity_id": {
+              "title": "Activity Id",
+              "type": "string"
+            },
+            "activity_name": {
+              "title": "Activity Name",
+              "type": "string"
+            },
+            "chunk_index": {
+              "minimum": 0,
+              "title": "Chunk Index",
+              "type": "integer"
+            },
+            "content_tables": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Content Tables",
+              "type": "array"
+            },
+            "course_id": {
+              "title": "Course Id",
+              "type": "string"
+            },
+            "course_title": {
+              "title": "Course Title",
+              "type": "string"
+            },
+            "evidence_id": {
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "filename": {
+              "title": "Filename",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Start"
+            },
+            "relative_text_path": {
+              "title": "Relative Text Path",
+              "type": "string"
+            },
+            "retrieval_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Retrieval Hint"
+            },
+            "score": {
+              "minimum": 0,
+              "title": "Score",
+              "type": "number"
+            },
+            "source_kind": {
+              "default": "file",
+              "enum": [
+                "file",
+                "moodle_activity"
+              ],
+              "title": "Source Kind",
+              "type": "string"
+            },
+            "source_unit_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit End"
+            },
+            "source_unit_label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Label"
+            },
+            "source_unit_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Start"
+            },
+            "text": {
+              "title": "Text",
+              "type": "string"
+            },
+            "text_character_count": {
+              "minimum": 0,
+              "title": "Text Character Count",
+              "type": "integer"
+            },
+            "text_truncated": {
+              "default": false,
+              "title": "Text Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "score",
+            "evidence_id",
+            "course_id",
+            "course_title",
+            "activity_id",
+            "activity_name",
+            "filename",
+            "relative_text_path",
+            "chunk_index",
+            "text",
+            "text_character_count"
+          ],
+          "title": "MaterialHit",
+          "type": "object"
+        },
+        "MaterialSearchResult": {
+          "additionalProperties": false,
+          "properties": {
+            "course_ids": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Course Ids",
+              "type": "array"
+            },
+            "hits": {
+              "items": {
+                "$ref": "#/$defs/MaterialHit"
+              },
+              "title": "Hits",
+              "type": "array"
+            },
+            "indexed_chunk_count": {
+              "minimum": 0,
+              "title": "Indexed Chunk Count",
+              "type": "integer"
+            },
+            "indexed_document_count": {
+              "minimum": 0,
+              "title": "Indexed Document Count",
+              "type": "integer"
+            },
+            "query": {
+              "title": "Query",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "1.0",
+              "default": "1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "skipped_document_count": {
+              "minimum": 0,
+              "title": "Skipped Document Count",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "query",
+            "indexed_document_count",
+            "indexed_chunk_count",
+            "skipped_document_count"
+          ],
+          "title": "MaterialSearchResult",
+          "type": "object"
+        },
+        "RecurrenceException": {
+          "additionalProperties": false,
+          "description": "One cancelled or changed occurrence of a weekly timetable rule.",
+          "properties": {
+            "date": {
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            },
+            "end_time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "End Time"
+            },
+            "location": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Location"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/$defs/SourceReference"
+              },
+              "title": "Sources",
+              "type": "array"
+            },
+            "start_time": {
+              "anyOf": [
+                {
+                  "format": "time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Start Time"
+            },
+            "status": {
+              "enum": [
+                "cancelled",
+                "changed"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Title"
+            }
+          },
+          "required": [
+            "date",
+            "status"
+          ],
+          "title": "RecurrenceException",
+          "type": "object"
+        },
+        "RelatedMaterial": {
+          "additionalProperties": false,
+          "description": "A locally previewable learning resource attached to a calendar item.",
+          "properties": {
+            "material_type": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional AI-authored free-text role; no fixed taxonomy",
+              "title": "Material Type"
+            },
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "page_numbers": {
+              "items": {
+                "type": "integer"
+              },
+              "title": "Page Numbers",
+              "type": "array"
+            },
+            "relative_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Relative Path"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Url"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "title": "RelatedMaterial",
+          "type": "object"
+        },
+        "SourceReference": {
+          "additionalProperties": false,
+          "description": "Human-checkable evidence for one course fact.",
+          "properties": {
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Observed At"
+            },
+            "page_numbers": {
+              "items": {
+                "type": "integer"
+              },
+              "title": "Page Numbers",
+              "type": "array"
+            },
+            "relative_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Relative Path"
+            },
+            "source_type": {
+              "enum": [
+                "syllabus",
+                "moodle",
+                "course_document",
+                "announcement",
+                "email",
+                "manual",
+                "sis_course_info",
+                "other"
+              ],
+              "title": "Source Type",
+              "type": "string"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Url"
+            }
+          },
+          "required": [
+            "source_type",
+            "title"
+          ],
+          "title": "SourceReference",
+          "type": "object"
+        },
+        "WeeklyRecurrence": {
+          "additionalProperties": false,
+          "description": "A weekly timetable rule; weekdays use Monday=0 through Sunday=6.",
+          "properties": {
+            "additional_dates": {
+              "items": {
+                "format": "date",
+                "type": "string"
+              },
+              "title": "Additional Dates",
+              "type": "array"
+            },
+            "end_time": {
+              "format": "time",
+              "title": "End Time",
+              "type": "string"
+            },
+            "exceptions": {
+              "items": {
+                "$ref": "#/$defs/RecurrenceException"
+              },
+              "title": "Exceptions",
+              "type": "array"
+            },
+            "excluded_dates": {
+              "items": {
+                "format": "date",
+                "type": "string"
+              },
+              "title": "Excluded Dates",
+              "type": "array"
+            },
+            "start_time": {
+              "format": "time",
+              "title": "Start Time",
+              "type": "string"
+            },
+            "valid_from": {
+              "format": "date",
+              "title": "Valid From",
+              "type": "string"
+            },
+            "valid_until": {
+              "format": "date",
+              "title": "Valid Until",
+              "type": "string"
+            },
+            "weekdays": {
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 1,
+              "title": "Weekdays",
+              "type": "array"
+            }
+          },
+          "required": [
+            "weekdays",
+            "valid_from",
+            "valid_until",
+            "start_time",
+            "end_time"
+          ],
+          "title": "WeeklyRecurrence",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Evidence packet consumed by an AI; it is not itself an AI answer.",
+      "properties": {
+        "course_facts": {
+          "items": {
+            "$ref": "#/$defs/CourseFactHit"
+          },
+          "title": "Course Facts",
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "information_items": {
+          "items": {
+            "$ref": "#/$defs/InformationItemHit"
+          },
+          "title": "Information Items",
+          "type": "array"
+        },
+        "information_updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Information Updated At"
+        },
+        "material_evidence": {
+          "$ref": "#/$defs/MaterialSearchResult"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "selected_course_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selected Course Ids",
+          "type": "array"
+        },
+        "timezone": {
+          "title": "Timezone",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "question",
+        "generated_at",
+        "timezone",
+        "material_evidence"
+      ],
+      "title": "CourseQuestionContext",
+      "type": "object"
+    },
+    "EvidenceContentResult": {
+      "$defs": {
+        "EvidenceContentChunk": {
+          "additionalProperties": false,
+          "properties": {
+            "activity_id": {
+              "title": "Activity Id",
+              "type": "string"
+            },
+            "activity_name": {
+              "title": "Activity Name",
+              "type": "string"
+            },
+            "chunk_index": {
+              "minimum": 0,
+              "title": "Chunk Index",
+              "type": "integer"
+            },
+            "content_tables": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Content Tables",
+              "type": "array"
+            },
+            "course_id": {
+              "title": "Course Id",
+              "type": "string"
+            },
+            "course_title": {
+              "title": "Course Title",
+              "type": "string"
+            },
+            "filename": {
+              "title": "Filename",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Start"
+            },
+            "relative_text_path": {
+              "title": "Relative Text Path",
+              "type": "string"
+            },
+            "source_kind": {
+              "enum": [
+                "file",
+                "moodle_activity"
+              ],
+              "title": "Source Kind",
+              "type": "string"
+            },
+            "source_unit_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit End"
+            },
+            "source_unit_label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Label"
+            },
+            "source_unit_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Start"
+            },
+            "text": {
+              "title": "Text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "course_id",
+            "course_title",
+            "activity_id",
+            "activity_name",
+            "source_kind",
+            "filename",
+            "relative_text_path",
+            "chunk_index",
+            "text"
+          ],
+          "title": "EvidenceContentChunk",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "character_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Character Count",
+          "type": "integer"
+        },
+        "chunks": {
+          "items": {
+            "$ref": "#/$defs/EvidenceContentChunk"
+          },
+          "title": "Chunks",
+          "type": "array"
+        },
+        "context_chunks": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Context Chunks",
+          "type": "integer"
+        },
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "requested_chunk_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Chunk Index"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "not_found"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "evidence_id"
+      ],
+      "title": "EvidenceContentResult",
+      "type": "object"
+    },
+    "MaterialSearchResult": {
+      "$defs": {
+        "MaterialHit": {
+          "additionalProperties": false,
+          "properties": {
+            "activity_id": {
+              "title": "Activity Id",
+              "type": "string"
+            },
+            "activity_name": {
+              "title": "Activity Name",
+              "type": "string"
+            },
+            "chunk_index": {
+              "minimum": 0,
+              "title": "Chunk Index",
+              "type": "integer"
+            },
+            "content_tables": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Content Tables",
+              "type": "array"
+            },
+            "course_id": {
+              "title": "Course Id",
+              "type": "string"
+            },
+            "course_title": {
+              "title": "Course Title",
+              "type": "string"
+            },
+            "evidence_id": {
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "filename": {
+              "title": "Filename",
+              "type": "string"
+            },
+            "page_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page End"
+            },
+            "page_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Page Start"
+            },
+            "relative_text_path": {
+              "title": "Relative Text Path",
+              "type": "string"
+            },
+            "retrieval_hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Retrieval Hint"
+            },
+            "score": {
+              "minimum": 0,
+              "title": "Score",
+              "type": "number"
+            },
+            "source_kind": {
+              "default": "file",
+              "enum": [
+                "file",
+                "moodle_activity"
+              ],
+              "title": "Source Kind",
+              "type": "string"
+            },
+            "source_unit_end": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit End"
+            },
+            "source_unit_label": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Label"
+            },
+            "source_unit_start": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Unit Start"
+            },
+            "text": {
+              "title": "Text",
+              "type": "string"
+            },
+            "text_character_count": {
+              "minimum": 0,
+              "title": "Text Character Count",
+              "type": "integer"
+            },
+            "text_truncated": {
+              "default": false,
+              "title": "Text Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "score",
+            "evidence_id",
+            "course_id",
+            "course_title",
+            "activity_id",
+            "activity_name",
+            "filename",
+            "relative_text_path",
+            "chunk_index",
+            "text",
+            "text_character_count"
+          ],
+          "title": "MaterialHit",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "course_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Course Ids",
+          "type": "array"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/MaterialHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "indexed_chunk_count": {
+          "minimum": 0,
+          "title": "Indexed Chunk Count",
+          "type": "integer"
+        },
+        "indexed_document_count": {
+          "minimum": 0,
+          "title": "Indexed Document Count",
+          "type": "integer"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "skipped_document_count": {
+          "minimum": 0,
+          "title": "Skipped Document Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query",
+        "indexed_document_count",
+        "indexed_chunk_count",
+        "skipped_document_count"
+      ],
+      "title": "MaterialSearchResult",
+      "type": "object"
+    }
+  },
+  "mcp_tools": {
+    "get_evidence": {
+      "input_schema": {
+        "properties": {
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "title": "get_evidenceArguments",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "get_evidenceDictOutput",
+        "type": "object"
+      }
+    },
+    "get_evidence_content": {
+      "input_schema": {
+        "properties": {
+          "chunk_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Chunk Index"
+          },
+          "context_chunks": {
+            "default": 1,
+            "title": "Context Chunks",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "title": "get_evidence_contentArguments",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "get_evidence_contentDictOutput",
+        "type": "object"
+      }
+    },
+    "query_course": {
+      "input_schema": {
+        "properties": {
+          "course_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Course Ids"
+          },
+          "item_limit": {
+            "default": 20,
+            "title": "Item Limit",
+            "type": "integer"
+          },
+          "material_limit": {
+            "default": 6,
+            "title": "Material Limit",
+            "type": "integer"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "query_courseArguments",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "query_courseDictOutput",
+        "type": "object"
+      }
+    },
+    "search_materials": {
+      "input_schema": {
+        "properties": {
+          "course_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Course Ids"
+          },
+          "limit": {
+            "default": 6,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "search_materialsArguments",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "search_materialsDictOutput",
+        "type": "object"
+      }
+    }
+  },
+  "schema_version": "1.0"
+}

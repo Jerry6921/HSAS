@@ -105,11 +105,12 @@ CORE façade 只维持稳定 Port、服务装配和兼容入口。CLI 的通用�
 flowchart LR
     Discover[发现链接与候选资源] --> Download[认证下载响应]
     Download --> Parse[解析惰性 HTML 证据]
-    Parse --> PDF[提取 PDF 文本]
-    PDF --> Office[提取 DOCX PPTX 文本与备注]
-    Office --> Changes[比较文件和活动变化]
+    Parse --> Analysis[并行提取 PDF DOCX PPTX 文本]
+    Cache[SHA-256 内容缓存] <--> Analysis
+    Analysis --> Changes[比较文件和活动变化]
     Changes --> Validate[验证 CourseArchive]
     Validate --> Publish[原子发布]
+    Publish --> FTS[按课程增量更新全局 FTS5]
 ```
 
 采集实现拆成可独立测试、可注入的发现、下载、解析三阶段。下载阶段接受 Moodle
@@ -155,16 +156,23 @@ caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。递�
 每个活动可确定性投影为 `EvidenceNode` / `EvidenceEdge` 图：活动、嵌套 HTML 页面、原文件与
 提取文本各有稳定 evidence ID，并用 `links_to`、`contains`、`derived_from` 连接。MCP
 `get_evidence` 与 Dashboard `GET /api/evidence/<id>` 返回节点、相邻节点和完整性状态，Agent
-可以从搜索命中追溯到原始来源，而不需要理解存储实现。
+可以从搜索命中追溯到原始来源，而不需要理解存储实现。搜索包受字符预算约束；需要完整上下文
+时，MCP `get_evidence_content` 按 evidence ID、chunk index 和最多三个相邻 chunk 定向展开，
+避免把无关文件一并送入 Agent。
 
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
 
-检索第一次读取课程快照时会建立本地 SQLite FTS5 索引。每份文档以 evidence ID 和内容指纹
-登记；刷新时只删除、重建已变化或已移除的证据行，未变化行保持原 rowid。活动、嵌套页面及
-提取文本的搜索命中直接携带对应证据图节点 ID，同时返回课程、活动、文件、页码和文本副本
-路径。索引是可删除的派生缓存，不会改变 canonical `course.json` 或个人资料。
+同步发布课程快照后会按课程增量更新本地 SQLite FTS5 全局索引。每份文档以 evidence ID 和
+内容指纹登记；只删除、重建已变化或已移除的证据行，未变化行保持原 rowid。课程过滤仅发生
+在 SQL 查询，不生成课程专属索引，也不扫描文件树。旧版或损坏索引只在首次读取时完整重建。
+活动、嵌套页面及提取文本的搜索命中直接携带对应证据图节点 ID，同时返回课程、活动、文件、
+页码和文本副本路径。索引是可删除的派生缓存，不会改变 canonical `course.json` 或个人资料。
+
+PDF、DOCX 与 PPTX 分析使用有界工作池，并将结果按“来源 SHA-256 + parser version”写入
+`cache/document-analysis/`。相同内容跨课程、改名或重复同步时直接复用已验证文本和分析模型；
+parser version 变化会自然产生新缓存键。OCR 改写文本后只刷新受影响课程的索引。
 
 HKU SIS 课程页面保存在 `sis-course-info/courses/<COURSE_CODE>/latest.txt` 与
 `latest.html`。采集器只截取可见课程正文、移除 PeopleSoft 导航和会话状态，并记录安全的

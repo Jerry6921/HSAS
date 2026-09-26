@@ -16,6 +16,10 @@ from hsas.application.ports.gateways import (
     SyncBatchResult,
     SyncCourseResult,
 )
+from hsas.application.material_search import (
+    invalidate_material_index,
+    refresh_material_index,
+)
 
 from hsas.infrastructure.moodle.activity_downloader import download_course_files
 from hsas.infrastructure.moodle.client import (
@@ -45,10 +49,7 @@ from hsas.domain.courses.change_detection import (
 )
 from hsas.infrastructure.moodle.course_mapper import build_course_archive
 from hsas.domain.courses.models import CourseActivity, CourseArchive
-from hsas.infrastructure.documents.pdf import analyze_course_pdfs
-from hsas.infrastructure.documents.office import (
-    analyze_course_office_documents,
-)
+from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
 
 
 def _settings() -> Settings:
@@ -166,23 +167,17 @@ async def _persist_course(
                 cancel_requested=cancel_requested,
             )
         raise_if_cancelled(cancel_requested)
-        with _stage(progress, progress_task, "PdfAnalyzer", "Extracting PDF text"):
-            analyze_course_pdfs(
-                archive,
-                storage_root=storage_root,
-                course_root=course_root,
-            )
-        raise_if_cancelled(cancel_requested)
         with _stage(
             progress,
             progress_task,
-            "OfficeAnalyzer",
-            "Extracting DOCX and PPTX text",
+            "DocumentAnalyzer",
+            "Reusing or extracting PDF, DOCX, and PPTX text",
         ):
-            analyze_course_office_documents(
+            analyze_course_documents(
                 archive,
                 storage_root=storage_root,
                 course_root=course_root,
+                cache_root=live_storage_root / "cache" / "document-analysis",
             )
         raise_if_cancelled(cancel_requested)
         with _stage(
@@ -201,6 +196,10 @@ async def _persist_course(
             raise_if_cancelled(cancel_requested)
             write_model(staged_course_path, archive)
             output_path = transaction.commit()
+        try:
+            refresh_material_index(live_storage_root, {course_id})
+        except (OSError, ValueError):
+            invalidate_material_index(live_storage_root)
     return archive, changes, output_path
 
 

@@ -97,3 +97,25 @@ def test_core_resolves_stable_evidence_node(tmp_path: Path) -> None:
     assert result["status"] == "found"
     assert result["node"]["evidence_id"] == f"activity:{activity.module_id}"
     assert result["course_id"] == "138907"
+
+
+def test_core_hydrates_only_selected_evidence_context(tmp_path: Path) -> None:
+    state = json.loads((ROOT / "tests/fixtures/course_state.json").read_text())
+    archive = build_course_archive(
+        state, course_title="Demo", raw_state_path="courses/138907/raw/course-state.json"
+    )
+    activity = archive.sections[0].activities[0]
+    activity.content_text = "selected evidence context for the agent"
+    write_model(tmp_path / "courses/138907/course.json", archive)
+    core = HIQSCore(resources_dir=tmp_path)
+
+    result = core.get_evidence_content(
+        {
+            "evidence_id": f"activity:{activity.module_id}",
+            "chunk_index": 0,
+            "context_chunks": 0,
+        }
+    )
+
+    assert result["status"] == "found"
+    assert result["chunks"][0]["text"] == "selected evidence context for the agent"

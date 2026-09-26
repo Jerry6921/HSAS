@@ -11,20 +11,51 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: python -m pip install -c requirements.lock -e '.[dev]'
+      - name: Verify SQLite FTS5
+        run: python -c "import sqlite3; connection = sqlite3.connect(':memory:'); connection.execute('CREATE VIRTUAL TABLE probe USING fts5(content)')"
+      - name: Lint
+        run: python -m ruff check src tests scripts
+      - name: Verify Agent contract snapshots
+        run: python scripts/generate_agent_contracts.py && git diff --exit-code -- contracts
+      - name: Test
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps --wheel-dir dist-wheel
+
+  macos:
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: pip
-      - name: Install
-        run: python -m pip install -c requirements.lock -e '.[dev]'
-      - name: Lint
-        run: python -m ruff check src tests
-      - name: Test
-        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
-      - name: Build wheel
-        run: python -m pip wheel . --no-deps --wheel-dir dist-wheel
+      - name: Install in app-compatible environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -c requirements.lock -e '.[dev]'
+      - name: Verify macOS runtime and local server
+        run: |
+          .venv/bin/python -c "import sqlite3; connection = sqlite3.connect(':memory:'); connection.execute('CREATE VIRTUAL TABLE probe USING fts5(content)')"
+          PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider tests/test_macos_app.py tests/test_macos_launcher.py tests/test_run_dashboard.py
+          .venv/bin/python -m hsas --help
+      - name: Build and verify native app
+        run: |
+          scripts/build_macos_app.sh
+          test -x dist/HIQS.app/Contents/MacOS/HIQS
+          codesign --verify --deep --strict dist/HIQS.app
 
   frontend:
     runs-on: ubuntu-latest

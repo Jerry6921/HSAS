@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
-import hashlib
+import fcntl
 import json
 import math
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any, Literal
 
 from pydantic import Field
@@ -21,7 +23,15 @@ from hsas.domain.courses import (
     iter_activities,
     iter_files,
 )
-from hsas.application.material_index import read_signature, search_index, write_index
+from hsas.application.material_index import (
+    evidence_context,
+    index_ready,
+    mark_index_stale,
+    remove_index_courses,
+    replace_index,
+    search_index,
+    update_index_courses,
+)
 
 
 UNIT_MARKER = re.compile(
@@ -48,16 +58,48 @@ class MaterialHit(StrictModel):
     source_unit_end: int | None = None
     chunk_index: int = Field(ge=0)
     text: str
+    text_character_count: int = Field(ge=0)
+    text_truncated: bool = False
+    retrieval_hint: str | None = None
     content_tables: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MaterialSearchResult(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
     query: str
     course_ids: list[str] = Field(default_factory=list)
     indexed_document_count: int = Field(ge=0)
     indexed_chunk_count: int = Field(ge=0)
     skipped_document_count: int = Field(ge=0)
     hits: list[MaterialHit] = Field(default_factory=list)
+
+
+class EvidenceContentChunk(StrictModel):
+    course_id: str
+    course_title: str
+    activity_id: str
+    activity_name: str
+    source_kind: Literal["file", "moodle_activity"]
+    filename: str
+    relative_text_path: str
+    page_start: int | None = None
+    page_end: int | None = None
+    source_unit_label: str | None = None
+    source_unit_start: int | None = None
+    source_unit_end: int | None = None
+    chunk_index: int = Field(ge=0)
+    text: str
+    content_tables: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EvidenceContentResult(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    status: Literal["found", "not_found"]
+    evidence_id: str
+    requested_chunk_index: int | None = None
+    context_chunks: int = Field(default=1, ge=0, le=3)
+    character_count: int = Field(default=0, ge=0)
+    chunks: list[EvidenceContentChunk] = Field(default_factory=list)
 
 
 def list_materials(
@@ -170,6 +212,8 @@ def search_materials(
     *,
     course_ids: set[str] | None = None,
     limit: int = 6,
+    context_character_limit: int = 6_000,
+    hit_character_limit: int = 1_200,
 ) -> MaterialSearchResult:
     """Retrieve relevant page-aware chunks without external services."""
     normalized_query = query.strip()
@@ -178,27 +222,168 @@ def search_materials(
         raise ValueError("material query must contain searchable text")
     if limit < 1 or limit > 20:
         raise ValueError("material result limit must be between 1 and 20")
+    if context_character_limit < 500 or context_character_limit > 50_000:
+        raise ValueError("context character limit must be between 500 and 50000")
+    if hit_character_limit < 200 or hit_character_limit > 10_000:
+        raise ValueError("hit character limit must be between 200 and 10000")
 
     index_path = resources_dir / "index" / "materials.sqlite3"
-    signature = _material_signature(resources_dir, course_ids)
-    if read_signature(index_path) == signature:
-        indexed = search_index(index_path, " OR ".join(query_tokens), course_ids, limit)
-        return _result_from_index(normalized_query, course_ids, indexed, limit)
+    if not index_ready(index_path):
+        _ensure_material_index(resources_dir)
+    query_expression = " OR ".join(query_tokens)
+    try:
+        indexed = search_index(index_path, query_expression, course_ids, limit)
+    except sqlite3.Error:
+        _rebuild_material_index(resources_dir)
+        try:
+            indexed = search_index(index_path, query_expression, course_ids, limit)
+        except sqlite3.Error as exc:
+            raise OSError(f"material index search failed after recovery: {exc}") from exc
+    return _result_from_index(
+        normalized_query,
+        course_ids,
+        indexed,
+        limit,
+        context_character_limit=context_character_limit,
+        hit_character_limit=hit_character_limit,
+    )
 
+
+def refresh_material_index(
+    resources_dir: Path,
+    course_ids: set[str] | None = None,
+) -> dict[str, int]:
+    """Build once or incrementally refresh synchronized course evidence."""
+    index_path = resources_dir / "index" / "materials.sqlite3"
+    try:
+        with _material_index_lock(resources_dir):
+            selected = course_ids if course_ids and index_ready(index_path) else None
+            chunks, skipped_by_course = _collect_chunks(resources_dir, selected)
+            if selected is None:
+                return replace_index(
+                    index_path,
+                    chunks,
+                    skipped_by_course=skipped_by_course,
+                )
+            return update_index_courses(
+                index_path,
+                chunks,
+                course_ids=selected,
+                skipped_by_course=skipped_by_course,
+            )
+    except sqlite3.Error as exc:
+        raise OSError(f"material index refresh failed: {exc}") from exc
+
+
+def _ensure_material_index(resources_dir: Path) -> None:
+    index_path = resources_dir / "index" / "materials.sqlite3"
+    try:
+        with _material_index_lock(resources_dir):
+            if index_ready(index_path):
+                return
+            chunks, skipped_by_course = _collect_chunks(resources_dir, None)
+            replace_index(
+                index_path,
+                chunks,
+                skipped_by_course=skipped_by_course,
+            )
+    except sqlite3.Error as exc:
+        raise OSError(f"material index initialization failed: {exc}") from exc
+
+
+def _rebuild_material_index(resources_dir: Path) -> dict[str, int]:
+    """Replace a broken derived index once while serializing competing rebuilds."""
+    index_path = resources_dir / "index" / "materials.sqlite3"
+    try:
+        with _material_index_lock(resources_dir):
+            chunks, skipped_by_course = _collect_chunks(resources_dir, None)
+            return replace_index(
+                index_path,
+                chunks,
+                skipped_by_course=skipped_by_course,
+            )
+    except sqlite3.Error as exc:
+        raise OSError(f"material index recovery failed: {exc}") from exc
+
+
+@contextmanager
+def _material_index_lock(resources_dir: Path):
+    lock_path = resources_dir / "index" / "materials.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def remove_material_index_courses(
+    resources_dir: Path,
+    course_ids: set[str],
+) -> dict[str, int]:
+    try:
+        with _material_index_lock(resources_dir):
+            return remove_index_courses(
+                resources_dir / "index" / "materials.sqlite3", course_ids
+            )
+    except sqlite3.Error as exc:
+        raise OSError(f"material index removal failed: {exc}") from exc
+
+
+def invalidate_material_index(resources_dir: Path) -> None:
+    mark_index_stale(resources_dir / "index" / "materials.sqlite3")
+
+
+def retrieve_evidence_context(
+    resources_dir: Path,
+    evidence_id: str,
+    *,
+    chunk_index: int | None = None,
+    context_chunks: int = 1,
+) -> list[dict[str, Any]]:
+    index_path = resources_dir / "index" / "materials.sqlite3"
+    if not index_ready(index_path):
+        _ensure_material_index(resources_dir)
+    try:
+        return evidence_context(
+            index_path,
+            evidence_id,
+            chunk_index=chunk_index,
+            context_chunks=context_chunks,
+        )
+    except sqlite3.Error:
+        _rebuild_material_index(resources_dir)
+        try:
+            return evidence_context(
+                index_path,
+                evidence_id,
+                chunk_index=chunk_index,
+                context_chunks=context_chunks,
+            )
+        except sqlite3.Error as exc:
+            raise OSError(
+                f"material evidence retrieval failed after recovery: {exc}"
+            ) from exc
+
+
+def _collect_chunks(
+    resources_dir: Path,
+    course_ids: set[str] | None,
+) -> tuple[list[_Chunk], dict[str, int]]:
     chunks: list[_Chunk] = []
-    document_count = 0
-    skipped = 0
+    skipped_by_course: dict[str, int] = {}
     courses_root = resources_dir / "courses"
     for archive_path in sorted(courses_root.glob("*/course.json")):
         index = ArchiveIndex.from_json(archive_path)
         course_id = index.archive.course.course_id
         if course_ids and course_id not in course_ids:
             continue
+        skipped_by_course[course_id] = 0
         course_relative_path = archive_path.relative_to(resources_dir).as_posix()
         for activity in iter_activities(index.archive):
             content_text, content_tables = _activity_evidence(activity)
             if content_text:
-                document_count += 1
                 chunks.extend(
                     _chunk_document(
                         content_text,
@@ -217,7 +402,6 @@ def search_materials(
             for page_index, page in enumerate(activity.linked_pages):
                 if not page.content_text.strip():
                     continue
-                document_count += 1
                 chunks.extend(
                     _chunk_document(
                         page.content_text,
@@ -236,14 +420,13 @@ def search_materials(
         for activity, stored_file in iter_files(index.archive):
             analysis = stored_file.analysis
             if analysis is None or not analysis.extracted_text_path:
-                skipped += 1
+                skipped_by_course[course_id] += 1
                 continue
             text_path = resources_dir / analysis.extracted_text_path
             if not text_path.is_file():
-                skipped += 1
+                skipped_by_course[course_id] += 1
                 continue
             text = text_path.read_text(encoding="utf-8")
-            document_count += 1
             chunks.extend(
                 _chunk_document(
                     text,
@@ -256,50 +439,7 @@ def search_materials(
                     evidence_id=f"text:{activity.module_id}:{analysis.extracted_text_path}",
                 )
             )
-
-    scored = _rank(chunks, query_tokens, normalized_query)
-    write_index(index_path, signature, chunks, document_count, skipped)
-    hits = [
-        MaterialHit(
-            score=round(score, 6),
-            course_id=chunk.course_id,
-            evidence_id=chunk.evidence_id,
-            course_title=chunk.course_title,
-            activity_id=chunk.activity_id,
-            activity_name=chunk.activity_name,
-            source_kind=chunk.source_kind,
-            filename=chunk.filename,
-            relative_text_path=chunk.relative_text_path,
-            page_start=chunk.page_start,
-            page_end=chunk.page_end,
-            source_unit_label=chunk.source_unit_label,
-            source_unit_start=chunk.source_unit_start,
-            source_unit_end=chunk.source_unit_end,
-            chunk_index=chunk.chunk_index,
-            text=chunk.text,
-            content_tables=chunk.content_tables,
-        )
-        for score, chunk in scored[:limit]
-    ]
-    return MaterialSearchResult(
-        query=normalized_query,
-        course_ids=sorted(course_ids or {chunk.course_id for chunk in chunks}),
-        indexed_document_count=document_count,
-        indexed_chunk_count=len(chunks),
-        skipped_document_count=skipped,
-        hits=hits,
-    )
-
-
-def _material_signature(resources_dir: Path, course_ids: set[str] | None) -> str:
-    digest = hashlib.sha256()
-    digest.update(json.dumps(sorted(course_ids or []), ensure_ascii=False).encode())
-    for path in sorted((resources_dir / "courses").rglob("*")):
-        if not path.is_file():
-            continue
-        stat = path.stat()
-        digest.update(f"{path}:{stat.st_mtime_ns}:{stat.st_size}".encode())
-    return digest.hexdigest()
+    return chunks, skipped_by_course
 
 
 def _result_from_index(
@@ -307,18 +447,37 @@ def _result_from_index(
     course_ids: set[str] | None,
     indexed: dict[str, Any],
     limit: int,
+    *,
+    context_character_limit: int,
+    hit_character_limit: int,
 ) -> MaterialSearchResult:
     hits = []
+    remaining = context_character_limit
     for row in indexed["rows"][:limit]:
         score, *values = row
         tables = json.loads(values[-1])
+        full_text = str(values[14])
+        allowance = min(hit_character_limit, remaining)
+        if allowance <= 0:
+            break
+        text = full_text
+        truncated = len(full_text) > allowance
+        if truncated:
+            text = full_text[: allowance - 1].rstrip() + "…"
+        remaining -= len(text)
         hits.append(MaterialHit(
-            score=round(1.0 / (1.0 + max(float(score), 0.0)), 6),
+            score=round(1.0 / (1.0 + abs(float(score))), 6),
             evidence_id=values[0], course_id=values[1], course_title=values[2], activity_id=values[3],
             activity_name=values[4], source_kind=values[5], filename=values[6],
             relative_text_path=values[7], page_start=values[8], page_end=values[9],
             source_unit_label=values[10], source_unit_start=values[11],
-            source_unit_end=values[12], chunk_index=values[13], text=values[14],
+            source_unit_end=values[12], chunk_index=values[13], text=text,
+            text_character_count=len(full_text), text_truncated=truncated,
+            retrieval_hint=(
+                "Call get_evidence_content with this evidence_id and chunk_index "
+                "to retrieve the complete local context."
+                if truncated else None
+            ),
             content_tables=tables if isinstance(tables, list) else [],
         ))
     return MaterialSearchResult(

@@ -316,6 +316,10 @@ class HIQSCore:
     def get_evidence(self, evidence_id: str) -> dict[str, Any]:
         return self.material_query_service.evidence(evidence_id)
 
+    def get_evidence_content(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return complete text only for an explicitly selected evidence neighborhood."""
+        return self.material_query_service.evidence_content(payload)
+
     def query_course(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a cited RAG packet from structured facts and local materials."""
         return self.material_query_service.query_course(payload)

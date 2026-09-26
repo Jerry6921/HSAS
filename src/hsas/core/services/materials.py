@@ -14,7 +14,12 @@ from hsas.application.ports.repositories import (
     InformationRepository,
 )
 from hsas.application.course_context import build_course_question_context
-from hsas.application.material_search import list_materials, search_materials
+from hsas.application.material_search import (
+    EvidenceContentResult,
+    list_materials,
+    retrieve_evidence_context,
+    search_materials,
+)
 from hsas.core.ports import HIQSPortError
 from hsas.domain.courses import activity_evidence_graph, iter_activities, iter_files
 from hsas.infrastructure.storage import (
@@ -89,6 +94,7 @@ class MaterialQueryService:
                     if item.evidence_id in related_ids
                 ]
                 return {
+                    "schema_version": "1.0",
                     "status": "found",
                     "course_id": index.archive.course.course_id,
                     "course_title": index.archive.course.title,
@@ -101,10 +107,53 @@ class MaterialQueryService:
                     "truncation_reason": graph.truncation_reason,
                 }
         return {
+            "schema_version": "1.0",
             "status": "not_found",
             "evidence_id": evidence_id,
             "reason": "No current course snapshot contains this evidence node.",
         }
+
+    def evidence_content(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Hydrate one selected evidence result without returning unrelated files."""
+        evidence_id = payload.get("evidence_id")
+        if not isinstance(evidence_id, str) or not evidence_id or len(evidence_id) > 500:
+            raise HIQSPortError("evidence_id is required and must be bounded.")
+        chunk_index = payload.get("chunk_index")
+        if chunk_index is not None and (
+            not isinstance(chunk_index, int) or isinstance(chunk_index, bool) or chunk_index < 0
+        ):
+            raise HIQSPortError("chunk_index must be a non-negative integer or null.")
+        context_chunks = payload.get("context_chunks", 1)
+        if (
+            not isinstance(context_chunks, int)
+            or isinstance(context_chunks, bool)
+            or context_chunks < 0
+            or context_chunks > 3
+        ):
+            raise HIQSPortError("context_chunks must be between 0 and 3.")
+        try:
+            chunks = retrieve_evidence_context(
+                self.resources_dir,
+                evidence_id,
+                chunk_index=chunk_index,
+                context_chunks=context_chunks,
+            )
+        except (OSError, ValueError) as exc:
+            raise HIQSPortError(str(exc)) from exc
+        if not chunks:
+            return EvidenceContentResult(
+                status="not_found",
+                evidence_id=evidence_id,
+                chunks=[],
+            ).model_dump(mode="json")
+        return EvidenceContentResult(
+            status="found",
+            evidence_id=evidence_id,
+            requested_chunk_index=chunk_index,
+            context_chunks=context_chunks,
+            character_count=sum(len(chunk["text"]) for chunk in chunks),
+            chunks=chunks,
+        ).model_dump(mode="json")
 
     def query_course(self, payload: dict[str, Any]) -> dict[str, Any]:
         question = payload.get("question")

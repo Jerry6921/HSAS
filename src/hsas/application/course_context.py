@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 import re
+from typing import Literal
 
 from pydantic import Field
 
@@ -33,6 +34,7 @@ class InformationItemHit(StrictModel):
 class CourseQuestionContext(StrictModel):
     """Evidence packet consumed by an AI; it is not itself an AI answer."""
 
+    schema_version: Literal["1.0"] = "1.0"
     question: str
     generated_at: datetime
     timezone: str

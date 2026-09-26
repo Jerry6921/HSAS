@@ -10,10 +10,12 @@ as an atomic snapshot.
 The Collector owns acquisition and provenance. The AI reads collected evidence,
 derives assessment facts, and writes `information.json` through `hsas information apply`.
 
-The material query path maintains a local SQLite FTS5 index at
-`<RESOURCES_DIR>/index/materials.sqlite3`. It is rebuilt when the course archive
-or extracted sidecars change and preserves the same file/page provenance as the
-JSON archive. The UI contracts in `ui/src/contracts.ts` are generated from the
+The material query path maintains one global SQLite FTS5 index at
+`<RESOURCES_DIR>/index/materials.sqlite3`. Successful snapshot publication and
+OCR update only the affected course rows; course filters execute in SQL and do
+not rebuild the index or scan the material tree. An incompatible derived index
+is rebuilt once on demand. The index preserves the same file/page provenance as
+the JSON archive. The UI contracts in `ui/src/contracts.ts` are generated from the
 Pydantic response models with `scripts/generate_ui_contracts.py`.
 
 ## 2. Commands
@@ -93,6 +95,10 @@ Each file record includes:
 as absolute local paths. The AI should prefer the original document whenever
 tables, slide layout, images, equations or exact formatting matter.
 
+PDF, DOCX, and PPTX analysis uses a bounded worker pool. Successful deterministic
+results are cached under `cache/document-analysis/` by source SHA-256 and parser
+version, so renamed or cross-course duplicate content is parsed once.
+
 ## 6. Text sidecars
 
 ### PDF
@@ -134,6 +140,12 @@ For Text and media areas, rendered HTML tables are stored as inert row/cell
 records with empty cells, header roles, `rowspan`, and `colspan` preserved;
 search hits identify these records with `source_kind: moodle_activity` and
 include the structured table evidence for an agent to interpret.
+
+Search responses enforce a bounded character budget and include
+`text_character_count`, `text_truncated`, and a retrieval hint. When more context
+is required, call MCP `get_evidence_content(evidence_id, chunk_index,
+context_chunks)` instead of loading unrelated files; `context_chunks` is capped
+at three on either side.
 
 ## 7. Atomic synchronization
 

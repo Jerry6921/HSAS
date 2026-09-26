@@ -74,9 +74,12 @@ confirms that preview.
    `material_evidence.hits` for course content and detailed requirements.
 4. Answer with nearby source citations. Preserve unknown, tentative and
    conflicting information exactly as represented.
-5. When the answer needs more evidence, name the evidence needed and inspect a
-   returned local source. Fill claims from cited sources.
-6. Use the read-only query path for answering; reserve `information apply` for a
+5. When a material hit is truncated or more nearby evidence is required, call
+   `get_evidence_content` with its `evidence_id` and `chunk_index`; expand only
+   the selected neighborhood before opening an entire local source.
+6. When the answer still needs more evidence, name the evidence needed and inspect
+   the returned local source. Fill claims from cited sources.
+7. Use the read-only query path for answering; reserve `information apply` for a
    separately authorized information update.
 
 ## Canonical data

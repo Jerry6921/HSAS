@@ -15,6 +15,10 @@ from hsas.application.ports.repositories import (
     ChangeQueueRepository,
     InformationRepository,
 )
+from hsas.application.material_search import (
+    invalidate_material_index,
+    remove_material_index_courses,
+)
 from hsas.core.ports import HIQSPortError
 from hsas.domain.courses import ArchiveIndex
 from hsas.domain.information import (
@@ -298,12 +302,19 @@ class CourseRecordService:
                             archive_path.parent.mkdir(parents=True, exist_ok=True)
                             trash_target.replace(archive_path)
                     raise
+                removed_archive_ids = {
+                    moodle_course_id for _archive_path, moodle_course_id in archive_paths
+                }
             except HIQSPortError:
                 raise
             except (OSError, ValueError, ValidationError) as exc:
                 raise HIQSPortError(
                     f"删除课程失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
+        try:
+            remove_material_index_courses(self.resources_dir, removed_archive_ids)
+        except (OSError, ValueError):
+            invalidate_material_index(self.resources_dir)
         return {
             "deleted_item_count": len(removed_items),
             "files_moved_to_trash": len(moved_archives),

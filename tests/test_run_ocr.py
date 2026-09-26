@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hsas.application.material_search import search_materials
 from hsas.domain.courses.models import StoredFile
 from hsas.domain.courses.documents import PdfAnalysis
 from hsas.infrastructure.documents.ocr import collect_ocr_queue, run_ocr_queue
@@ -68,3 +69,5 @@ def test_batch_ocr_updates_sidecar_and_archive_atomically(tmp_path: Path) -> Non
     assert analysis["ocr_engine"] == "Test OCR"
     assert analysis["extraction_method"] == "pypdf_ocr"
     assert "Force equals mass" in sidecar.read_text(encoding="utf-8")
+    indexed = search_materials(tmp_path, "force mass acceleration", course_ids={"138907"})
+    assert indexed.hits[0].evidence_id.startswith("text:")

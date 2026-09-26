@@ -16,7 +16,13 @@ The result combines two retrieval paths:
   `information.json` database;
 - `material_evidence.hits` contains relevant excerpts from local PDF, DOCX and
   PPTX text sidecars, including the Moodle activity, filename and page or slide
-  marker when available.
+  marker when available. Each hit also carries a stable `evidence_id`,
+  `chunk_index`, and truncation status.
+
+The initial packet is deliberately bounded. If `text_truncated` is true or the
+claim needs nearby context, call MCP `get_evidence_content` with the returned
+`evidence_id` and `chunk_index`. Request only the necessary adjacent chunks
+before opening the full local source.
 
 Use `--course` whenever the course is known. For an ambiguous question, ask the
 student to select the intended course before retrieval.

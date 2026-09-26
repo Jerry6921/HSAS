@@ -105,6 +105,21 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         return port.get_evidence(evidence_id)
 
     @server.tool()
+    def get_evidence_content(
+        evidence_id: str,
+        chunk_index: int | None = None,
+        context_chunks: int = 1,
+    ) -> dict[str, Any]:
+        """Hydrate one selected evidence chunk and a small adjacent neighborhood."""
+        return port.get_evidence_content(
+            {
+                "evidence_id": evidence_id,
+                "chunk_index": chunk_index,
+                "context_chunks": context_chunks,
+            }
+        )
+
+    @server.tool()
     def get_pending_changes(
         source: str = "moodle",
         course_ids: list[str] | None = None,

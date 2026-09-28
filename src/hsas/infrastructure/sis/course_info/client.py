@@ -12,6 +12,10 @@ from urllib.parse import urlencode, urlparse
 from playwright.async_api import BrowserContext, Frame, Page, async_playwright
 
 from hsas.infrastructure.storage.json_store import read_json, write_json
+from hsas.infrastructure.browser.state import (
+    restore_shared_browser_state,
+    save_shared_browser_state,
+)
 
 
 SEARCH_URL = (
@@ -46,10 +50,12 @@ async def sis_context(
             headless=headless,
         )
         try:
+            await restore_shared_browser_state(context, profile_dir)
             if session_state_path is not None:
                 await restore_sis_session(context, session_state_path)
             yield context
         finally:
+            await save_shared_browser_state(context, profile_dir)
             await context.close()
 
 

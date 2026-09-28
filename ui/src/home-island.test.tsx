@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { AttentionRadar } from "./home-island";
-import type { HomeAttentionItem, HomeAttentionSnapshot } from "./types";
+import { AttentionRadar, RecentUpdateVisual } from "./home-island";
+import type { HomeAttentionItem, HomeAttentionSnapshot, HomeRecentUpdate } from "./types";
 
 function item(index: number): HomeAttentionItem {
   return {
@@ -23,7 +23,7 @@ function item(index: number): HomeAttentionItem {
 
 function render(snapshot: HomeAttentionSnapshot) {
   return renderToStaticMarkup(
-    <AttentionRadar snapshot={snapshot} onAction={() => undefined} onReviewChanges={() => undefined} onCreateDraft={async () => true} />,
+    <AttentionRadar snapshot={snapshot} onAction={() => undefined} onReviewChanges={() => undefined} onCreateDraft={async () => true} onCopyPrompt={() => undefined} />,
   );
 }
 
@@ -38,6 +38,7 @@ describe("AttentionRadar", () => {
     expect(markup).toContain("Attention 1");
     expect(markup).toContain("Attention 4");
     expect(markup).toContain("来源冲突");
+    expect(markup).toContain("复制 AI 问答提示词");
   });
 
   it("identifies the missing information and offers manual entry only for item facts", () => {
@@ -67,7 +68,57 @@ describe("AttentionRadar", () => {
   });
 
   it("keeps empty and isolated-error states explicit", () => {
-    expect(render({ state: "ready", items: [] })).toContain("未来两周没有需要优先核实的事项");
+    const empty = render({ state: "ready", items: [] });
+    expect(empty).toContain("未来两周没有需要优先核实的事项");
+    expect(empty).not.toContain("复制 AI 问答提示词");
     expect(render({ state: "error", items: [], error: "offline" })).toContain("课程资料与日历仍可正常使用");
+  });
+});
+
+describe("RecentUpdateVisual", () => {
+  it("shows Agent results as activities, confirmations, updates, and materials", () => {
+    const outcome = (record_id: string, title: string, details: string[]) => ({
+      record_id,
+      title,
+      kind: "deadline" as const,
+      details,
+    });
+    const recent: HomeRecentUpdate = {
+      applied_at: "2026-09-28T10:00:00+08:00",
+      summary: {
+        added: 2,
+        modified: 4,
+        removed: 0,
+        change_count: 6,
+        course_count: 1,
+        activities_added: 1,
+        activities_updated: 1,
+        activities_confirmed: 1,
+        materials_added: 1,
+      },
+      courses: [{
+        course_id: "DEMO1001-2026-S1",
+        course_title: "Demo Course",
+        mode: "completed",
+        changes: [],
+        activities_added: [outcome("quiz-1", "Quiz 1", ["截止日期：2026-10-02"])],
+        activities_confirmed: [outcome("assignment-1", "Assignment 1", ["日期状态：已确认", "截止日期：2026-10-15"])],
+        activities_updated: [outcome("tutorial-1", "Tutorial", ["地点：MB201"])],
+        materials_added: [{...outcome("slides-1", "Week 1 slides", ["归类：Lecture slides"]), kind: "material"}],
+      }],
+    };
+
+    const markup = renderToStaticMarkup(
+      <RecentUpdateVisual recent={recent} pending={[]} onOpenSource={() => undefined} />,
+    );
+
+    expect(markup).toContain("本次整理结果");
+    expect(markup).toContain("新增活动");
+    expect(markup).toContain("信息已确认");
+    expect(markup).toContain("活动信息变更");
+    expect(markup).toContain("资料变化");
+    expect(markup).toContain("Assignment 1");
+    expect(markup).toContain("日期状态：已确认 · 截止日期：2026-10-15");
+    expect(markup.match(/Assignment 1/g)).toHaveLength(1);
   });
 });

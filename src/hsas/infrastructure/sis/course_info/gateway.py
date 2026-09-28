@@ -21,7 +21,7 @@ from hsas.infrastructure.storage.json_store import read_json, write_json, write_
 from hsas.infrastructure.runtime import hku_portal_profile_dir
 
 from .client import (
-    LOGIN_URL,
+    SEARCH_URL,
     SisCourseInfoAuthenticationError,
     capture_course_page,
     open_login_until_sis_ready,
@@ -163,7 +163,7 @@ class SisCourseInfoBrowserGateway:
             ) as context:
                 await open_login_until_sis_ready(
                     context,
-                    login_url=LOGIN_URL,
+                    login_url=SEARCH_URL,
                     timeout_seconds=timeout_seconds,
                 )
                 await save_sis_session(context, self.session_state_path)

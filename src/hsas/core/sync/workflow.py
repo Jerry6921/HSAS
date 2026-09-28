@@ -41,7 +41,6 @@ class CourseSyncWorkflow:
     controller: CourseSyncController
     review_service: SourceReviewService
     course_service_factory: ServiceFactory
-    class_planner_service_factory: ServiceFactory
     enrollment_gateway_factory: ServiceFactory
     unified_service_factory: ServiceFactory
 
@@ -197,28 +196,16 @@ class CourseSyncWorkflow:
                 report(
                     {
                         "stage": "authentication",
-                        "detail": "正在打开 HKU Portal，请完成一次登录",
+                        "detail": "正在打开 HKU Portal；完成一次登录后将自动连接 Moodle 与 SIS",
                         "completed": 0,
                         "total": 1,
                         "cards": [],
                     }
                 )
-                planner_service = self.class_planner_service_factory(self.resources_dir)
-                try:
-                    planner_service.login_until_ready(
-                        cancel_requested=self.controller.cancel_event.is_set,
-                    )
-                except InterruptedError:
-                    if self.controller.cancel_event.is_set():
-                        raise _WorkflowCancelled
-                    raise
-                if self.controller.cancel_event.is_set():
-                    raise _WorkflowCancelled
-
                 moodle_service = self.course_service_factory(self.resources_dir)
                 report(
                     {
-                        "detail": "正在用共享 HKU 会话连接 Moodle 与 SIS",
+                        "detail": "正在通过 Moodle CAS 打开 HKU Portal 登录",
                     }
                 )
                 moodle_status = moodle_service.check_login_status()
@@ -233,6 +220,12 @@ class CourseSyncWorkflow:
                         raise
                 if self.controller.cancel_event.is_set():
                     raise _WorkflowCancelled
+
+                report(
+                    {
+                        "detail": "HKU Portal 登录已完成；正在复用会话连接 SIS",
+                    }
+                )
 
                 if retry_tasks is None:
                     report(

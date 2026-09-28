@@ -16,6 +16,7 @@ from hsas.application.material_search import (
 from hsas.domain.courses.models import StoredFile
 from hsas.domain.courses.documents import PdfAnalysis
 from hsas.domain.courses.evidence import LinkedPageEvidence, linked_page_evidence_id
+from hsas.domain.information import CourseRecord, InformationItem, InformationStore
 from hsas.infrastructure.moodle.course_mapper import build_course_archive
 from hsas.infrastructure.storage.json_store import write_model, write_text
 
@@ -116,6 +117,54 @@ def test_local_search_returns_slide_provenance(tmp_path: Path) -> None:
     assert result.hits[0].source_unit_label == "Speaker notes"
     assert result.hits[0].source_unit_start == 1
     assert result.hits[0].page_start is None
+
+
+def test_structure_aware_chunks_preserve_heading_and_table_rows(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    archive, activity = _write_search_archive(
+        resources,
+        "# Assessment rules\nLate submissions lose ten percent.\n\n"
+        "# Tutorial registration\nChoose one tutorial group.",
+    )
+    activity.content_tables = [{
+        "caption": "Tutorial timetable",
+        "rows": [{"cells": [{"text": "Tuesday"}, {"text": "MB167"}]}],
+    }]
+    write_model(resources / "courses/138907/course.json", archive)
+
+    heading_hit = search_materials(resources, "late submissions").hits[0]
+    table_hit = search_materials(resources, "Tuesday MB167").hits[0]
+
+    assert heading_hit.heading == "Assessment rules"
+    assert heading_hit.section_path == "Assessment rules"
+    assert table_hit.content_kind == "table"
+    assert table_hit.section_path == "Tutorial timetable / row 1"
+
+
+def test_information_json_records_share_the_evidence_index(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    write_model(resources / "information.json", InformationStore(
+        courses=[CourseRecord(
+            course_id="MATH1851-2026-S1", code="MATH1851",
+            title="Calculus and ordinary differential equations",
+            moodle_course_id="138907",
+        )],
+        items=[InformationItem(
+            item_id="math-midterm", course_id="MATH1851-2026-S1",
+            title="Midterm examination", category="exam",
+            description="Covers integration and differential equations",
+        )],
+    ))
+
+    from hsas.application.material_search import search_evidence
+    result = search_evidence(
+        resources, "midterm differential equations",
+        course_ids={"138907"}, source_kinds={"information_item"},
+    )
+
+    assert result.hits[0].evidence_id == "information:item:math-midterm"
+    assert result.hits[0].course_id == "MATH1851-2026-S1"
+    assert result.hits[0].record_id == "math-midterm"
 
 
 def test_local_search_indexes_rendered_moodle_activity_text(tmp_path: Path) -> None:
@@ -305,7 +354,7 @@ def test_v2_index_is_automatically_migrated_by_rebuild(tmp_path: Path) -> None:
         version = connection.execute(
             "SELECT value FROM metadata WHERE key = 'index_version'"
         ).fetchone()[0]
-    assert version == "3"
+    assert version == "4"
     assert result.hits[0].evidence_id == f"activity:{activity.module_id}"
 
 

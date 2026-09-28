@@ -30,6 +30,8 @@ ENV_FIELDS = {
     "MOODLE_MAX_LINKED_PAGES": "max_linked_pages",
     "MOODLE_MAX_LINKED_FILES": "max_linked_files",
 }
+LEGACY_MOODLE_LOGIN_URL = "https://moodle.hku.hk/login/index.php"
+HKU_PORTAL_CAS_LOGIN_URL = f"{LEGACY_MOODLE_LOGIN_URL}?authCAS=CAS"
 
 
 class SelectorConfig(BaseModel):
@@ -49,7 +51,7 @@ class SelectorConfig(BaseModel):
 
 class Settings(BaseModel):
     base_url: HttpUrl = HttpUrl("https://moodle.hku.hk")
-    login_url: HttpUrl = HttpUrl("https://moodle.hku.hk/login/index.php")
+    login_url: HttpUrl = HttpUrl(HKU_PORTAL_CAS_LOGIN_URL)
     dashboard_url: HttpUrl = HttpUrl("https://moodle.hku.hk/my/")
     selector_config: Path | None = None
     profile_dir: Path = Field(
@@ -88,13 +90,19 @@ class Settings(BaseModel):
         if selector_value is not None and not Path(selector_value).is_absolute():
             values["selector_config"] = PROJECT_ROOT / Path(selector_value)
         values.update(overrides)
+        if str(values.get("login_url", "")).rstrip("/") == LEGACY_MOODLE_LOGIN_URL:
+            values["login_url"] = HKU_PORTAL_CAS_LOGIN_URL
         return cls.model_validate(values)
 
     @model_validator(mode="after")
     def ensure_same_origin(self) -> "Settings":
         # A typo that sends an authenticated browser to another host should fail early.
-        if self.base_url.host != self.dashboard_url.host:
-            raise ValueError("base_url and dashboard_url must use the same host")
+        if not (
+            self.base_url.host == self.dashboard_url.host == self.login_url.host
+        ):
+            raise ValueError(
+                "base_url, login_url and dashboard_url must use the same host"
+            )
         return self
 
     def selectors(self) -> SelectorConfig:

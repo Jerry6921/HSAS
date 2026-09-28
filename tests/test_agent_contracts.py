@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from hsas.application.course_context import CourseQuestionContext
+from hsas.application.evidence_explanation import EvidenceExplanation
 from hsas.application.material_search import EvidenceContentResult, MaterialSearchResult
 from scripts.generate_agent_contracts import contract_document, render_contract_document
 
@@ -20,9 +21,11 @@ def test_agent_contracts_have_an_explicit_compatible_version() -> None:
     assert set(document["contracts"]) == {
         "CourseQuestionContext",
         "EvidenceContentResult",
+        "EvidenceExplanation",
         "MaterialSearchResult",
     }
     assert set(document["mcp_tools"]) == {
+        "explain_evidence",
         "get_evidence",
         "get_evidence_content",
         "query_course",
@@ -31,7 +34,10 @@ def test_agent_contracts_have_an_explicit_compatible_version() -> None:
     assert document["mcp_tools"]["get_evidence_content"]["input_schema"][
         "required"
     ] == ["evidence_id"]
-    for model in (MaterialSearchResult, EvidenceContentResult, CourseQuestionContext):
+    for model in (
+        MaterialSearchResult, EvidenceContentResult, CourseQuestionContext,
+        EvidenceExplanation,
+    ):
         schema = model.model_json_schema()
         assert schema["properties"]["schema_version"]["const"] == "1.0"
 

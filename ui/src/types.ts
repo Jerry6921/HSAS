@@ -131,6 +131,13 @@ export interface HomeUpdateChange extends HomeUpdateSource {
   text_path?: string | null;
 }
 
+export interface HomeUpdateOutcome extends HomeUpdateSource {
+  record_id: string;
+  kind: "activity" | "deadline" | "material";
+  details: string[];
+  text_path?: string | null;
+}
+
 export interface HomeUpdateCourse {
   course_id: string;
   course_title: string;
@@ -138,6 +145,31 @@ export interface HomeUpdateCourse {
   acknowledge_through?: string | null;
   changes?: HomeUpdateChange[];
   files?: Array<HomeUpdateSource & { filename?: string }>;
+  activities_added?: HomeUpdateOutcome[];
+  activities_updated?: HomeUpdateOutcome[];
+  activities_confirmed?: HomeUpdateOutcome[];
+  materials_added?: HomeUpdateOutcome[];
+  materials_updated?: HomeUpdateOutcome[];
+  materials_removed?: HomeUpdateOutcome[];
+}
+
+export interface HomeRecentUpdate {
+  applied_at: string;
+  updated_by?: string;
+  summary: {
+    added: number;
+    modified: number;
+    removed: number;
+    change_count: number;
+    course_count: number;
+    activities_added?: number;
+    activities_updated?: number;
+    activities_confirmed?: number;
+    materials_added?: number;
+    materials_updated?: number;
+    materials_removed?: number;
+  };
+  courses: HomeUpdateCourse[];
 }
 
 export interface HomeSyncJob {
@@ -216,12 +248,14 @@ export interface ModernHomeOptions {
   inboxEntries: HomeInboxEntry[];
   updateCount: number;
   updates: HomeUpdateCourse[];
+  recentUpdate?: HomeRecentUpdate | null;
   syncJob?: HomeSyncJob | null;
   attentionSnapshot: HomeAttentionSnapshot;
   onOpenNext: (itemId: string, dateKey?: string) => void;
   onStartWorkflow: () => void;
   onRetryFailures: () => void;
   onCopyAgentPrompt: () => void;
+  onCopyAttentionPrompt: (items: HomeAttentionItem[]) => void;
   onCancelSync: () => void;
   onRunOcr: () => void;
   onOpenOcr: (index: number) => void;
@@ -398,6 +432,7 @@ export interface DetailLink { label: string; url: string; }
 
 export interface ModernDetailOptions {
   itemId: string;
+  evidenceId: string;
   courseLabel: string;
   title: string;
   category: string;
@@ -415,6 +450,17 @@ export interface ModernDetailOptions {
   hasPrompt: boolean;
   prompt?: string | null;
   userCreated: boolean;
+}
+
+export interface EvidenceExplanationPayload {
+  status: "found" | "not_found";
+  evidence_id: string;
+  statement?: string | null;
+  confirmation_status?: string | null;
+  extraction_method?: string | null;
+  sources: CourseSource[];
+  warnings: string[];
+  limitations: string[];
 }
 
 export interface EventEditorCourse { courseId: string; label: string; }

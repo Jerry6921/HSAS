@@ -1,7 +1,16 @@
 import json
 from pathlib import Path
 
-from hsas.infrastructure.moodle.settings import DEFAULT_CONFIG, DEFAULT_SELECTORS, Settings
+import pytest
+from pydantic import ValidationError
+
+from hsas.infrastructure.moodle.settings import (
+    DEFAULT_CONFIG,
+    DEFAULT_SELECTORS,
+    HKU_PORTAL_CAS_LOGIN_URL,
+    LEGACY_MOODLE_LOGIN_URL,
+    Settings,
+)
 from hsas.infrastructure.runtime.paths import RuntimePaths, ensure_resources_layout, get_runtime_paths
 
 
@@ -29,6 +38,18 @@ def test_packaged_defaults_match_public_templates() -> None:
     root = Path(__file__).parents[1]
     assert DEFAULT_CONFIG.read_text(encoding="utf-8") == (root / "config/defaults.toml").read_text(encoding="utf-8")
     assert json.loads(DEFAULT_SELECTORS.read_text(encoding="utf-8")) == json.loads((root / "config/selectors.example.json").read_text(encoding="utf-8"))
+
+
+def test_moodle_defaults_use_the_hku_portal_cas_entrypoint() -> None:
+    assert str(Settings().login_url) == HKU_PORTAL_CAS_LOGIN_URL
+    assert str(Settings.load(login_url=LEGACY_MOODLE_LOGIN_URL).login_url) == (
+        HKU_PORTAL_CAS_LOGIN_URL
+    )
+
+
+def test_moodle_rejects_a_cross_origin_login_url() -> None:
+    with pytest.raises(ValidationError, match="same host"):
+        Settings(login_url="https://example.invalid/login")
 
 
 def test_runtime_create_builds_private_layout(tmp_path: Path) -> None:

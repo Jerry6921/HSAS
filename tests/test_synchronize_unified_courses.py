@@ -5,6 +5,11 @@ from types import SimpleNamespace
 
 from hsas.application.unified_course_sync import UnifiedCourseSyncService
 from hsas.infrastructure.browser.session import BrowserSessionBroker
+from hsas.infrastructure.browser.state import (
+    restore_shared_browser_state,
+    save_shared_browser_state,
+)
+from hsas.infrastructure.storage.json_store import write_json
 
 
 def test_unified_sync_uses_one_session_and_runs_collectors_concurrently() -> None:
@@ -164,3 +169,32 @@ def test_browser_broker_restores_and_saves_one_shared_context(
         ("save", context),
         ("close", context),
     ]
+
+
+def test_shared_browser_state_restores_session_only_portal_cookies(
+    tmp_path: Path,
+) -> None:
+    profile = tmp_path / "browser-profile"
+    cookies = [{
+        "name": "portal-session", "value": "private",
+        "domain": "hkuportal.hku.hk", "path": "/",
+    }]
+    write_json(profile / "storage-state.json", {
+        "cookies": cookies, "origins": [],
+    }).chmod(0o600)
+
+    class Context:
+        restored = []
+
+        async def add_cookies(self, values):
+            self.restored = values
+
+        async def storage_state(self, *, path):
+            write_json(Path(path), {"cookies": cookies, "origins": []})
+
+    context = Context()
+    asyncio.run(restore_shared_browser_state(context, profile))
+    path = asyncio.run(save_shared_browser_state(context, profile))
+
+    assert context.restored == cookies
+    assert path.stat().st_mode & 0o777 == 0o600

@@ -23,6 +23,7 @@ from hsas.domain.courses import (
     iter_activities,
     iter_files,
 )
+from hsas.domain.information import InformationStore, moodle_source_course_ids
 from hsas.application.material_index import (
     evidence_context,
     index_ready,
@@ -39,6 +40,10 @@ UNIT_MARKER = re.compile(
     re.MULTILINE,
 )
 WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
+MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+EvidenceSourceKind = Literal[
+    "file", "moodle_activity", "information_course", "information_item"
+]
 
 
 class MaterialHit(StrictModel):
@@ -48,8 +53,12 @@ class MaterialHit(StrictModel):
     course_title: str
     activity_id: str
     activity_name: str
-    source_kind: Literal["file", "moodle_activity"] = "file"
+    source_kind: EvidenceSourceKind = "file"
     filename: str
+    record_id: str | None = None
+    heading: str | None = None
+    section_path: str | None = None
+    content_kind: Literal["text", "table", "structured_fact"] = "text"
     relative_text_path: str
     page_start: int | None = None
     page_end: int | None = None
@@ -79,8 +88,12 @@ class EvidenceContentChunk(StrictModel):
     course_title: str
     activity_id: str
     activity_name: str
-    source_kind: Literal["file", "moodle_activity"]
+    source_kind: EvidenceSourceKind
     filename: str
+    record_id: str | None = None
+    heading: str | None = None
+    section_path: str | None = None
+    content_kind: Literal["text", "table", "structured_fact"] = "text"
     relative_text_path: str
     page_start: int | None = None
     page_end: int | None = None
@@ -192,8 +205,12 @@ class _Chunk:
     course_title: str
     activity_id: str
     activity_name: str
-    source_kind: Literal["file", "moodle_activity"]
+    source_kind: EvidenceSourceKind
     filename: str
+    record_id: str | None
+    heading: str | None
+    section_path: str | None
+    content_kind: Literal["text", "table", "structured_fact"]
     relative_text_path: str
     page_start: int | None
     page_end: int | None
@@ -216,6 +233,28 @@ def search_materials(
     hit_character_limit: int = 1_200,
 ) -> MaterialSearchResult:
     """Retrieve relevant page-aware chunks without external services."""
+    return search_evidence(
+        resources_dir,
+        query,
+        course_ids=course_ids,
+        limit=limit,
+        context_character_limit=context_character_limit,
+        hit_character_limit=hit_character_limit,
+        source_kinds={"file", "moodle_activity"},
+    )
+
+
+def search_evidence(
+    resources_dir: Path,
+    query: str,
+    *,
+    course_ids: set[str] | None = None,
+    limit: int = 6,
+    context_character_limit: int = 6_000,
+    hit_character_limit: int = 1_200,
+    source_kinds: set[str] | None = None,
+) -> MaterialSearchResult:
+    """Search the unified local evidence index, including canonical facts."""
     normalized_query = query.strip()
     query_tokens = _tokenize(normalized_query)
     if not query_tokens:
@@ -232,11 +271,23 @@ def search_materials(
         _ensure_material_index(resources_dir)
     query_expression = " OR ".join(query_tokens)
     try:
-        indexed = search_index(index_path, query_expression, course_ids, limit)
+        indexed = search_index(
+            index_path,
+            query_expression,
+            _canonical_search_ids(resources_dir, course_ids),
+            limit,
+            source_kinds=source_kinds,
+        )
     except sqlite3.Error:
         _rebuild_material_index(resources_dir)
         try:
-            indexed = search_index(index_path, query_expression, course_ids, limit)
+            indexed = search_index(
+                index_path,
+                query_expression,
+                _canonical_search_ids(resources_dir, course_ids),
+                limit,
+                source_kinds=source_kinds,
+            )
         except sqlite3.Error as exc:
             raise OSError(f"material index search failed after recovery: {exc}") from exc
     return _result_from_index(
@@ -268,7 +319,7 @@ def refresh_material_index(
             return update_index_courses(
                 index_path,
                 chunks,
-                course_ids=selected,
+                course_ids=_canonical_search_ids(resources_dir, selected) or set(),
                 skipped_by_course=skipped_by_course,
             )
     except sqlite3.Error as exc:
@@ -373,17 +424,21 @@ def _collect_chunks(
 ) -> tuple[list[_Chunk], dict[str, int]]:
     chunks: list[_Chunk] = []
     skipped_by_course: dict[str, int] = {}
+    information = _load_information(resources_dir)
+    alias_to_canonical, _ = _course_identity_maps(information)
+    selected_canonical = _canonical_search_ids(resources_dir, course_ids) or set()
     courses_root = resources_dir / "courses"
     for archive_path in sorted(courses_root.glob("*/course.json")):
         index = ArchiveIndex.from_json(archive_path)
-        course_id = index.archive.course.course_id
-        if course_ids and course_id not in course_ids:
+        source_course_id = index.archive.course.course_id
+        course_id = alias_to_canonical.get(source_course_id, source_course_id)
+        if selected_canonical and course_id not in selected_canonical:
             continue
         skipped_by_course[course_id] = 0
         course_relative_path = archive_path.relative_to(resources_dir).as_posix()
         for activity in iter_activities(index.archive):
             content_text, content_tables = _activity_evidence(activity)
-            if content_text:
+            if content_text or content_tables:
                 chunks.extend(
                     _chunk_document(
                         content_text,
@@ -439,6 +494,45 @@ def _collect_chunks(
                     evidence_id=f"text:{activity.module_id}:{analysis.extracted_text_path}",
                 )
             )
+    if information is not None:
+        course_titles = {course.course_id: course.title for course in information.courses}
+        for course in information.courses:
+            if selected_canonical and course.course_id not in selected_canonical:
+                continue
+            skipped_by_course.setdefault(course.course_id, 0)
+            text = _course_record_text(course)
+            chunks.extend(_chunk_document(
+                text,
+                course_id=course.course_id,
+                course_title=course.title,
+                activity_id=course.course_id,
+                activity_name="Canonical course facts",
+                filename="information.json · course",
+                relative_text_path="information.json",
+                default_unit_label="Course record",
+                source_kind="information_course",
+                evidence_id=f"information:course:{course.course_id}",
+                record_id=course.course_id,
+                content_kind="structured_fact",
+            ))
+        for item in information.items:
+            if selected_canonical and item.course_id not in selected_canonical:
+                continue
+            skipped_by_course.setdefault(item.course_id, 0)
+            chunks.extend(_chunk_document(
+                _information_item_text(item),
+                course_id=item.course_id,
+                course_title=course_titles.get(item.course_id, item.course_id),
+                activity_id=item.item_id,
+                activity_name=item.title,
+                filename="information.json · item",
+                relative_text_path="information.json",
+                default_unit_label="Information item",
+                source_kind="information_item",
+                evidence_id=f"information:item:{item.item_id}",
+                record_id=item.item_id,
+                content_kind="structured_fact",
+            ))
     return chunks, skipped_by_course
 
 
@@ -456,7 +550,7 @@ def _result_from_index(
     for row in indexed["rows"][:limit]:
         score, *values = row
         tables = json.loads(values[-1])
-        full_text = str(values[14])
+        full_text = str(values[18])
         allowance = min(hit_character_limit, remaining)
         if allowance <= 0:
             break
@@ -469,9 +563,11 @@ def _result_from_index(
             score=round(1.0 / (1.0 + abs(float(score))), 6),
             evidence_id=values[0], course_id=values[1], course_title=values[2], activity_id=values[3],
             activity_name=values[4], source_kind=values[5], filename=values[6],
-            relative_text_path=values[7], page_start=values[8], page_end=values[9],
-            source_unit_label=values[10], source_unit_start=values[11],
-            source_unit_end=values[12], chunk_index=values[13], text=text,
+            record_id=values[7], heading=values[8], section_path=values[9],
+            content_kind=values[10], relative_text_path=values[11],
+            page_start=values[12], page_end=values[13],
+            source_unit_label=values[14], source_unit_start=values[15],
+            source_unit_end=values[16], chunk_index=values[17], text=text,
             text_character_count=len(full_text), text_truncated=truncated,
             retrieval_hint=(
                 "Call get_evidence_content with this evidence_id and chunk_index "
@@ -502,9 +598,11 @@ def _chunk_document(
     words_per_chunk: int = 260,
     overlap_words: int = 40,
     default_unit_label: str | None = None,
-    source_kind: Literal["file", "moodle_activity"] = "file",
+    source_kind: EvidenceSourceKind = "file",
     content_tables: list[dict[str, Any]] | None = None,
     evidence_id: str,
+    record_id: str | None = None,
+    content_kind: Literal["text", "table", "structured_fact"] = "text",
 ) -> list[_Chunk]:
     units = _split_units(text)
     chunks: list[_Chunk] = []
@@ -512,23 +610,19 @@ def _chunk_document(
     step = max(words_per_chunk - overlap_words, 1)
     for unit_label, unit_number, unit_text in units:
         effective_unit_label = unit_label or default_unit_label
-        words = unit_text.split()
-        for start in range(0, len(words), step):
-            selected = words[start : start + words_per_chunk]
-            if not selected:
-                continue
-            content = " ".join(selected).strip()
-            tokens = tuple(
-                _tokenize(
-                    " ".join(
-                        [course_title, activity_name, filename, content]
-                    )
-                )
-            )
-            if not tokens:
-                continue
-            chunks.append(
-                _Chunk(
+        for heading, section_path, section_text in _split_sections(unit_text):
+            words = section_text.split()
+            for start in range(0, len(words), step):
+                selected = words[start : start + words_per_chunk]
+                if not selected:
+                    continue
+                content = " ".join(selected).strip()
+                tokens = tuple(_tokenize(" ".join(
+                    [course_title, activity_name, filename, heading or "", content]
+                )))
+                if not tokens:
+                    continue
+                chunks.append(_Chunk(
                     evidence_id=evidence_id,
                     course_id=course_id,
                     course_title=course_title,
@@ -536,6 +630,10 @@ def _chunk_document(
                     activity_name=activity_name,
                     source_kind=source_kind,
                     filename=filename,
+                    record_id=record_id,
+                    heading=heading,
+                    section_path=section_path,
+                    content_kind=content_kind,
                     relative_text_path=relative_text_path,
                     page_start=unit_number if unit_label == "Page" else None,
                     page_end=unit_number if unit_label == "Page" else None,
@@ -546,11 +644,32 @@ def _chunk_document(
                     text=content,
                     tokens=tokens,
                     content_tables=content_tables or [],
-                )
-            )
+                ))
+                chunk_index += 1
+                if start + words_per_chunk >= len(words):
+                    break
+    for table_number, table in enumerate(content_tables or [], start=1):
+        caption = str(table.get("caption") or f"Table {table_number}").strip()
+        rows = table.get("rows") if isinstance(table, dict) else None
+        for row_number, row in enumerate(rows if isinstance(rows, list) else [], start=1):
+            cells = row.get("cells") if isinstance(row, dict) else None
+            values = [str(cell.get("text") or "").strip() for cell in cells or [] if isinstance(cell, dict)]
+            if not any(values):
+                continue
+            content = f"{caption}\n" + " | ".join(values)
+            chunks.append(_Chunk(
+                evidence_id=evidence_id, course_id=course_id,
+                course_title=course_title, activity_id=activity_id,
+                activity_name=activity_name, source_kind=source_kind,
+                filename=filename, record_id=record_id, heading=caption,
+                section_path=f"{caption} / row {row_number}", content_kind="table",
+                relative_text_path=relative_text_path, page_start=None, page_end=None,
+                source_unit_label="Table row", source_unit_start=row_number,
+                source_unit_end=row_number, chunk_index=chunk_index, text=content,
+                tokens=tuple(_tokenize(" ".join([course_title, activity_name, content]))),
+                content_tables=[table],
+            ))
             chunk_index += 1
-            if start + words_per_chunk >= len(words):
-                break
     return chunks
 
 
@@ -565,27 +684,7 @@ def _activity_evidence(
         if isinstance(raw_tables, list)
         else []
     )
-    table_lines = []
-    for table in tables:
-        caption = table.get("caption")
-        if isinstance(caption, str) and caption.strip():
-            table_lines.append(caption.strip())
-        rows = table.get("rows")
-        if not isinstance(rows, list):
-            continue
-        for row in rows:
-            cells = row.get("cells") if isinstance(row, dict) else None
-            if not isinstance(cells, list):
-                continue
-            values = [
-                str(cell.get("text") or "").strip()
-                for cell in cells
-                if isinstance(cell, dict)
-            ]
-            if any(values):
-                table_lines.append(" | ".join(values))
-    table_text = "\n".join(table_lines)
-    return "\n".join(value for value in (text, table_text) if value), tables
+    return text, tables
 
 
 def _split_units(text: str) -> list[tuple[str | None, int | None, str]]:
@@ -602,6 +701,101 @@ def _split_units(text: str) -> list[tuple[str | None, int | None, str]]:
             (match.group(1), int(match.group(2)), text[match.end() : end].strip())
         )
     return units
+
+
+def _split_sections(text: str) -> list[tuple[str | None, str | None, str]]:
+    """Split one page/slide into heading-bounded sections before size limits."""
+    sections: list[tuple[str | None, str | None, str]] = []
+    path: list[str] = []
+    heading: str | None = None
+    buffer: list[str] = []
+
+    def flush() -> None:
+        content = "\n".join(buffer).strip()
+        if content:
+            sections.append((heading, " / ".join(path) or None, content))
+        buffer.clear()
+
+    for line in text.splitlines():
+        match = MARKDOWN_HEADING.match(line.strip())
+        if match:
+            flush()
+            level = len(match.group(1))
+            heading = match.group(2).strip()
+            del path[level - 1 :]
+            while len(path) < level - 1:
+                path.append("")
+            path.append(heading)
+        else:
+            buffer.append(line)
+    flush()
+    return sections or [(None, None, text.strip())]
+
+
+def _load_information(resources_dir: Path) -> InformationStore | None:
+    path = resources_dir / "information.json"
+    if not path.is_file():
+        return None
+    try:
+        return InformationStore.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _course_identity_maps(
+    information: InformationStore | None,
+) -> tuple[dict[str, str], dict[str, set[str]]]:
+    alias_to_canonical: dict[str, str] = {}
+    canonical_to_aliases: dict[str, set[str]] = {}
+    for course in information.courses if information else []:
+        aliases = set(moodle_source_course_ids(course)) | {course.course_id}
+        canonical_to_aliases[course.course_id] = aliases
+        for alias in aliases:
+            alias_to_canonical[alias] = course.course_id
+    return alias_to_canonical, canonical_to_aliases
+
+
+def _canonical_search_ids(
+    resources_dir: Path,
+    course_ids: set[str] | None,
+) -> set[str] | None:
+    if not course_ids:
+        return None
+    aliases, _ = _course_identity_maps(_load_information(resources_dir))
+    return {aliases.get(course_id, course_id) for course_id in course_ids}
+
+
+def _labeled_lines(value: Any, prefix: str = "") -> list[str]:
+    if value is None or value == "" or value == [] or value == {}:
+        return []
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, child in value.items():
+            lines.extend(_labeled_lines(child, f"{prefix}.{key}" if prefix else key))
+        return lines
+    if isinstance(value, list):
+        return [f"{prefix}: {item}" for item in value]
+    return [f"{prefix}: {value}"]
+
+
+def _course_record_text(course: Any) -> str:
+    payload = course.model_dump(mode="json")
+    ordered = [f"# {course.code} {course.title}", f"course_id: {course.course_id}"]
+    for field in (
+        "semester", "starts_on", "ends_on", "overview", "objectives",
+        "instructors", "policies", "notes", "links", "sources",
+    ):
+        ordered.extend(_labeled_lines(payload.get(field), field))
+    return "\n".join(ordered)
+
+
+def _information_item_text(item: Any) -> str:
+    payload = item.model_dump(mode="json")
+    lines = [f"# {item.title}", f"item_id: {item.item_id}", f"course_id: {item.course_id}"]
+    for field, value in payload.items():
+        if field not in {"item_id", "course_id", "title"}:
+            lines.extend(_labeled_lines(value, field))
+    return "\n".join(lines)
 
 
 def _tokenize(text: str) -> list[str]:

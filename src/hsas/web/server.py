@@ -121,6 +121,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(HTTPStatus.OK, value)
             return
+        if path.startswith("/api/evidence-explanation/"):
+            evidence_id = unquote(path.removeprefix("/api/evidence-explanation/"))
+            try:
+                value = self.server.dashboard_service.explain_evidence(evidence_id)
+            except DashboardError as exc:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            status = HTTPStatus.OK if value.get("status") == "found" else HTTPStatus.NOT_FOUND
+            self._send_json(status, value)
+            return
         if path.startswith("/api/evidence/"):
             evidence_id = unquote(path.removeprefix("/api/evidence/"))
             try:

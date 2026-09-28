@@ -70,7 +70,9 @@ information.json / 日历 / 需要确认
    - 还能按 `evidence_id` 继续读取上下文
 
    [material_search.py](src/hsas/application/material_search.py) 负责从本地索引返回相关证据，
-   统一证据模型负责保存内容与来源之间的关系。
+   统一证据模型负责保存内容与来源之间的关系。索引同时收录课件文本、Moodle 活动和
+   `information.json` 中已经验证的课程记录；分块会保留标题层级、页码、slide 和表格行，
+   以减少脱离结构的搜索片段。
 
 3. **受控的正式数据写入**
 
@@ -106,13 +108,38 @@ information.json / 日历 / 需要确认
 - HIQS 用于整理和核对课程信息；涉及提交截止时间、考试安排和课程政策时，用户仍可打开所列
   官方来源进行最终确认。
 
-![HIQS 首页：今日安排、近期考核与课程资料更新](docs/images/ui/home-study-journal.png)
+## 界面展示
+
+### 学习手记与今日安排
+
+![HIQS 学习手记：首页今日安排、近期考核与资料提醒](docs/images/ui/dashboard-today.png)
+
+### 资料闭环
+
+![HIQS 资料闭环：来源采集、Agent 整理、校验写入与 Checkpoint](docs/images/ui/dashboard-information-closure.png)
+
+### 本轮资料变化
+
+![HIQS 本轮待写入内容：按课程查看新增、变更与移除项目](docs/images/ui/dashboard-latest-changes.png)
+
+### 跨课程周日历
+
+![HIQS 周日历：集中查看课程、Tutorial 与 Assignment](docs/images/ui/calendar-week-view.png)
+
+### 课程概览与成绩构成
+
+![HIQS 课程概览：课程信息、来源与 Assessment 权重](docs/images/ui/course-overview-assessments.png)
+
+### 课程活动与确切要求
+
+![HIQS 课程活动：按项目、报告与汇报查看日期、占分和状态](docs/images/ui/course-activity-groups.png)
 
 ## 界面功能
 
 ### 首页
 
 - 查看今天的课程、下一项安排、近期考核与资料更新。
+- 查看 Agent 最近一次整理后新增的活动与资料，以及哪些活动的信息发生变化或由未知、暂定状态得到确认；字段级差异仍保留用于核对来源。
 - 在“需要确认”中优先处理最多三项近期问题，并可查看事项、证据或精确重试来源。
 - 一键同步课程来源，并查看进度、失败项目和待整理资料。
 - 搜索本地课程信息和课件。
@@ -123,6 +150,7 @@ information.json / 日历 / 需要确认
 
 - 在月、周、日视图中集中查看所有课程和活动。
 - 按课程或关键字筛选，并查看日期、地点、占分、提交方式和要求。
+- 在事项详情中查看证据确认状态、处理方式、来源、警告与当前限制。
 - 显示假期、Reading Week、补课、取消、改时与教室变更。
 - 保留日期尚未确认的活动，方便之后继续核对。
 - 添加个人事项，或导出为 ICS 日历文件。
@@ -150,14 +178,15 @@ information.json / 日历 / 需要确认
 
 ```text
 请从 https://github.com/Jerry6921/HSAS 安装或更新 HIQS，并按照项目内的说明完成检查与启动。
-请保留现有课程资料和未提交修改。Moodle、HKU Portal、SSO 与 MFA 登录由我在官方页面亲自
+请保留现有课程资料和未提交修改。HKU Portal、SSO 与 MFA 登录由我在官方页面亲自
 完成；不要读取或输出我的密码、验证码、Cookie 或访问令牌。完成后告诉我如何打开 HIQS。
 ```
 
 首次使用：
 
 1. 打开 HIQS，在首页选择 **开始同步**。
-2. 按提示在 HKU 官方页面完成登录。
+2. 按提示完成一次 HKU Portal 登录；HIQS 随后通过共享会话连接 SIS，并直接访问 Moodle
+   的 HKU Portal CAS 登录入口。
 3. 同步完成后选择 **复制 Agent 整理指令**。
 4. 将指令交给 Agent，整理新增或变化的课程资料。
 5. 回到 HIQS，在首页、日历和课程概览中查看结果。

@@ -105,6 +105,11 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         return port.get_evidence(evidence_id)
 
     @server.tool()
+    def explain_evidence(evidence_id: str) -> dict[str, Any]:
+        """Explain what evidence supports, how it was obtained, and known limits."""
+        return port.explain_evidence(evidence_id)
+
+    @server.tool()
     def get_evidence_content(
         evidence_id: str,
         chunk_index: int | None = None,

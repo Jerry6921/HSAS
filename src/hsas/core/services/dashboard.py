@@ -20,7 +20,7 @@ from hsas.core.services.records import is_user_created_item, matching_archive
 from hsas.core.services.reviews import SourceReviewService
 from hsas.domain.courses import ArchiveIndex, PendingChangeBatch, iter_activities, iter_files
 from hsas.domain.courses.change_queue import CourseReview
-from hsas.domain.information import CourseRecord, InformationStore
+from hsas.domain.information import CourseRecord, InformationStore, RecentInformationUpdate
 from hsas.domain.information import moodle_source_course_ids
 from hsas.domain.information.calendar import build_ics
 from hsas.infrastructure.class_planner import class_planner_status
@@ -89,6 +89,7 @@ class DashboardProjectionService:
                 "sis_course_info": self._sis_course_info_status(),
                 "moodle_session": load_moodle_session_status(self.resources_dir),
                 "updates": _pending_updates(pending),
+                "recent_update": self._recent_update(),
                 "warnings": [
                     "information.json 尚未建立。请让 AI 阅读本地课程资料并生成更新。"
                 ],
@@ -148,8 +149,23 @@ class DashboardProjectionService:
             "sis_course_info": self._sis_course_info_status(),
             "moodle_session": load_moodle_session_status(self.resources_dir),
             "updates": _pending_updates(pending),
+            "recent_update": self._recent_update(),
             "warnings": [],
         }
+
+    def _recent_update(self) -> dict[str, Any] | None:
+        path = self.resources_dir / "ai-state" / "recent-information-update.json"
+        if not path.is_file():
+            return None
+        try:
+            value = read_json(path)
+        except (OSError, ValueError):
+            return None
+        try:
+            report = RecentInformationUpdate.model_validate(value)
+        except ValidationError:
+            return None
+        return report.model_dump(mode="json")
 
     @staticmethod
     def _course_code(*values: object) -> str | None:

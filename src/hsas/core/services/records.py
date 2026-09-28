@@ -312,7 +312,9 @@ class CourseRecordService:
                     f"删除课程失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
         try:
-            remove_material_index_courses(self.resources_dir, removed_archive_ids)
+            remove_material_index_courses(
+                self.resources_dir, removed_archive_ids | selected_ids
+            )
         except (OSError, ValueError):
             invalidate_material_index(self.resources_dir)
         return {

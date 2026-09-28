@@ -9,6 +9,10 @@ from typing import Any, AsyncIterator, Callable
 from urllib.parse import urlparse
 
 from playwright.async_api import BrowserContext, Response, async_playwright
+from hsas.infrastructure.browser.state import (
+    restore_shared_browser_state,
+    save_shared_browser_state,
+)
 
 
 APP_URL = "https://class-planner.hku.hk/app"
@@ -52,8 +56,10 @@ async def class_planner_context(
             headless=headless,
         )
         try:
+            await restore_shared_browser_state(context, profile_dir)
             yield context
         finally:
+            await save_shared_browser_state(context, profile_dir)
             # Close every visible page first. A failed SSO flow can leave an
             # auxiliary page alive even after the original capture page closes.
             for page in list(context.pages):

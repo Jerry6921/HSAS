@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import Mock
 
 from hsas.application.course_context import CourseQuestionContext
+from hsas.application.evidence_explanation import EvidenceExplanation
 from hsas.application.material_search import EvidenceContentResult, MaterialSearchResult
 from hsas.core import HIQSPort
 from hsas.mcp import build_mcp_server
@@ -19,9 +20,11 @@ MODELS = (
     MaterialSearchResult,
     EvidenceContentResult,
     CourseQuestionContext,
+    EvidenceExplanation,
 )
 AGENT_TOOLS = {
     "get_evidence",
+    "explain_evidence",
     "get_evidence_content",
     "query_course",
     "search_materials",

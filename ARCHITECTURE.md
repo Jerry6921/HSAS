@@ -160,15 +160,21 @@ caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。递�
 时，MCP `get_evidence_content` 按 evidence ID、chunk index 和最多三个相邻 chunk 定向展开，
 避免把无关文件一并送入 Agent。
 
+`explain_evidence` 与 Dashboard `GET /api/evidence-explanation/<id>` 统一返回确认状态、
+来源、处理方式、警告和已知限制。正式记录使用 `information:course:<course_id>` 与
+`information:item:<item_id>` 作为稳定 evidence ID。
+
 `hsas materials list` 输出所有原文件和文本副本的绝对路径，方便 AI 直接读取；
 `hsas materials search` 对已有文本副本作本地检索。原文件始终保留，AI 可按格式使用相应
 文档工具读取各类资料。
 
-同步发布课程快照后会按课程增量更新本地 SQLite FTS5 全局索引。每份文档以 evidence ID 和
+同步发布课程快照后会按课程增量更新本地 SQLite FTS5 全局索引。索引同时包含 Moodle 活动、
+提取文件与 `information.json` 正式记录。每份文档以 evidence ID 和
 内容指纹登记；只删除、重建已变化或已移除的证据行，未变化行保持原 rowid。课程过滤仅发生
 在 SQL 查询，不生成课程专属索引，也不扫描文件树。旧版或损坏索引只在首次读取时完整重建。
 活动、嵌套页面及提取文本的搜索命中直接携带对应证据图节点 ID，同时返回课程、活动、文件、
-页码和文本副本路径。索引是可删除的派生缓存，不会改变 canonical `course.json` 或个人资料。
+页码和文本副本路径。结构感知分块先保留 page/slide 边界，再按标题层级切分；表格按行建立
+独立块并保留原始表对象。索引是可删除的派生缓存，不会改变 canonical `course.json` 或个人资料。
 
 PDF、DOCX 与 PPTX 分析使用有界工作池，并将结果按“来源 SHA-256 + parser version”写入
 `cache/document-analysis/`。相同内容跨课程、改名或重复同步时直接复用已验证文本和分析模型；
@@ -180,11 +186,14 @@ Subject/Catalogue URL 与 SHA-256。课程事实保持由 AI 阅读，页面结�
 parser。当前学期课程名单保存在 `sis-enrollment/latest.json`，Student Center 可见正文
 保存在 `sis-enrollment/latest.txt`；课程名单的变化使用独立 batch 与 checkpoint 交给 AI
 审阅。相同课程的多个 Moodle section 共用一份 SIS 来源。Class Planner 与 SIS 访问器
-共享持久化 HKU Portal browser profile；SIS 登录从 `z_signon.jsp` 开始，并由用户在可见
-窗口完成可能出现的图形验证码。统一同步先完成登录与 Student Center 课程名单采集，随后由
+共享持久化 HKU Portal browser profile。统一同步完成一次 Portal 登录后，Moodle 直接访问
+`/login/index.php?authCAS=CAS` 建立 Moodle 会话，SIS 则优先打开目标页面复用 Portal 会话；
+只有会话过期或 SIS 仍要求验证时，才保留可见窗口供用户处理。随后由
 application 层的 `UnifiedCourseSyncService` 编排来源任务。infrastructure 层的
 `BrowserSessionBroker` 在整个采集阶段只打开一个 headless Chromium context，Moodle、SIS
 Course Information 和 Class Planner 各自使用独立 page 并通过 `asyncio.gather` 并发运行。
+Class Planner 属于认证完成后的 SIS 课表采集阶段，不再承担 Portal 登录入口。共享浏览器状态
+以 0600 权限保存，显式恢复 session-only Cookie，避免不同采集上下文再次要求 Portal 登录。
 来源分别写入自己的目录，聚合状态只在锁内更新。
 
 提取器会把文字覆盖不足的扫描 PDF 和图片型 PPT 标为 `ocr_required`。`hsas ocr status`

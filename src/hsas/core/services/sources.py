@@ -34,7 +34,7 @@ class InstitutionalSourceService:
 
     def login_moodle(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("confirmed") is not True:
-            raise HIQSPortError("请先确认打开 Moodle 登录窗口。")
+            raise HIQSPortError("请先确认通过 HKU Portal CAS 打开 Moodle。")
         with self._mutation_lock:
             try:
                 result = self._moodle_factory(self._resources_dir).login_until_ready()
@@ -129,7 +129,7 @@ class InstitutionalSourceService:
 
     def login_sis_course_info(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("confirmed") is not True:
-            raise HIQSPortError("请先确认打开 HKU SIS 登录窗口。")
+            raise HIQSPortError("请先确认使用共享 HKU Portal 会话打开 SIS。")
         with self._mutation_lock:
             try:
                 result = self._sis_course_info_factory(self._resources_dir).login_until_ready()

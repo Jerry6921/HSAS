@@ -21,6 +21,7 @@ from .attention import (
     AttentionSnapshot,
 )
 from .inbox import PersonalInbox, PersonalInboxEntry
+from .recent_updates import RecentInformationUpdate
 
 __all__ = [
     "AttentionAction",
@@ -36,6 +37,7 @@ __all__ = [
     "InformationUpdate",
     "PersonalInbox",
     "PersonalInboxEntry",
+    "RecentInformationUpdate",
     "RelatedMaterial",
     "RecurrenceException",
     "SourceReference",

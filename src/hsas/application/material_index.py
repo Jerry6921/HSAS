@@ -11,7 +11,7 @@ import tempfile
 from typing import Any, Iterable
 
 
-INDEX_VERSION = "3"
+INDEX_VERSION = "4"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS indexed_courses (
@@ -30,6 +30,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
     evidence_id UNINDEXED,
     course_id UNINDEXED, course_title UNINDEXED, activity_id UNINDEXED,
     activity_name UNINDEXED, source_kind UNINDEXED, filename UNINDEXED,
+    record_id UNINDEXED, heading UNINDEXED, section_path UNINDEXED,
+    content_kind UNINDEXED,
     relative_text_path UNINDEXED, page_start UNINDEXED, page_end UNINDEXED,
     source_unit_label UNINDEXED, source_unit_start UNINDEXED,
     source_unit_end UNINDEXED, chunk_index UNINDEXED,
@@ -184,6 +186,8 @@ def search_index(
     query: str,
     course_ids: set[str] | None,
     limit: int,
+    *,
+    source_kinds: set[str] | None = None,
 ) -> dict[str, Any]:
     clauses = ["chunks MATCH ?"]
     params: list[Any] = [query]
@@ -191,11 +195,16 @@ def search_index(
         placeholders = ",".join("?" for _ in course_ids)
         clauses.append(f"course_id IN ({placeholders})")
         params.extend(sorted(course_ids))
+    if source_kinds:
+        placeholders = ",".join("?" for _ in source_kinds)
+        clauses.append(f"source_kind IN ({placeholders})")
+        params.extend(sorted(source_kinds))
     where = " AND ".join(clauses)
     with _connect(path, writable=False) as connection:
         rows = connection.execute(
             f"""SELECT bm25(chunks), evidence_id, course_id, course_title, activity_id,
-                activity_name, source_kind, filename, relative_text_path,
+                activity_name, source_kind, filename, record_id, heading,
+                section_path, content_kind, relative_text_path,
                 page_start, page_end, source_unit_label, source_unit_start,
                 source_unit_end, chunk_index, content, content_tables
                 FROM chunks WHERE {where} ORDER BY bm25(chunks) LIMIT ?""",
@@ -223,14 +232,16 @@ def evidence_context(
     with _connect(path, writable=False) as connection:
         rows = connection.execute(
             f"""SELECT course_id, course_title, activity_id, activity_name, source_kind,
-                filename, relative_text_path, page_start, page_end, source_unit_label,
+                filename, record_id, heading, section_path, content_kind,
+                relative_text_path, page_start, page_end, source_unit_label,
                 source_unit_start, source_unit_end, chunk_index, content, content_tables
                 FROM chunks WHERE {' AND '.join(clauses)} ORDER BY chunk_index""",
             params,
         ).fetchall()
     keys = (
         "course_id", "course_title", "activity_id", "activity_name", "source_kind",
-        "filename", "relative_text_path", "page_start", "page_end", "source_unit_label",
+        "filename", "record_id", "heading", "section_path", "content_kind",
+        "relative_text_path", "page_start", "page_end", "source_unit_label",
         "source_unit_start", "source_unit_end", "chunk_index", "text", "content_tables",
     )
     return [
@@ -312,7 +323,7 @@ def _insert_documents(
         if not values:
             continue
         connection.executemany(
-            "INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (_chunk_row(chunk) for chunk in values),
         )
         connection.execute(
@@ -336,6 +347,10 @@ def _chunk_row(chunk: Any) -> tuple[Any, ...]:
         chunk.activity_name,
         chunk.source_kind,
         chunk.filename,
+        chunk.record_id,
+        chunk.heading,
+        chunk.section_path,
+        chunk.content_kind,
         chunk.relative_text_path,
         chunk.page_start,
         chunk.page_end,
@@ -393,6 +408,9 @@ def _document_fingerprint(chunks: list[Any]) -> str:
             "chunk_index": chunk.chunk_index,
             "text": chunk.text,
             "path": chunk.relative_text_path,
+            "heading": chunk.heading,
+            "section_path": chunk.section_path,
+            "content_kind": chunk.content_kind,
             "tables": chunk.content_tables,
         }
         for chunk in chunks

@@ -1,6 +1,6 @@
 [moodle]
 base_url = "https://moodle.hku.hk"
-login_url = "https://moodle.hku.hk/login/index.php"
+login_url = "https://moodle.hku.hk/login/index.php?authCAS=CAS"
 dashboard_url = "https://moodle.hku.hk/my/"
 headless = true
 navigation_timeout_ms = 30000

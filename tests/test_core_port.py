@@ -65,6 +65,129 @@ def test_core_exposes_information_schema_and_empty_material_manifest(tmp_path: P
     assert manifest["documents"] == []
 
 
+def test_information_apply_keeps_a_user_visible_recent_change_audit(tmp_path: Path) -> None:
+    core = HIQSCore(resources_dir=tmp_path)
+    first = core.apply_information_update(
+        {
+            "confirmed": True,
+            "update": {
+                "courses": [
+                    {
+                        "course_id": "DEMO1001-2026-S1",
+                        "code": "DEMO1001",
+                        "title": "Demo Course",
+                    }
+                ],
+                "items": [
+                    {
+                        "item_id": "demo-assignment",
+                        "course_id": "DEMO1001-2026-S1",
+                        "title": "Assignment",
+                        "category": "assignment",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert first["recent_update"]["summary"] == {
+        "added": 2,
+        "modified": 0,
+        "removed": 0,
+        "change_count": 2,
+        "course_count": 1,
+        "activities_added": 1,
+        "activities_updated": 0,
+        "activities_confirmed": 0,
+        "materials_added": 0,
+        "materials_updated": 0,
+        "materials_removed": 0,
+    }
+    added_activity = first["recent_update"]["courses"][0]["activities_added"][0]
+    assert added_activity["record_id"] == "demo-assignment"
+    assert added_activity["title"] == "Assignment"
+    audit_path = tmp_path / "ai-state/recent-information-update.json"
+    assert audit_path.is_file()
+    assert audit_path.stat().st_mode & 0o777 == 0o600
+
+    second = core.apply_information_update(
+        {
+            "confirmed": True,
+            "update": {
+                "items": [
+                    {
+                        "item_id": "demo-assignment",
+                        "course_id": "DEMO1001-2026-S1",
+                        "title": "Assignment",
+                        "category": "assignment",
+                        "date_status": "confirmed",
+                        "due_on": "2026-10-15",
+                    }
+                ]
+            },
+        }
+    )
+
+    recent = second["information"]["recent_update"]
+    assert recent["summary"]["modified"] == 2
+    assert recent["summary"]["course_count"] == 1
+    assert recent["summary"]["activities_confirmed"] == 1
+    assert recent["summary"]["activities_updated"] == 0
+    changes = recent["courses"][0]["changes"]
+    assert {change["field"] for change in changes} == {"date_status", "due_on"}
+    due_change = next(change for change in changes if change["field"] == "due_on")
+    assert due_change["before"] is None
+    assert due_change["after"] == "2026-10-15"
+    confirmed = recent["courses"][0]["activities_confirmed"][0]
+    assert confirmed["record_id"] == "demo-assignment"
+    assert confirmed["details"] == ["日期状态：已确认", "截止日期：2026-10-15"]
+
+    third = core.apply_information_update(
+        {
+            "confirmed": True,
+            "update": {
+                "courses": [
+                    {
+                        "course_id": "DEMO1001-2026-S1",
+                        "code": "DEMO1001",
+                        "title": "Demo Course",
+                        "material_sections": [
+                            {
+                                "title": "Lecture slides",
+                                "materials": [
+                                    {
+                                        "title": "Week 1 slides",
+                                        "url": "https://example.test/week-1.pdf",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+                "items": [
+                    {
+                        "item_id": "demo-assignment",
+                        "course_id": "DEMO1001-2026-S1",
+                        "title": "Assignment",
+                        "category": "assignment",
+                        "date_status": "confirmed",
+                        "due_on": "2026-10-15",
+                        "location": "Moodle",
+                    }
+                ],
+            },
+        }
+    )
+    recent = third["information"]["recent_update"]
+    assert recent["summary"]["activities_confirmed"] == 0
+    assert recent["summary"]["activities_updated"] == 1
+    assert recent["summary"]["materials_added"] == 1
+    assert recent["courses"][0]["activities_updated"][0]["details"] == ["地点：Moodle"]
+    assert recent["courses"][0]["materials_added"][0]["details"] == [
+        "归类：Lecture slides"
+    ]
+
+
 def test_core_exposes_attention_through_public_query_port(tmp_path: Path) -> None:
     now = datetime(2026, 9, 24, tzinfo=UTC)
     core = HIQSCore(resources_dir=tmp_path, clock=lambda: now)
@@ -119,3 +242,28 @@ def test_core_hydrates_only_selected_evidence_context(tmp_path: Path) -> None:
 
     assert result["status"] == "found"
     assert result["chunks"][0]["text"] == "selected evidence context for the agent"
+
+
+def test_core_explains_canonical_information_evidence(tmp_path: Path) -> None:
+    core = HIQSCore(resources_dir=tmp_path)
+    core.apply_information_update({
+        "confirmed": True,
+        "update": {
+            "courses": [{"course_id": "DEMO1001", "code": "DEMO1001", "title": "Demo"}],
+            "items": [{
+                "item_id": "demo-deadline", "course_id": "DEMO1001",
+                "title": "Report deadline", "category": "deadline",
+                "date_status": "tentative", "due_on": "2026-10-20",
+                "warnings": ["Date differs between two announcements"],
+                "sources": [{"source_type": "announcement", "title": "Moodle news"}],
+            }],
+        },
+    })
+
+    result = core.explain_evidence("information:item:demo-deadline")
+
+    assert result["status"] == "found"
+    assert result["confirmation_status"] == "tentative"
+    assert result["sources"][0]["title"] == "Moodle news"
+    assert result["warnings"] == ["Date differs between two announcements"]
+    assert "不得视为已确认日期" in result["limitations"][0]

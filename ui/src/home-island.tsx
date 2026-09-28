@@ -22,8 +22,10 @@ import type {
   AttentionDraftField,
   HomeInboxEntry,
   HomeListEntry,
+  HomeRecentUpdate,
   HomeUpdateChange,
   HomeUpdateCourse,
+  HomeUpdateOutcome,
   ModernHomeOptions,
 } from "./types";
 
@@ -146,11 +148,12 @@ function AttentionRow({ item, onAction, onReviewChanges, onCreateDraft, onDismis
   </article>;
 }
 
-export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDraft, embedded = false }: {
+export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDraft, onCopyPrompt, embedded = false }: {
   snapshot: HomeAttentionSnapshot;
   onAction: (item: HomeAttentionItem, action: AttentionActionKind) => void;
   onReviewChanges: () => void;
   onCreateDraft: ModernHomeOptions["onCreateAttentionDraft"];
+  onCopyPrompt: ModernHomeOptions["onCopyAttentionPrompt"];
   embedded?: boolean;
 }) {
   const [sectionOpen, setSectionOpen] = useState(false);
@@ -197,6 +200,7 @@ export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDr
           <span className="hiqs-attention-index-label">01 / REVIEW</span>
           <span className="hiqs-attention-heading-copy"><strong id="hiqs-attention-title">待确认</strong><small>未来 14 天内，优先核实会影响安排或提交的事项。</small></span>
           <span className={`hiqs-attention-count ${snapshot.state !== "ready" ? "is-status" : ""}`} aria-label={countLabel}>{snapshot.state === "ready" ? <><strong>{visible.length}</strong><em>项</em></> : <strong>{countLabel}</strong>}</span>
+          {snapshot.state === "ready" && visible.length > 0 && <button type="button" className="hiqs-attention-copy-prompt" title="复制一段让 AI 逐项询问并整理缺漏信息的提示词" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCopyPrompt(visible); }}><Copy size={14} />复制 AI 问答提示词</button>}
           <ChevronDown className="hiqs-attention-chevron" size={17} aria-hidden="true" />
         </summary>
         <div className="hiqs-attention-body">
@@ -268,7 +272,17 @@ function InboxEntry({ entry, onApply }: { entry: HomeInboxEntry; onApply: (entry
 
 function ChangeCard({ change, onOpenSource }: { change: HomeUpdateChange; onOpenSource: ModernHomeOptions["onOpenSource"] }) {
   const actionLabels: Record<string, string> = { added: "新增", modified: "修改", removed: "删除", baseline: "首次整理" };
-  const kindLabels: Record<string, string> = { deadline: "日期", activity: "项目", material: "文件" };
+  const kindLabels: Record<string, string> = { deadline: "日期", activity: "项目", material: "文件", course: "课程信息" };
+  const fieldLabels: Record<string, string> = {
+    title: "标题", semester: "学期", starts_on: "开课日期", ends_on: "结束日期",
+    overview: "课程简介", objectives: "学习目标", instructors: "教师", links: "链接",
+    policies: "课程政策", notes: "备注", category: "类型", date_status: "日期状态",
+    opens_at: "开放时间", starts_at: "开始时间", ends_at: "结束时间", due_at: "截止时间",
+    due_on: "截止日期", scheduled_on: "安排日期", recurrence: "重复安排", all_day: "全天",
+    location: "地点", description: "说明", assessment_format: "考核形式",
+    submission_method: "提交方式", weight_percent: "占分", word_limit: "字数限制",
+    requirements: "要求", materials: "相关资料", warnings: "提示", material: "资料归类",
+  };
   const canOpen = change.action !== "removed" && Boolean(change.relative_path || change.text_path || change.source_url);
   return (
     <div className="hiqs-home-change-card">
@@ -278,7 +292,7 @@ function ChangeCard({ change, onOpenSource }: { change: HomeUpdateChange; onOpen
         <strong>{change.title}</strong>
         {canOpen && <Button size="sm" variant="ghost" onClick={() => onOpenSource({ ...change, relative_path: change.relative_path || change.text_path })}>预览</Button>}
       </div>
-      {change.field && change.field !== 'sha256' && <code className="hiqs-home-change-field">{change.field}</code>}
+      {change.field && change.field !== 'sha256' && <code className="hiqs-home-change-field">{fieldLabels[change.field] || change.field}</code>}
       {change.action === "modified" && <details className="hiqs-change-details"><summary>{change.field === 'sha256' ? '文件内容已更新 · 查看技术详情' : '查看变更详情'}</summary>
         <div className="hiqs-home-diff">
           <div><span>更新前</span><pre>{previewValue(change.before)}</pre></div>
@@ -295,7 +309,7 @@ function UpdateCourse({ course, onOpenSource }: { course: HomeUpdateCourse; onOp
     <article className="hiqs-home-update-course">
       <header>
         <div><h3>{course.course_title}</h3><p>{course.course_id} · 检测至 {formatDateTime(course.acknowledge_through)}</p></div>
-        <Badge>{course.mode === "full" ? "首次整理" : "增量更新"}</Badge>
+        <Badge>{course.mode === "full" ? "首次整理" : course.mode === "completed" ? "已写入" : "增量更新"}</Badge>
       </header>
       {(course.changes || []).map((change, index) => <ChangeCard key={`${change.title}:${index}`} change={change} onOpenSource={onOpenSource} />)}
       {!(course.changes || []).length && (
@@ -305,6 +319,124 @@ function UpdateCourse({ course, onOpenSource }: { course: HomeUpdateCourse; onOp
         </div>
       )}
     </article>
+  );
+}
+
+type OutcomeEntry = HomeUpdateOutcome & { course_id: string; course_title: string; action?: string };
+
+function OutcomeGroup({ title, description, tone, entries, onOpenSource }: {
+  title: string;
+  description: string;
+  tone: string;
+  entries: OutcomeEntry[];
+  onOpenSource: ModernHomeOptions["onOpenSource"];
+}) {
+  if (!entries.length) return null;
+  return (
+    <section className={`hiqs-update-outcome-group is-${tone}`}>
+      <header><div><h3>{title}</h3><p>{description}</p></div><strong>{entries.length}</strong></header>
+      <div>
+        {entries.map((entry) => {
+          const canOpen = Boolean(entry.relative_path || entry.text_path || entry.source_url);
+          return <article key={`${entry.course_id}:${entry.record_id}:${entry.action || tone}`}>
+            <span>{entry.course_title}</span>
+            <div><strong>{entry.title}</strong>{entry.details.length > 0 && <p>{entry.details.join(" · ")}</p>}</div>
+            {entry.action && <Badge className={`is-${entry.action}`}>{entry.action === "added" ? "新增" : entry.action === "modified" ? "更新" : "移除"}</Badge>}
+            {canOpen && <Button size="sm" variant="ghost" onClick={() => onOpenSource({ ...entry, relative_path: entry.relative_path || entry.text_path })}>查看来源</Button>}
+          </article>;
+        })}
+      </div>
+    </section>
+  );
+}
+
+export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
+  recent?: HomeRecentUpdate | null;
+  pending: HomeUpdateCourse[];
+  onOpenSource: ModernHomeOptions["onOpenSource"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const completed = Boolean(recent?.courses?.length);
+  const courses = completed ? recent!.courses : pending;
+  const changes = courses.flatMap((course) => course.changes || []);
+  const baselineCount = courses.reduce((sum, course) => sum + (!(course.changes || []).length ? (course.files || []).filter((file) => file.relative_path !== "course.json").length : 0), 0);
+  const counts = {
+    added: completed ? recent!.summary.added : changes.filter((change) => change.action === "added" || change.action === "baseline").length + baselineCount,
+    modified: completed ? recent!.summary.modified : changes.filter((change) => change.action === "modified").length,
+    removed: completed ? recent!.summary.removed : changes.filter((change) => change.action === "removed").length,
+  };
+  const total = counts.added + counts.modified + counts.removed;
+  const maxCourseChanges = Math.max(1, ...courses.map((course) => (course.changes || []).length || (course.files || []).length));
+  const title = completed ? "最近一次资料更新" : pending.length ? "本轮待写入内容" : "最近没有内容变化";
+  const timestamp = completed ? formatDateTime(recent!.applied_at) : "等待下一次同步与 Agent 整理";
+  const collect = (field: keyof Pick<HomeUpdateCourse,
+    "activities_added" | "activities_updated" | "activities_confirmed" |
+    "materials_added" | "materials_updated" | "materials_removed"
+  >, action?: string): OutcomeEntry[] => courses.flatMap((course) =>
+    (course[field] || []).map((entry) => ({
+      ...entry,
+      course_id: course.course_id,
+      course_title: course.course_title,
+      action,
+    })),
+  );
+  const activitiesAdded = collect("activities_added");
+  const activitiesConfirmed = collect("activities_confirmed");
+  const activitiesUpdated = collect("activities_updated");
+  const materialChanges = [
+    ...collect("materials_added", "added"),
+    ...collect("materials_updated", "modified"),
+    ...collect("materials_removed", "removed"),
+  ];
+  const outcomeCount = activitiesAdded.length + activitiesConfirmed.length + activitiesUpdated.length + materialChanges.length;
+
+  return (
+    <section className={`hiqs-update-visual ${!total ? "is-empty" : ""}`} aria-labelledby="hiqs-update-visual-title">
+      <header>
+        <div><p>CHANGESET / LATEST</p><h2 id="hiqs-update-visual-title">{title}</h2><span>{completed ? `${timestamp} · 已通过校验写入资料库` : timestamp}</span></div>
+        {total > 0 && <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "收起明细" : "查看全部明细"}<ChevronDown size={15} /></button>}
+      </header>
+      {!total ? <p className="hiqs-update-visual-empty"><Check size={16} />资料库与来源保持一致；下一次完成更新后，这里会保留新增与变更摘要。</p> : <>
+        <div className="hiqs-update-overview">
+          <div className="hiqs-update-total"><strong>{String(total).padStart(2, "0")}</strong><span>项内容变化</span><small>横跨 {courses.length} 门课程</small></div>
+          <div className="hiqs-update-breakdown">
+            <article className="is-added"><span>新增</span><strong>{counts.added}</strong><small>新课程、事项与资料</small></article>
+            <article className="is-modified"><span>变更</span><strong>{counts.modified}</strong><small>日期、内容与归类调整</small></article>
+            <article className="is-removed"><span>移除</span><strong>{counts.removed}</strong><small>已不在当前资料中</small></article>
+            <div className="hiqs-update-composition" aria-label={`新增 ${counts.added}，变更 ${counts.modified}，移除 ${counts.removed}`}>
+              {counts.added > 0 && <i className="is-added" style={{ flexGrow: counts.added }} />}
+              {counts.modified > 0 && <i className="is-modified" style={{ flexGrow: counts.modified }} />}
+              {counts.removed > 0 && <i className="is-removed" style={{ flexGrow: counts.removed }} />}
+            </div>
+          </div>
+        </div>
+        {outcomeCount > 0 && <section className="hiqs-update-outcomes" aria-label="本次整理结果">
+          <header><span>本次整理结果</span><small>同一活动的多个字段变化已合并显示</small></header>
+          <div>
+            <OutcomeGroup title="新增活动" description="本次加入日历或课程记录" tone="activity-added" entries={activitiesAdded} onOpenSource={onOpenSource} />
+            <OutcomeGroup title="信息已确认" description="日期由未知或暂定变为已确认" tone="confirmed" entries={activitiesConfirmed} onOpenSource={onOpenSource} />
+            <OutcomeGroup title="活动信息变更" description="时间、地点、提交或要求发生变化" tone="activity-updated" entries={activitiesUpdated} onOpenSource={onOpenSource} />
+            <OutcomeGroup title="资料变化" description="新增、更新或移除的课程资料" tone="materials" entries={materialChanges} onOpenSource={onOpenSource} />
+          </div>
+        </section>}
+        <div className="hiqs-update-course-map">
+          <div className="hiqs-update-course-map-heading"><span>按课程分布</span><small>条形长度代表本次变化数量</small></div>
+          {courses.map((course, index) => {
+            const courseChanges = (course.changes || []).length || (course.files || []).length;
+            const added = (course.changes || []).filter((change) => change.action === "added" || change.action === "baseline").length;
+            const modified = (course.changes || []).filter((change) => change.action === "modified").length;
+            const removed = (course.changes || []).filter((change) => change.action === "removed").length;
+            return <article key={course.course_id}>
+              <em>{String(index + 1).padStart(2, "0")}</em>
+              <div><strong>{course.course_title}</strong><small>{[added && `${added} 新增`, modified && `${modified} 变更`, removed && `${removed} 移除`].filter(Boolean).join(" · ") || `${courseChanges} 项首次整理`}</small></div>
+              <span><i style={{ width: `${Math.max(8, courseChanges / maxCourseChanges * 100)}%` }} /></span>
+              <b>{courseChanges}</b>
+            </article>;
+          })}
+        </div>
+      </>}
+      {expanded && <div className="hiqs-update-visual-details">{courses.map((course) => <UpdateCourse key={course.course_id} course={course} onOpenSource={onOpenSource} />)}</div>}
+    </section>
   );
 }
 
@@ -384,13 +516,14 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
           )}
           {options.retrySummary && <p className="hiqs-home-retry"><AlertTriangle size={14} />{options.retrySummary}</p>}
           <section className="hiqs-home-review">
-            <AttentionRadar embedded snapshot={options.attentionSnapshot} onAction={options.onAttentionAction} onCreateDraft={options.onCreateAttentionDraft} onReviewChanges={() => document.querySelector<HTMLElement>(".hiqs-home-updates")?.scrollIntoView({ behavior: animate ? "smooth" : "auto", block: "start" })} />
+            <AttentionRadar embedded snapshot={options.attentionSnapshot} onAction={options.onAttentionAction} onCreateDraft={options.onCreateAttentionDraft} onCopyPrompt={options.onCopyAttentionPrompt} onReviewChanges={() => document.querySelector<HTMLElement>(".hiqs-home-updates")?.scrollIntoView({ behavior: animate ? "smooth" : "auto", block: "start" })} />
           </section>
           </div>
 
         <div className="hiqs-home-metrics">
           {options.metrics.map((metric) => <article key={metric.label}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.note}</small></article>)}
         </div>
+        <RecentUpdateVisual recent={options.recentUpdate} pending={options.updates} onOpenSource={options.onOpenSource} />
       </motion.section>}
 
       <div className={`hiqs-home-grid ${workspace ? 'is-workspace' : 'is-today'}`}>

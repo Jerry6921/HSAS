@@ -9,7 +9,11 @@ from typing import Literal
 
 from pydantic import Field
 
-from hsas.application.material_search import MaterialSearchResult, search_materials
+from hsas.application.material_search import (
+    MaterialSearchResult,
+    search_evidence,
+    search_materials,
+)
 from hsas.domain.courses import StrictModel
 from hsas.domain.information import CourseRecord, InformationItem, InformationStore
 
@@ -94,8 +98,31 @@ def build_course_question_context(
                 + ", ".join(missing_ids)
             )
 
-    course_hits = _rank_courses(courses, tokens, normalized_question, selected)
-    item_hits = _rank_items(items, tokens, normalized_question, selected)[:item_limit]
+    structured = search_evidence(
+        resources_dir,
+        normalized_question,
+        course_ids=selected or None,
+        limit=min(20, item_limit + max(len(courses), 1)),
+        source_kinds={"information_course", "information_item"},
+    )
+    courses_by_id = {course.course_id: course for course in courses}
+    items_by_id = {item.item_id: item for item in items}
+    course_hits = [
+        CourseFactHit(score=hit.score, course=courses_by_id[hit.record_id])
+        for hit in structured.hits
+        if hit.source_kind == "information_course" and hit.record_id in courses_by_id
+    ]
+    item_hits = [
+        InformationItemHit(score=hit.score, item=items_by_id[hit.record_id])
+        for hit in structured.hits
+        if hit.source_kind == "information_item" and hit.record_id in items_by_id
+    ][:item_limit]
+    # Direct library callers may supply a validated in-memory store before it is
+    # persisted. Production reads use the unified index; retain this bounded
+    # compatibility path only when that store has not yet been indexed.
+    if information is not None and not structured.hits:
+        course_hits = _rank_courses(courses, tokens, normalized_question, selected)
+        item_hits = _rank_items(items, tokens, normalized_question, selected)[:item_limit]
     materials = search_materials(
         resources_dir,
         normalized_question,

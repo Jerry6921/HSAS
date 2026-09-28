@@ -8,6 +8,7 @@ import type {
   CourseSource,
   EventEditorDefaults,
   EventEditorValue,
+  EvidenceExplanationPayload,
   ModernDetailOptions,
   ModernOverlayOptions,
   NewCourseValue,
@@ -81,6 +82,29 @@ function SourceCards({ title, values, onOpen }: { title: string; values: CourseS
   return <section className="hiqs-detail-block"><h3>{title}</h3><div className="hiqs-detail-sources">{values.map((source, index) => <button type="button" key={`${source.title || source.relative_path}:${index}`} onClick={() => onOpen(source)}><FileText size={14} /><span>{source.title || source.label || source.relative_path || "来源"}</span><ArrowUpRight size={14} /></button>)}</div></section>;
 }
 
+function EvidenceExplanationPanel({ evidenceId, onOpenSource }: { evidenceId: string; onOpenSource: (source: CourseSource) => void }) {
+  const [value, setValue] = useState<EvidenceExplanationPayload | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    setValue(null); setError("");
+    fetch(`/api/evidence-explanation/${encodeURIComponent(evidenceId)}`, { cache: "no-store" })
+      .then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "证据说明不可用"); return payload; })
+      .then((payload) => { if (active) setValue(payload); })
+      .catch((reason) => { if (active) setError(reason.message); });
+    return () => { active = false; };
+  }, [evidenceId]);
+  if (error) return <section className="hiqs-detail-block is-warning"><h3>证据说明</h3><p>{error}</p></section>;
+  if (!value) return <section className="hiqs-detail-block hiqs-evidence-explanation"><h3>证据说明</h3><p>正在核对正式记录与来源…</p></section>;
+  return <section className="hiqs-detail-block hiqs-evidence-explanation"><h3>证据说明</h3>
+    <dl><div><dt>确认状态</dt><dd>{value.confirmation_status || "未标注"}</dd></div><div><dt>处理方式</dt><dd>{value.extraction_method || "未标注"}</dd></div></dl>
+    {value.statement && <p>{value.statement}</p>}
+    {!!value.warnings.length && <ul className="is-warning">{value.warnings.map((item, index) => <li key={`${item}:${index}`}>{item}</li>)}</ul>}
+    {!!value.limitations.length && <ul>{value.limitations.map((item, index) => <li key={`${item}:${index}`}>{item}</li>)}</ul>}
+    {!!value.sources.length && <><h4>可核对来源</h4><div className="hiqs-detail-sources">{value.sources.map((source, index) => <button type="button" key={`${source.title || source.relative_path}:${index}`} onClick={() => onOpenSource(source)}><FileText size={14} /><span>{source.title || source.relative_path || "来源"}</span><ArrowUpRight size={14} /></button>)}</div></>}
+  </section>;
+}
+
 function DetailModal({ detail, options, onClose, onOpenSource }: { detail: ModernDetailOptions; options: ModernOverlayOptions; onClose: () => void; onOpenSource: (source: CourseSource) => void }) {
   return <Modal onClose={onClose} wide><ModalHeader eyebrow="CALENDAR ITEM" title={detail.title} onClose={onClose} /><div className={`hiqs-detail-body category-${detail.categoryKey}`}>
     <div className="hiqs-detail-course">{detail.courseLabel}</div>
@@ -92,6 +116,7 @@ function DetailModal({ detail, options, onClose, onOpenSource }: { detail: Moder
     {!!detail.links.length && <section className="hiqs-detail-block"><h3>相关链接</h3><div className="hiqs-detail-sources">{detail.links.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /><span>{link.label}</span><ArrowUpRight size={14} /></a>)}</div></section>}
     <SourceCards title="证据来源" values={detail.sources} onOpen={onOpenSource} />
     <SourceCards title="本次变更来源" values={detail.exceptionSources} onOpen={onOpenSource} />
+    <EvidenceExplanationPanel evidenceId={detail.evidenceId} onOpenSource={onOpenSource} />
     <div className="hiqs-modal-actions"><Button onClick={() => detail.prompt && options.onCopyPrompt(detail.prompt, `“${detail.title}”活动查询提示词已复制。`)} disabled={!detail.hasPrompt}><Copy size={14} />复制 AI 提示词</Button>{detail.userCreated && <Button className="hiqs-danger" onClick={() => options.onDeleteEvent(detail.itemId)}><Trash2 size={14} />删除事件</Button>}</div>
   </div></Modal>;
 }

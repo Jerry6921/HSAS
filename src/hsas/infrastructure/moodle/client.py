@@ -13,6 +13,10 @@ from bs4 import BeautifulSoup
 from playwright.async_api import BrowserContext, Page, async_playwright
 
 from .settings import SelectorConfig, Settings
+from hsas.infrastructure.browser.state import (
+    restore_shared_browser_state,
+    save_shared_browser_state,
+)
 from hsas.domain.courses.models import CourseSummary
 from hsas.infrastructure.moodle.cancellation import raise_if_cancelled
 
@@ -46,25 +50,19 @@ async def persistent_context(
 ) -> AsyncIterator[BrowserContext]:
     """Reuse a local Chromium profile so Moodle cookies survive between runs."""
     settings.profile_dir.mkdir(parents=True, exist_ok=True)
-    storage_state_path = settings.profile_dir / "storage-state.json"
     async with async_playwright() as playwright:
         context = await playwright.chromium.launch_persistent_context(
             user_data_dir=str(settings.profile_dir),
             headless=settings.headless if headless is None else headless,
         )
-        # Chromium may discard session-only cookies when it closes. Persist and
-        # re-inject them explicitly so Moodle SSO survives between CLI commands.
-        if storage_state_path.exists():
-            state = json.loads(storage_state_path.read_text(encoding="utf-8"))
-            cookies = state.get("cookies", [])
-            if cookies:
-                await context.add_cookies(cookies)
+        # Chromium may discard session-only cookies when it closes. Restore the
+        # same private state used by Portal, Moodle, SIS and Class Planner.
+        await restore_shared_browser_state(context, settings.profile_dir)
         context.set_default_timeout(settings.navigation_timeout_ms)
         try:
             yield context
         finally:
-            await context.storage_state(path=str(storage_state_path))
-            storage_state_path.chmod(0o600)
+            await save_shared_browser_state(context, settings.profile_dir)
             await context.close()
 
 

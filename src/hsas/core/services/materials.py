@@ -14,6 +14,10 @@ from hsas.application.ports.repositories import (
     InformationRepository,
 )
 from hsas.application.course_context import build_course_question_context
+from hsas.application.evidence_explanation import (
+    EvidenceExplanation,
+    explain_information_evidence,
+)
 from hsas.application.material_search import (
     EvidenceContentResult,
     list_materials,
@@ -22,6 +26,7 @@ from hsas.application.material_search import (
 )
 from hsas.core.ports import HIQSPortError
 from hsas.domain.courses import activity_evidence_graph, iter_activities, iter_files
+from hsas.domain.information import SourceReference
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
     JsonInformationRepository,
@@ -153,6 +158,56 @@ class MaterialQueryService:
             context_chunks=context_chunks,
             character_count=sum(len(chunk["text"]) for chunk in chunks),
             chunks=chunks,
+        ).model_dump(mode="json")
+
+    def explain_evidence(self, evidence_id: str) -> dict[str, Any]:
+        """Explain provenance, confirmation state, warnings, and known limits."""
+        if not evidence_id or len(evidence_id) > 500:
+            raise HIQSPortError("evidence_id is required and must be bounded.")
+        information = self._load_information_optional()
+        try:
+            context = retrieve_evidence_context(
+                self.resources_dir, evidence_id, context_chunks=0
+            )
+        except (OSError, ValueError) as exc:
+            raise HIQSPortError(str(exc)) from exc
+        structured = explain_information_evidence(information, evidence_id, context[:3])
+        if structured is not None:
+            return structured.model_dump(mode="json")
+
+        provenance = self.evidence(evidence_id)
+        if provenance.get("status") != "found":
+            return EvidenceExplanation(
+                status="not_found", evidence_id=evidence_id,
+                limitations=["当前课程快照与统一索引中均不存在该证据。"],
+            ).model_dump(mode="json")
+        node = provenance["node"]
+        source = SourceReference(
+            source_type="moodle" if node.get("source_url") else "course_document",
+            title=node.get("title") or provenance.get("activity_name") or evidence_id,
+            url=node.get("source_url"),
+            relative_path=node.get("local_path"),
+            observed_at=node.get("collected_at"),
+        )
+        limitations = []
+        if node.get("status") != "complete":
+            limitations.append(f"采集状态为 {node.get('status')}，内容可能不完整。")
+        if not provenance.get("graph_complete", True):
+            limitations.append(
+                provenance.get("truncation_reason") or "递归证据图未完整采集。"
+            )
+        if not context:
+            limitations.append("该节点没有可检索的文本块；只能核对来源元数据。")
+        return EvidenceExplanation(
+            status="found", evidence_id=evidence_id,
+            source_kind=context[0]["source_kind"] if context else node.get("kind"),
+            course_id=provenance.get("course_id"),
+            title=node.get("title") or provenance.get("activity_name"),
+            statement=(context[0]["text"][:500] if context else node.get("content_text")),
+            confirmation_status=node.get("status"), sources=[source],
+            warnings=list(node.get("warnings") or []), limitations=limitations,
+            extraction_method=("Indexed extracted text" if context else "Evidence graph metadata"),
+            indexed_context=context[:3], provenance=provenance,
         ).model_dump(mode="json")
 
     def query_course(self, payload: dict[str, Any]) -> dict[str, Any]:

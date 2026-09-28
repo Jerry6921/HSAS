@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from hsas.infrastructure.sis.course_info.review import (
@@ -13,6 +14,7 @@ from hsas.infrastructure.sis.course_info.gateway import (
 )
 from hsas.infrastructure.sis.course_info.client import (
     LOGIN_URL,
+    SEARCH_URL,
     open_login_until_authenticated,
     restore_sis_session,
     save_sis_session,
@@ -40,6 +42,44 @@ def test_sis_and_class_planner_share_hku_portal_profile(tmp_path: Path) -> None:
     assert SisCourseInfoBrowserGateway(tmp_path).profile_dir == (
         ClassPlannerBrowserGateway(tmp_path).profile_dir
     )
+
+
+def test_sis_login_reuses_portal_session_at_the_target_page(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    @asynccontextmanager
+    async def fake_context(*_args, **_kwargs):
+        yield object()
+
+    async def fake_open(_context, *, login_url, timeout_seconds):
+        calls.append(f"{login_url}|{timeout_seconds}")
+
+    async def fake_save(_context, _path):
+        return None
+
+    monkeypatch.setattr(
+        "hsas.infrastructure.sis.course_info.gateway.sis_context", fake_context
+    )
+    monkeypatch.setattr(
+        "hsas.infrastructure.sis.course_info.gateway.open_login_until_sis_ready",
+        fake_open,
+    )
+    monkeypatch.setattr(
+        "hsas.infrastructure.sis.course_info.gateway.save_sis_session", fake_save
+    )
+    monkeypatch.setattr(
+        "hsas.infrastructure.sis.course_info.gateway.discover_moodle_course_codes",
+        lambda _resources: ([], []),
+    )
+
+    result = SisCourseInfoBrowserGateway(tmp_path).login_until_ready(
+        timeout_seconds=45
+    )
+
+    assert result.status == "logged_in"
+    assert calls == [f"{SEARCH_URL}|45"]
 
 
 def test_sis_session_cookies_survive_browser_process_restart(tmp_path: Path) -> None:

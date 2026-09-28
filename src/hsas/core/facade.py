@@ -119,7 +119,6 @@ class HIQSCore:
             self.sync_controller,
             self.review_service,
             _course_service,
-            _class_planner_service,
             _sis_enrollment_gateway,
             _unified_course_sync_service,
         )
@@ -319,6 +318,10 @@ class HIQSCore:
     def get_evidence_content(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return complete text only for an explicitly selected evidence neighborhood."""
         return self.material_query_service.evidence_content(payload)
+
+    def explain_evidence(self, evidence_id: str) -> dict[str, Any]:
+        """Explain one evidence record, its sources, status, and limitations."""
+        return self.material_query_service.explain_evidence(evidence_id)
 
     def query_course(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a cited RAG packet from structured facts and local materials."""

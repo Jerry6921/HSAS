@@ -616,7 +616,10 @@ def test_course_workflow_reports_progress_and_can_cancel(
                 ],
             }
 
-    class PlannerService:
+    class MoodleService:
+        def check_login_status(self):
+            return SimpleNamespace(status="logged_out")
+
         def login_until_ready(self, *, cancel_requested):
             while not cancel_requested():
                 time.sleep(0.005)
@@ -627,8 +630,8 @@ def test_course_workflow_reports_progress_and_can_cancel(
         lambda _resources: EnrollmentGateway(),
     )
     monkeypatch.setattr(
-        "hsas.core.facade._class_planner_service",
-        lambda _resources: PlannerService(),
+        "hsas.core.facade._course_service",
+        lambda _resources, **_kwargs: MoodleService(),
     )
     service = DashboardService(tmp_path)
     started = service.start_course_sync({"confirmed": True})
@@ -728,6 +731,68 @@ def test_course_workflow_collects_authenticated_sources_concurrently(
         time.sleep(0.005)
 
     assert status["state"] == "completed"
+
+
+def test_course_workflow_authenticates_before_sis_and_timetable(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    calls: list[str] = []
+    course = {
+        "course_code": "BMED2206", "subject_area": "BMED",
+        "catalogue_number": "2206", "title": "Engineering",
+    }
+
+    class MoodleService:
+        def check_login_status(self):
+            calls.append("check_moodle")
+            return SimpleNamespace(status="logged_out")
+
+        def login_until_ready(self, **_kwargs):
+            calls.append("portal_cas_login")
+            return SimpleNamespace(status="logged_in")
+
+    class EnrollmentGateway:
+        def sync(self, *, auto_login, **_kwargs):
+            assert auto_login is True
+            calls.append("sis_enrollment")
+            return {"courses": [course]}
+
+    class UnifiedService:
+        async def synchronize(self, courses, **_kwargs):
+            assert courses == [course]
+            calls.append("collect_moodle_sis_timetable")
+            return UnifiedCourseSyncResult(
+                {"completed": 1, "failures": []},
+                SimpleNamespace(failures=()),
+                SimpleNamespace(course_count=1),
+            )
+
+    monkeypatch.setattr(
+        "hsas.core.facade._course_service",
+        lambda _resources, **_kwargs: MoodleService(),
+    )
+    monkeypatch.setattr(
+        "hsas.core.facade._sis_enrollment_gateway",
+        lambda _resources: EnrollmentGateway(),
+    )
+    monkeypatch.setattr(
+        "hsas.core.facade._unified_course_sync_service",
+        lambda _resources: UnifiedService(),
+    )
+
+    service = DashboardService(tmp_path)
+    service.start_course_sync({"confirmed": True})
+    for _ in range(200):
+        status = service.course_sync_status()
+        if status["state"] != "running":
+            break
+        time.sleep(0.005)
+
+    assert status["state"] == "completed"
+    assert calls == [
+        "check_moodle", "portal_cas_login", "sis_enrollment",
+        "collect_moodle_sis_timetable",
+    ]
 
 
 def test_course_workflow_retries_only_failed_source_course(

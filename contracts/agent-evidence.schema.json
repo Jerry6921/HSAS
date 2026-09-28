@@ -561,6 +561,16 @@
               "title": "Chunk Index",
               "type": "integer"
             },
+            "content_kind": {
+              "default": "text",
+              "enum": [
+                "text",
+                "table",
+                "structured_fact"
+              ],
+              "title": "Content Kind",
+              "type": "string"
+            },
             "content_tables": {
               "items": {
                 "additionalProperties": true,
@@ -584,6 +594,18 @@
             "filename": {
               "title": "Filename",
               "type": "string"
+            },
+            "heading": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Heading"
             },
             "page_end": {
               "anyOf": [
@@ -609,6 +631,18 @@
               "default": null,
               "title": "Page Start"
             },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Record Id"
+            },
             "relative_text_path": {
               "title": "Relative Text Path",
               "type": "string"
@@ -630,11 +664,25 @@
               "title": "Score",
               "type": "number"
             },
+            "section_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Section Path"
+            },
             "source_kind": {
               "default": "file",
               "enum": [
                 "file",
-                "moodle_activity"
+                "moodle_activity",
+                "information_course",
+                "information_item"
               ],
               "title": "Source Kind",
               "type": "string"
@@ -1174,6 +1222,16 @@
               "title": "Chunk Index",
               "type": "integer"
             },
+            "content_kind": {
+              "default": "text",
+              "enum": [
+                "text",
+                "table",
+                "structured_fact"
+              ],
+              "title": "Content Kind",
+              "type": "string"
+            },
             "content_tables": {
               "items": {
                 "additionalProperties": true,
@@ -1193,6 +1251,18 @@
             "filename": {
               "title": "Filename",
               "type": "string"
+            },
+            "heading": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Heading"
             },
             "page_end": {
               "anyOf": [
@@ -1218,14 +1288,40 @@
               "default": null,
               "title": "Page Start"
             },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Record Id"
+            },
             "relative_text_path": {
               "title": "Relative Text Path",
               "type": "string"
             },
+            "section_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Section Path"
+            },
             "source_kind": {
               "enum": [
                 "file",
-                "moodle_activity"
+                "moodle_activity",
+                "information_course",
+                "information_item"
               ],
               "title": "Source Kind",
               "type": "string"
@@ -1346,6 +1442,251 @@
       "title": "EvidenceContentResult",
       "type": "object"
     },
+    "EvidenceExplanation": {
+      "$defs": {
+        "SourceReference": {
+          "additionalProperties": false,
+          "description": "Human-checkable evidence for one course fact.",
+          "properties": {
+            "note": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Note"
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Observed At"
+            },
+            "page_numbers": {
+              "items": {
+                "type": "integer"
+              },
+              "title": "Page Numbers",
+              "type": "array"
+            },
+            "relative_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Relative Path"
+            },
+            "source_type": {
+              "enum": [
+                "syllabus",
+                "moodle",
+                "course_document",
+                "announcement",
+                "email",
+                "manual",
+                "sis_course_info",
+                "other"
+              ],
+              "title": "Source Type",
+              "type": "string"
+            },
+            "title": {
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Url"
+            }
+          },
+          "required": [
+            "source_type",
+            "title"
+          ],
+          "title": "SourceReference",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Explain what one evidence ID represents, supports, and cannot establish.",
+      "properties": {
+        "confirmation_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confirmation Status"
+        },
+        "course_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Course Id"
+        },
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "extraction_method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraction Method"
+        },
+        "indexed_context": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Indexed Context",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provenance"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Id"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Kind"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "statement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statement"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "not_found"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "status",
+        "evidence_id"
+      ],
+      "title": "EvidenceExplanation",
+      "type": "object"
+    },
     "MaterialSearchResult": {
       "$defs": {
         "MaterialHit": {
@@ -1363,6 +1704,16 @@
               "minimum": 0,
               "title": "Chunk Index",
               "type": "integer"
+            },
+            "content_kind": {
+              "default": "text",
+              "enum": [
+                "text",
+                "table",
+                "structured_fact"
+              ],
+              "title": "Content Kind",
+              "type": "string"
             },
             "content_tables": {
               "items": {
@@ -1388,6 +1739,18 @@
               "title": "Filename",
               "type": "string"
             },
+            "heading": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Heading"
+            },
             "page_end": {
               "anyOf": [
                 {
@@ -1412,6 +1775,18 @@
               "default": null,
               "title": "Page Start"
             },
+            "record_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Record Id"
+            },
             "relative_text_path": {
               "title": "Relative Text Path",
               "type": "string"
@@ -1433,11 +1808,25 @@
               "title": "Score",
               "type": "number"
             },
+            "section_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Section Path"
+            },
             "source_kind": {
               "default": "file",
               "enum": [
                 "file",
-                "moodle_activity"
+                "moodle_activity",
+                "information_course",
+                "information_item"
               ],
               "title": "Source Kind",
               "type": "string"
@@ -1563,6 +1952,26 @@
     }
   },
   "mcp_tools": {
+    "explain_evidence": {
+      "input_schema": {
+        "properties": {
+          "evidence_id": {
+            "title": "Evidence Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evidence_id"
+        ],
+        "title": "explain_evidenceArguments",
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": true,
+        "title": "explain_evidenceDictOutput",
+        "type": "object"
+      }
+    },
     "get_evidence": {
       "input_schema": {
         "properties": {

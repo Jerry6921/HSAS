@@ -52,6 +52,17 @@ from hsas.domain.courses.models import CourseActivity, CourseArchive
 from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
 
 
+def _is_moodle_login_url(url: str, configured_login_url: str) -> bool:
+    """Recognize the Moodle login page regardless of CAS query parameters."""
+    candidate = urlparse(url)
+    configured = urlparse(configured_login_url)
+    return (
+        candidate.scheme == "https"
+        and candidate.netloc.lower() == configured.netloc.lower()
+        and candidate.path.rstrip("/") == configured.path.rstrip("/")
+    )
+
+
 def _settings() -> Settings:
     return Settings.load()
 
@@ -264,7 +275,9 @@ def check_login_status(settings: Settings | None = None) -> MoodleSessionResult:
                 dashboard_found = any(
                     [await page.locator(css).count() for css in selectors.dashboard_ready]
                 )
-                redirected_to_login = page.url.startswith(str(active_settings.login_url))
+                redirected_to_login = _is_moodle_login_url(
+                    page.url, str(active_settings.login_url)
+                )
                 status = (
                     "logged_out"
                     if redirected_to_login
@@ -331,7 +344,9 @@ def login_until_ready(
                     candidate
                     for candidate in context.pages
                     if urlparse(candidate.url).netloc == moodle_host
-                    and not candidate.url.startswith(str(active_settings.login_url))
+                    and not _is_moodle_login_url(
+                        candidate.url, str(active_settings.login_url)
+                    )
                 ]
                 if moodle_pages:
                     page = await open_page(context, str(active_settings.dashboard_url))
@@ -350,10 +365,9 @@ def login_until_ready(
                             checked_at=datetime.now(timezone.utc).isoformat(),
                             available_course_count=len(available),
                         )
-                    raise RuntimeError(
-                        "Moodle login returned, but the dashboard and course links "
-                        "were not recognized. Selector configuration may need updating."
-                    )
+                    # CAS may briefly return through a Moodle page before the
+                    # authenticated dashboard is ready. Keep the visible
+                    # browser available instead of failing the whole workflow.
                 await asyncio.sleep(1)
         raise RuntimeError("Moodle login timed out before the dashboard became available.")
 

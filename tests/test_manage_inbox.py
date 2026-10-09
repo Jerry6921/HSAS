@@ -79,18 +79,16 @@ def test_personal_inbox_previews_then_applies_a_validated_update(tmp_path: Path)
             information_repository=INFORMATION_REPOSITORY,
         )
 
-    apply_personal_inbox_entry(
-        tmp_path,
-        entry.entry_id,
-        confirmed=True,
-        inbox_repository=INBOX_REPOSITORY,
-        information_repository=INFORMATION_REPOSITORY,
+    applied = HIQSCore(resources_dir=tmp_path).apply_personal_inbox(
+        {"entry_id": entry.entry_id, "confirmed": True}
     )
     information = INFORMATION_REPOSITORY.load(tmp_path / "information.json")
     inbox = load_personal_inbox(tmp_path, INBOX_REPOSITORY)
     assert information.items[0].location == "CPD-LG.07"
     assert inbox.entries[0].status == "applied"
     assert inbox.entries[0].applied_at is not None
+    assert applied["recent_update"]["summary"]["activities_added"] == 1
+    assert (tmp_path / "ai-state/recent-information-update.json").is_file()
 
 
 def test_attention_form_stages_complete_item_without_changing_canonical_data(tmp_path: Path) -> None:

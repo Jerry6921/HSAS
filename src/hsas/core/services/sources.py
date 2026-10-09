@@ -172,7 +172,10 @@ class InstitutionalSourceService:
             raise HIQSPortError("Please confirm Student Center synchronization.")
         with self._mutation_lock:
             try:
-                result = self._sis_enrollment_factory(self._resources_dir).sync(auto_login=True)
+                result = self._sis_enrollment_factory(self._resources_dir).sync(
+                    auto_login=True,
+                    interactive_login=False,
+                )
             except Exception as exc:
                 raise HIQSPortError(
                     "Student Center synchronization failed; the previous snapshot was "

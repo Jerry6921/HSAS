@@ -74,6 +74,7 @@ class BrowserSyncSession:
         self,
         courses: list[dict[str, str]],
         *,
+        download_materials: bool = True,
         progress_callback: ProgressCallback | None,
         cancel_requested: CancelRequested | None,
     ) -> dict[str, object]:
@@ -139,6 +140,7 @@ class BrowserSyncSession:
                         result = await self.moodle.sync_course_in_context(
                             self.context,
                             entry.course_id,
+                            download_materials=download_materials,
                             cancel_requested=cancel_requested,
                             progress_callback=report_activity,
                         )
@@ -165,6 +167,7 @@ class BrowserSyncSession:
                                 "course": result.course_title,
                                 "succeeded": True,
                                 "change_count": result.change_count,
+                                "materials_deferred": not download_materials,
                             }
                         )
                 if not course_failed:

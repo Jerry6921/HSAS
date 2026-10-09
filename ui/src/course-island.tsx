@@ -33,10 +33,10 @@ function MaterialCard({ material, options }: { material: CourseMaterialItem; opt
         type="button"
         variant="ghost"
         className="hiqs-course-prompt"
-        title="复制 AI 提示词"
-        aria-label={`复制 ${material.title} 的 AI 提示词`}
+        title="复制定位提示词"
+        aria-label={`复制 ${material.title} 的定位提示词`}
         disabled={!material.hasPrompt || !material.prompt}
-        onClick={() => material.prompt && options.onCopyPrompt(material.prompt, `“${material.title}”定位与总结提示词已复制。`)}
+        onClick={() => material.prompt && options.onCopyPrompt(material.prompt, `“${material.title}”定位提示词已复制。`)}
       ><Copy size={16} /></Button>
     </motion.article>
   );
@@ -73,9 +73,16 @@ function SourceButton({ source, index, onOpen }: { source: CourseSource; index: 
 }
 
 export function CourseIsland({ options }: { options: ModernCourseOptions }) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('hiqs-material-sections') || '{}'); } catch { return {}; } });
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    if (typeof window === "undefined") return {};
+    try { return JSON.parse(window.localStorage.getItem('hiqs-material-sections') || '{}'); } catch { return {}; }
+  });
   const [query, setQuery] = useState('');
-  const toggleSection = (key: string, closed: boolean) => setCollapsed(previous => { const next = {...previous, [key]: closed}; try { localStorage.setItem('hiqs-material-sections', JSON.stringify(next)); } catch {} return next; });
+  const toggleSection = (key: string, closed: boolean) => setCollapsed(previous => {
+    const next = {...previous, [key]: closed};
+    try { window.localStorage.setItem('hiqs-material-sections', JSON.stringify(next)); } catch {}
+    return next;
+  });
   const animate = useWorkspaceMotion();
   const showingMaterials = options.mode === "materials";
   const materialCount = options.materialSections.reduce((total, section) => total + section.materials.length, 0);

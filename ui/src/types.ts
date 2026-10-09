@@ -135,6 +135,7 @@ export interface HomeUpdateOutcome extends HomeUpdateSource {
   record_id: string;
   kind: "activity" | "deadline" | "material";
   details: string[];
+  impact?: string[];
   text_path?: string | null;
 }
 
@@ -148,9 +149,26 @@ export interface HomeUpdateCourse {
   activities_added?: HomeUpdateOutcome[];
   activities_updated?: HomeUpdateOutcome[];
   activities_confirmed?: HomeUpdateOutcome[];
+  activity_date_changes?: HomeUpdateOutcome[];
+  activity_information_changes?: HomeUpdateOutcome[];
   materials_added?: HomeUpdateOutcome[];
   materials_updated?: HomeUpdateOutcome[];
   materials_removed?: HomeUpdateOutcome[];
+}
+
+export interface HomeUpdateHighlight extends HomeUpdateOutcome {
+  category: "date" | "information" | "activity" | "material";
+  label: string;
+  course_id: string;
+  course_title: string;
+}
+
+export interface HomeUpdateDigest {
+  headline: string;
+  body: string;
+  authored_by?: "system" | "ai_agent";
+  highlights: HomeUpdateHighlight[];
+  omitted_count: number;
 }
 
 export interface HomeRecentUpdate {
@@ -165,10 +183,13 @@ export interface HomeRecentUpdate {
     activities_added?: number;
     activities_updated?: number;
     activities_confirmed?: number;
+    activity_date_changes?: number;
+    activity_information_changes?: number;
     materials_added?: number;
     materials_updated?: number;
     materials_removed?: number;
   };
+  digest?: HomeUpdateDigest | null;
   courses: HomeUpdateCourse[];
 }
 
@@ -229,6 +250,7 @@ export interface HomeAttentionSnapshot {
 export interface ModernHomeOptions {
   today: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
   deadlines: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
+  todos: Array<{itemId: string; dateKey: string; title: string; meta: string}>;
   nextUp: HomeNextUp;
   metrics: HomeMetric[];
   stages: HomeStage[];

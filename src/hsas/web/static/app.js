@@ -2363,9 +2363,14 @@ function renderModernHome(occurrences) {
   const retryTasks = closure.retry_tasks || [];
   const inbox = state.data.personal_inbox || { pending_count: 0, entries: [] };
   const updateCourses = state.data.updates?.courses || [];
+  const todoEntries = upcomingOccurrences(new Date())
+    .filter(value => ['assignment', 'quiz', 'exam', 'project', 'report', 'presentation', 'deadline'].includes(value.item.category))
+    .slice(0, 8)
+    .map(value => ({ itemId: value.item.item_id, dateKey: value.key, title: value.item.title, meta: [value.key, value.time, courseFor(value.item).code, value.item.date_status !== 'confirmed' ? '待核实' : ''].filter(Boolean).join(' · ') }));
   modernHome.mount(root, {
     today: upcomingOccurrences(new Date()).filter(value => value.key === dateKey(new Date())).map(value => ({ itemId: value.item.item_id, dateKey: value.key, title: value.item.title, meta: [value.time, courseFor(value.item).code, value.item.location].filter(Boolean).join(' · ') })),
     deadlines: upcomingOccurrences(new Date()).filter(value => ['assignment', 'quiz', 'exam', 'project', 'report', 'presentation', 'deadline'].includes(value.item.category)).slice(0, 6).map(value => ({ itemId: value.item.item_id, dateKey: value.key, title: value.item.title, meta: [value.key, value.time, courseFor(value.item).code, value.item.date_status !== 'confirmed' ? '待核实' : ''].filter(Boolean).join(' · ') })),
+    todos: todoEntries,
     nextUp: modernHomeNextUp(),
     metrics: [
       { label: "课程", value: state.selectedCourses.size, note: "统一课程目录" },
@@ -2828,7 +2833,7 @@ async function pollCourseSync(jobId = null, options = {}) {
       const message = job.state === "completed"
         ? result.retry_mode
           ? `精确重试完成。${retryTasks ? `仍有 ${retryTasks} 个失败项目。` : "全部失败项目已恢复。"}待 AI 整理 ${pending} 项。`
-          : `同步完成：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门 Moodle 课程成功。${retryTasks ? `${retryTasks} 个项目需要重试。` : sourceFailures ? `${sourceFailures} 个来源需要重试。` : ""}待 AI 整理 ${pending} 项。`
+          : `已完成快速采集：${result.succeeded_course_count || 0}/${result.discovered_course_count || 0} 门 Moodle 课程。课程资料将在 Agent 整理时按需下载；${retryTasks ? `${retryTasks} 个项目需要重试。` : sourceFailures ? `${sourceFailures} 个来源需要重试。` : `当前待 Agent 整理 ${pending} 项。`}`
         : job.state === "cancelled"
           ? `同步已取消；已完成 ${result.succeeded_course_count || 0} 门课程，已发布资料已保留。`
           : `同步失败：${job.error || "上一份有效资料已保留"}`;
@@ -2846,7 +2851,7 @@ async function pollCourseSync(jobId = null, options = {}) {
 
 async function startWorkflow() {
   const confirmed = window.confirm(
-    "将打开共享浏览器供你完成一次 HKU Portal 登录。登录后 HIQS 会直接访问 Moodle CAS 与 SIS，并继续同步课程资料、课程信息和官方课表，无需分别登录。继续吗？",
+    "将打开共享浏览器供你完成一次 Moodle 的 HKU Portal 登录。登录后 HIQS 会复用同一会话访问 SIS 与官方课表，不再展示额外的 SIS 登录窗口。同步会先快速采集课程结构；Agent 整理时再按需下载资料并最后生成总摘要。继续吗？",
   );
   if (!confirmed) return;
   const job = await runLocalMutation(

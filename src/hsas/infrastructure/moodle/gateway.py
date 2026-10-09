@@ -49,6 +49,7 @@ from hsas.domain.courses.change_detection import (
 )
 from hsas.infrastructure.moodle.course_mapper import build_course_archive
 from hsas.domain.courses.models import CourseActivity, CourseArchive
+from hsas.domain.courses import iter_activities
 from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
 
 
@@ -126,8 +127,9 @@ async def _persist_course(
     progress_task: int | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     download_progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
+    download_materials: bool = True,
 ) -> tuple[CourseArchive, CourseChangeSet, Path]:
-    """Download every accessible file, create text sidecars, and persist one course."""
+    """Persist one course, optionally deferring files until Agent hydration."""
     live_storage_root = settings.output_dir
     live_course_root = live_storage_root / "courses" / course_id
     course_path = live_course_root / "course.json"
@@ -150,46 +152,73 @@ async def _persist_course(
                 course_title=course_title,
                 raw_state_path=raw_relative_path,
             )
+            if not download_materials and previous_archive is not None:
+                # A fast structural refresh must not erase already hydrated
+                # evidence. Reattach the last local payload until Agent asks
+                # for a material hydration pass.
+                previous_activities = {
+                    activity.module_id: activity
+                    for activity in iter_activities(previous_archive)
+                }
+                for activity in iter_activities(archive):
+                    previous = previous_activities.get(activity.module_id)
+                    if previous is None:
+                        continue
+                    activity.files = [item.model_copy(deep=True) for item in previous.files]
+                    activity.content_text = previous.content_text
+                    activity.content_tables = [dict(item) for item in previous.content_tables]
+                    activity.linked_pages = [item.model_copy(deep=True) for item in previous.linked_pages]
+                    activity.collection_report = previous.collection_report.model_copy(deep=True)
+                    activity.download_status = previous.download_status
+                    activity.download_error = previous.download_error
+                    activity.metadata.update(previous.metadata)
         with _stage(progress, progress_task, "FileStore", "Staging raw course state"):
             write_json(raw_path, state)
         raise_if_cancelled(cancel_requested)
-        with _stage(progress, progress_task, "Downloader", "Staging course files"):
-            await download_course_files(
-                context,
-                archive,
-                base_url=str(settings.base_url),
-                course_root=course_root,
-                storage_root=storage_root,
-                max_download_bytes=settings.max_download_bytes,
-                timeout_ms=settings.navigation_timeout_ms,
-                concurrency=settings.download_concurrency,
-                max_link_depth=settings.max_link_depth,
-                max_linked_pages=settings.max_linked_pages,
-                max_linked_files=settings.max_linked_files,
-                previous_archive=previous_archive,
-                progress_callback=(
-                    download_progress_callback
-                    or (
-                        progress.download_callback(progress_task)
-                        if progress is not None and progress_task is not None
-                        else None
-                    )
-                ),
-                cancel_requested=cancel_requested,
-            )
+        if download_materials:
+            with _stage(progress, progress_task, "Downloader", "Staging course files"):
+                await download_course_files(
+                    context,
+                    archive,
+                    base_url=str(settings.base_url),
+                    course_root=course_root,
+                    storage_root=storage_root,
+                    max_download_bytes=settings.max_download_bytes,
+                    timeout_ms=settings.navigation_timeout_ms,
+                    concurrency=settings.download_concurrency,
+                    max_link_depth=settings.max_link_depth,
+                    max_linked_pages=settings.max_linked_pages,
+                    max_linked_files=settings.max_linked_files,
+                    previous_archive=previous_archive,
+                    progress_callback=(
+                        download_progress_callback
+                        or (
+                            progress.download_callback(progress_task)
+                            if progress is not None and progress_task is not None
+                            else None
+                        )
+                    ),
+                    cancel_requested=cancel_requested,
+                )
+        else:
+            with _stage(progress, progress_task, "Downloader", "保留来源链接，等待 Agent 按需下载"):
+                for activity in iter_activities(archive):
+                    if activity.url and activity.download_status == "pending":
+                        activity.metadata["material_deferred"] = True
         raise_if_cancelled(cancel_requested)
-        with _stage(
-            progress,
-            progress_task,
-            "DocumentAnalyzer",
-            "Reusing or extracting PDF, DOCX, and PPTX text",
-        ):
-            analyze_course_documents(
-                archive,
-                storage_root=storage_root,
-                course_root=course_root,
-                cache_root=live_storage_root / "cache" / "document-analysis",
-            )
+        if download_materials:
+            with _stage(
+                progress,
+                progress_task,
+                "DocumentAnalyzer",
+                "Reusing or extracting PDF, DOCX, and PPTX text",
+            ):
+                analyze_course_documents(
+                    archive,
+                    storage_root=storage_root,
+                    course_root=course_root,
+                    cache_root=live_storage_root / "cache" / "document-analysis",
+                )
         raise_if_cancelled(cancel_requested)
         with _stage(
             progress,
@@ -455,6 +484,7 @@ async def sync_course_in_context(
     *,
     cancel_requested: Callable[[], bool] | None = None,
     progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
+    download_materials: bool = True,
 ) -> SyncCourseResult:
     """Synchronize one Moodle course through a broker-owned context."""
     course_id, course_url = _resolve_course_target(course, str(settings.base_url))
@@ -478,6 +508,7 @@ async def sync_course_in_context(
             state=state,
             cancel_requested=cancel_requested,
             download_progress_callback=progress_callback,
+            download_materials=download_materials,
         )
     finally:
         await page.close()
@@ -846,6 +877,7 @@ class MoodleCourseGateway:
         *,
         cancel_requested: Callable[[], bool] | None = None,
         progress_callback: Callable[[str, CourseActivity, int, int], None] | None = None,
+        download_materials: bool = True,
     ) -> SyncCourseResult:
         return await sync_course_in_context(
             context,
@@ -853,6 +885,7 @@ class MoodleCourseGateway:
             self.settings,
             cancel_requested=cancel_requested,
             progress_callback=progress_callback,
+            download_materials=download_materials,
         )
 
     def sync_all(

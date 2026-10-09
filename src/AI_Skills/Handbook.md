@@ -8,7 +8,9 @@ supported documents, records provenance and failures, and publishes each course
 as an atomic snapshot.
 
 The Collector owns acquisition and provenance. The AI reads collected evidence,
-derives assessment facts, and writes `information.json` through `hsas information apply`.
+derives assessment facts, and writes `information.json` through the MCP
+`apply_information_update` tool. The equivalent `hsas information apply`
+command is retained only as a recovery adapter to the same CORE port.
 
 The material query path maintains one global SQLite FTS5 index at
 `<RESOURCES_DIR>/index/materials.sqlite3`. Successful snapshot publication and
@@ -18,7 +20,12 @@ is rebuilt once on demand. The index preserves the same file/page provenance as
 the JSON archive. The UI contracts in `ui/src/contracts.ts` are generated from the
 Pydantic response models with `scripts/generate_ui_contracts.py`.
 
-## 2. Commands
+## 2. Collector commands
+
+The commands below are human-operated collection and recovery adapters. An Agent
+connected to HIQS should use MCP for status, synchronization, material manifests,
+evidence retrieval and writes; these commands remain available when MCP is not
+connected or when a user is diagnosing the local installation.
 
 ```bash
 hsas login
@@ -177,11 +184,13 @@ The SIS and Class Planner adapters share the persistent HKU Portal browser
 profile. SIS sign-in opens `z_signon.jsp`; the user completes any image
 verification in that visible browser before headless collection begins.
 
-`hsas changes show` turns this history into a pending batch. A course awaiting
+MCP `get_pending_changes(source="moodle")` turns this history into a pending
+batch. A course awaiting
 its first checkpoint receives one full review; later batches contain changes
-after the checkpoint. `information apply --changes` advances the checkpoint
-after the information update succeeds. A newer synchronization supersedes an
-older pending batch and prompts creation of a fresh batch.
+after the checkpoint. MCP `apply_information_update` accepts the reviewed batch,
+writes the recent-update report and advances the checkpoint after the information
+update succeeds. A newer synchronization supersedes an older pending batch and
+prompts creation of a fresh batch.
 
 ## 8. Reading course.json
 

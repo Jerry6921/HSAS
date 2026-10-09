@@ -99,6 +99,8 @@ def test_information_apply_keeps_a_user_visible_recent_change_audit(tmp_path: Pa
         "activities_added": 1,
         "activities_updated": 0,
         "activities_confirmed": 0,
+        "activity_date_changes": 0,
+        "activity_information_changes": 0,
         "materials_added": 0,
         "materials_updated": 0,
         "materials_removed": 0,
@@ -106,6 +108,8 @@ def test_information_apply_keeps_a_user_visible_recent_change_audit(tmp_path: Pa
     added_activity = first["recent_update"]["courses"][0]["activities_added"][0]
     assert added_activity["record_id"] == "demo-assignment"
     assert added_activity["title"] == "Assignment"
+    assert first["recent_update"]["digest"]["headline"] == "本次整理新增了 2 项课程信息"
+    assert first["recent_update"]["digest"]["highlights"][0]["title"] == "Assignment"
     audit_path = tmp_path / "ai-state/recent-information-update.json"
     assert audit_path.is_file()
     assert audit_path.stat().st_mode & 0o777 == 0o600
@@ -131,16 +135,25 @@ def test_information_apply_keeps_a_user_visible_recent_change_audit(tmp_path: Pa
     recent = second["information"]["recent_update"]
     assert recent["summary"]["modified"] == 2
     assert recent["summary"]["course_count"] == 1
-    assert recent["summary"]["activities_confirmed"] == 1
+    assert recent["summary"]["activity_date_changes"] == 1
     assert recent["summary"]["activities_updated"] == 0
     changes = recent["courses"][0]["changes"]
     assert {change["field"] for change in changes} == {"date_status", "due_on"}
     due_change = next(change for change in changes if change["field"] == "due_on")
     assert due_change["before"] is None
     assert due_change["after"] == "2026-10-15"
-    confirmed = recent["courses"][0]["activities_confirmed"][0]
+    confirmed = recent["courses"][0]["activity_date_changes"][0]
     assert confirmed["record_id"] == "demo-assignment"
-    assert confirmed["details"] == ["日期状态：已确认", "截止日期：2026-10-15"]
+    assert confirmed["details"] == [
+        "日期状态：未知 → 已确认",
+        "截止日期：已移除 → 2026-10-15",
+    ]
+    assert confirmed["impact"] == [
+        "日期已由暂定或未知转为确认",
+        "截止日期已补充",
+    ]
+    assert recent["digest"]["highlights"][0]["label"] == "日期变化"
+    assert "日期变化需要优先留意" in recent["digest"]["body"]
 
     third = core.apply_information_update(
         {
@@ -179,10 +192,12 @@ def test_information_apply_keeps_a_user_visible_recent_change_audit(tmp_path: Pa
         }
     )
     recent = third["information"]["recent_update"]
-    assert recent["summary"]["activities_confirmed"] == 0
-    assert recent["summary"]["activities_updated"] == 1
+    assert recent["summary"]["activity_date_changes"] == 0
+    assert recent["summary"]["activity_information_changes"] == 1
     assert recent["summary"]["materials_added"] == 1
-    assert recent["courses"][0]["activities_updated"][0]["details"] == ["地点：Moodle"]
+    changed = recent["courses"][0]["activity_information_changes"][0]
+    assert changed["details"] == ["地点：已移除 → Moodle"]
+    assert changed["impact"] == ["地点已更改"]
     assert recent["courses"][0]["materials_added"][0]["details"] == [
         "归类：Lecture slides"
     ]
@@ -197,6 +212,32 @@ def test_core_exposes_attention_through_public_query_port(tmp_path: Path) -> Non
     assert snapshot["generated_at"] == "2026-09-24T00:00:00Z"
     assert snapshot["horizon_days"] == 14
     assert snapshot["items"][0]["reason_codes"] == ["LOGIN_REQUIRED"]
+
+
+def test_core_accepts_agent_summary_for_latest_report(tmp_path: Path) -> None:
+    core = HIQSCore(resources_dir=tmp_path)
+    applied = core.apply_information_update({
+        "confirmed": True,
+        "update": {
+            "courses": [{"course_id": "DEMO1001", "code": "DEMO1001", "title": "Demo"}],
+            "items": [{
+                "item_id": "demo-deadline", "course_id": "DEMO1001",
+                "title": "Report", "category": "deadline",
+            }],
+        },
+    })
+    report = applied["recent_update"]
+    saved = core.save_recent_update_summary({
+        "applied_at": report["applied_at"],
+        "headline": "报告已加入课程记录",
+        "body": "新增一个待完成的报告事项。",
+        "highlights": [{
+            "category": "activity", "course_id": "DEMO1001", "record_id": "demo-deadline",
+        }],
+    })
+    assert saved["digest"]["authored_by"] == "ai_agent"
+    assert saved["digest"]["headline"] == "报告已加入课程记录"
+    assert saved["digest"]["highlights"][0]["title"] == "Report"
 
 
 def test_core_rejects_string_as_course_id_list(tmp_path: Path) -> None:

@@ -23,8 +23,8 @@ Pending values stay pending. An absent date keeps the deadline status open for v
 
 ## 3. Query workflow
 
-1. Run `hsas list-status` to locate resources and check material coverage.
-2. Resolve the exact course and run `hsas query "QUESTION" --course COURSE_ID`.
+1. Call MCP `get_status` to locate the configured resources and inspect material coverage.
+2. Resolve the exact course and call MCP `query_course(question, course_ids)`.
 3. Use structured matches for exact course facts and material excerpts for
    requirements or course content. Material evidence with
    `source_kind: moodle_activity` comes from visible Moodle page text; inspect
@@ -51,13 +51,16 @@ past item remains unresolved.
 
 ## 4. Source-to-database workflow
 
-1. Use `hsas sync-courses COURSE_ID` when the user asks to collect or refresh Moodle.
-2. Export `hsas changes show --output pending-changes.json`.
+1. Call MCP `start_course_sync` when the user asks to collect or refresh Moodle.
+2. Export the exact review batch with MCP `get_pending_changes(source="moodle")`.
 3. For `full` mode inspect every listed file; for `incremental` mode inspect only listed changes and affected information items.
 4. Prefer text sidecars for navigation, but open the source document when exact layout, tables, or wording matters.
 5. Read PPTX slides and speaker notes, DOCX content, and relevant PDF pages.
 6. Build a minimal `InformationUpdate` with complete records and stable IDs.
-7. Apply it with `--changes pending-changes.json`, then verify the pending count decreased.
+7. Call MCP `apply_information_update(update, review_batches, confirmed=true)`, then verify the
+   pending count decreased and inspect the returned `recent_update`. Use MCP
+   `save_recent_update_summary` to attach a concise Agent-written digest to that
+   exact report before presenting the result to the user.
 8. Follow [references/information-write-protocol.md](references/information-write-protocol.md).
 
 ## 5. Evidence authority
@@ -201,6 +204,6 @@ conversation, explain each user-chosen sorting rule as a personal planning rule.
 - Pending values retained their pending state.
 - Conflicts stayed visible.
 - Update validated before write.
-- Canonical `information.json` was written through the validated CLI workflow.
+- Canonical `information.json` was written through the validated MCP/`HIQSPort` workflow.
 - Secret and authentication material remained inside the authentication boundary.
 - Final answer leads with the requested fact; study suggestions appear in their own section.

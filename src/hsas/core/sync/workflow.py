@@ -81,6 +81,21 @@ class CourseSyncWorkflow:
             raise DashboardError("请先确认取消课程同步工作流。")
         return self.controller.cancel()
 
+    def hydrate_course_materials(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Download and index one deferred Moodle course on Agent demand."""
+        course_id = payload.get("course_id")
+        if not isinstance(course_id, str) or not course_id.strip() or len(course_id) > 120:
+            raise DashboardError("course_id must be a bounded non-empty string.")
+        with self.mutation_lock:
+            result = self.course_service_factory(self.resources_dir).sync_course(course_id.strip())
+        return {
+            "status": "hydrated",
+            "course_id": result.course_id,
+            "course_title": result.course_title,
+            "change_count": result.change_count,
+            "output_path": str(result.output_path),
+        }
+
     def run(
         self,
         job_id: str,
@@ -237,6 +252,7 @@ class CourseSyncWorkflow:
                     try:
                         enrollment = self.enrollment_gateway_factory(self.resources_dir).sync(
                             auto_login=True,
+                            interactive_login=False,
                             cancel_requested=self.controller.cancel_event.is_set,
                         )
                     except InterruptedError:
@@ -361,11 +377,20 @@ class CourseSyncWorkflow:
                 )
                 sync_service = self.unified_service_factory(self.resources_dir)
                 sync_kwargs = {
+                    "download_materials": False,
                     "progress_callback": report_unified_progress,
                     "cancel_requested": self.controller.cancel_event.is_set,
                 }
                 if retry_tasks is None:
-                    unified_result = asyncio.run(sync_service.synchronize(courses, **sync_kwargs))
+                    try:
+                        unified_result = asyncio.run(sync_service.synchronize(courses, **sync_kwargs))
+                    except TypeError as exc:
+                        # Keep older injected adapters usable while they adopt the
+                        # lazy-material contract.
+                        if "download_materials" not in str(exc):
+                            raise
+                        sync_kwargs.pop("download_materials", None)
+                        unified_result = asyncio.run(sync_service.synchronize(courses, **sync_kwargs))
                 else:
                     unified_result = asyncio.run(
                         sync_service.synchronize(
@@ -446,6 +471,7 @@ class CourseSyncWorkflow:
                 "source_failures": source_failures,
                 "retry_tasks": retry_remaining,
                 "retry_mode": retry_tasks is not None,
+                "materials_deferred": True,
                 "term": enrollment.get("term"),
                 "pending_review": pending_summary(
                     self.review_service.pending_batch(
@@ -460,9 +486,11 @@ class CourseSyncWorkflow:
                         state="completed",
                         stage="finished",
                         detail=(
-                            f"同步完成，{len(retry_remaining)} 个项目需要重试"
+                            f"快速采集完成，{len(retry_remaining)} 个项目需要重试"
                             if retry_remaining
                             else "同步完成"
+                            if retry_tasks is not None
+                            else "快速采集完成；资料等待 Agent 按需下载"
                         ),
                         result=payload,
                         cards=[],

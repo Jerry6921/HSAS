@@ -248,5 +248,11 @@ def test_information_template_is_schema_valid_and_cli_can_apply_it(tmp_path: Pat
     assert validated.exit_code == 0
     assert applied.exit_code == 0
     value = json.loads((resources / "information.json").read_text(encoding="utf-8"))
+    recent = json.loads(
+        (resources / "ai-state/recent-information-update.json").read_text(encoding="utf-8")
+    )
     assert value["schema_version"] == "1.0"
     assert len(value["items"]) == 2
+    assert recent["summary"]["activities_added"] == 2
+    assert recent["summary"]["course_count"] == 1
+    assert "Recent update report saved" in applied.stdout

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,10 @@ from hsas.domain.information import (
     InformationStore,
     InformationUpdate,
     RecentInformationUpdate,
+    RecentUpdateDigest,
 )
 from hsas.infrastructure.storage import JsonInformationRepository
-from hsas.infrastructure.storage.json_store import write_json
+from hsas.infrastructure.storage.json_store import read_json, write_json
 
 
 RECENT_UPDATE_PATH = Path("ai-state/recent-information-update.json")
@@ -100,6 +102,31 @@ _OUTCOME_FIELD_LABELS = {
     "warnings": "提示",
 }
 _OUTCOME_FIELD_ORDER = tuple(_OUTCOME_FIELD_LABELS)
+_DATE_CHANGE_FIELDS = (
+    "date_status", "opens_at", "starts_at", "ends_at", "due_at", "due_on",
+    "scheduled_on", "recurrence", "all_day",
+)
+_INFORMATION_CHANGE_FIELDS = (
+    "title", "category", "location", "description", "assessment_format",
+    "submission_method", "weight_percent", "word_limit", "requirements",
+    "policies", "links", "warnings",
+)
+_IMPACT_LABELS = {
+    "title": "活动名称已更改",
+    "category": "活动类型已更改",
+    "location": "地点已更改",
+    "description": "活动说明已更改",
+    "assessment_format": "考核形式已更改",
+    "submission_method": "提交方式已更改",
+    "weight_percent": "成绩占比已更改",
+    "word_limit": "字数限制已更改",
+    "requirements": "活动要求已更改",
+    "policies": "课程政策已更改",
+    "links": "相关链接已更改",
+    "warnings": "核对提示已更改",
+    "recurrence": "重复安排已更改",
+    "all_day": "全天状态已更改",
+}
 
 
 class InformationContractService:
@@ -160,9 +187,9 @@ class InformationContractService:
                 resources_dir=self.resources_dir,
             )
             checkpoints = review_service.acknowledge_validated_batches(validated_batches)
-            audit = _build_recent_update(before, result.store, update)
-            audit_path = write_json(self.resources_dir / RECENT_UPDATE_PATH, audit)
-            audit_path.chmod(0o600)
+            audit = persist_recent_information_update(
+                self.resources_dir, before, result.store, update
+            )
             affected_courses = {course.course_id for course in update.courses} | {
                 item.course_id for item in update.items
             }
@@ -186,6 +213,76 @@ class InformationContractService:
             "recent_update": audit,
             "evidence_index": index_status,
         }
+
+    def save_recent_update_summary(
+        self, payload: dict[str, Any], mutation_lock: Any
+    ) -> dict[str, Any]:
+        """Attach an Agent-written digest to the exact latest validated report."""
+        if not isinstance(payload, dict):
+            raise ValueError("summary payload must be an object.")
+        expected = payload.get("applied_at")
+        headline = payload.get("headline")
+        body = payload.get("body")
+        references = payload.get("highlights", [])
+        if not isinstance(expected, str) or not expected:
+            raise ValueError("applied_at must identify the report being summarized.")
+        if not isinstance(headline, str) or not headline.strip() or len(headline) > 120:
+            raise ValueError("headline must contain 1 to 120 characters.")
+        if not isinstance(body, str) or not body.strip() or len(body) > 600:
+            raise ValueError("body must contain 1 to 600 characters.")
+        if not isinstance(references, list) or len(references) > 6:
+            raise ValueError("highlights must be a list of at most 6 report references.")
+        with mutation_lock:
+            path = self.resources_dir / RECENT_UPDATE_PATH
+            if not path.is_file():
+                raise ValueError("No recent information update is available to summarize.")
+            report = RecentInformationUpdate.model_validate(read_json(path))
+            if report.applied_at.isoformat() != expected.replace("Z", "+00:00"):
+                raise ValueError("The recent update changed; read the latest report before summarizing.")
+            candidates = {
+                (entry["category"], entry["course_id"], entry["record_id"]): entry
+                for entry in _update_highlights(
+                    [course.model_dump(mode="json") for course in report.courses]
+                )
+            }
+            selected: list[dict[str, Any]] = []
+            seen: set[tuple[str, str, str]] = set()
+            for reference in references:
+                if not isinstance(reference, dict) or set(reference) != {
+                    "category", "course_id", "record_id"
+                }:
+                    raise ValueError("Each highlight needs category, course_id and record_id.")
+                key = (
+                    reference["category"], reference["course_id"], reference["record_id"]
+                )
+                if key not in candidates or key in seen:
+                    raise ValueError("Highlight is missing, duplicated or not in this report.")
+                seen.add(key)
+                selected.append(candidates[key])
+            digest = {
+                "headline": headline.strip(),
+                "body": body.strip(),
+                "authored_by": "ai_agent",
+                "highlights": selected,
+                "omitted_count": max(0, len(candidates) - len(selected)),
+            }
+            updated = report.model_copy(update={"digest": RecentUpdateDigest.model_validate(digest)})
+            validated = RecentInformationUpdate.model_validate(updated.model_dump(mode="json"))
+            write_json(path, validated.model_dump(mode="json")).chmod(0o600)
+            return validated.model_dump(mode="json")
+
+
+def persist_recent_information_update(
+    resources_dir: Path,
+    before: InformationStore,
+    after: InformationStore,
+    update: InformationUpdate,
+) -> dict[str, Any]:
+    """Persist the user-visible audit for every canonical information write path."""
+    audit = _build_recent_update(before, after, update)
+    audit_path = write_json(resources_dir / RECENT_UPDATE_PATH, audit)
+    audit_path.chmod(0o600)
+    return audit
 
 
 def _source(record: CourseRecord | InformationItem) -> dict[str, Any]:
@@ -233,7 +330,19 @@ def _display_outcome_value(field_name: str, value: Any) -> str:
     if isinstance(value, list):
         if not value:
             return "已移除"
-        return "；".join(str(entry) for entry in value[:3])
+        labels = [
+            str(
+                entry.get("title")
+                or entry.get("label")
+                or entry.get("relative_path")
+                or "资料"
+            )
+            if isinstance(entry, dict)
+            else str(entry)
+            for entry in value[:3]
+        ]
+        suffix = f" 等 {len(value)} 项" if len(value) > 3 else ""
+        return "；".join(labels) + suffix
     if isinstance(value, dict):
         return "安排已更新"
     if value in (None, ""):
@@ -242,12 +351,14 @@ def _display_outcome_value(field_name: str, value: Any) -> str:
 
 
 def _item_outcome_details(
-    previous: InformationItem | None, current: InformationItem
+    previous: InformationItem | None,
+    current: InformationItem,
+    fields: tuple[str, ...] = _OUTCOME_FIELD_ORDER,
 ) -> list[str]:
     before = previous.model_dump(mode="json") if previous else {}
     after = current.model_dump(mode="json")
     details: list[str] = []
-    for field_name in _OUTCOME_FIELD_ORDER:
+    for field_name in fields:
         value = after[field_name]
         if previous is None:
             if value in (None, "", [], {}) or (
@@ -256,38 +367,98 @@ def _item_outcome_details(
                 continue
         elif before[field_name] == value:
             continue
-        details.append(
-            f"{_OUTCOME_FIELD_LABELS[field_name]}："
-            f"{_display_outcome_value(field_name, value)}"
+        label = _OUTCOME_FIELD_LABELS.get(field_name, field_name)
+        detail = (
+            f"{label}：{_display_outcome_value(field_name, value)}"
+            if previous is None
+            else f"{label}：{_display_outcome_value(field_name, before[field_name])}"
+            f" → {_display_outcome_value(field_name, value)}"
         )
+        details.append(detail)
         if len(details) == 6:
             break
     return details
 
 
-def _item_outcome(
+def _parse_temporal(value: Any) -> date | datetime | None:
+    if isinstance(value, (date, datetime)):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")) if "T" in value else date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _date_impact(previous: InformationItem, current: InformationItem, fields: list[str]) -> list[str]:
+    impact: list[str] = []
+    if "date_status" in fields:
+        impact.append(
+            "日期已由暂定或未知转为确认"
+            if current.date_status == "confirmed" and previous.date_status != "confirmed"
+            else "日期确认状态已更改"
+        )
+    for field_name in ("due_at", "due_on", "starts_at", "scheduled_on", "opens_at", "ends_at"):
+        if field_name not in fields:
+            continue
+        before = _parse_temporal(getattr(previous, field_name))
+        after = _parse_temporal(getattr(current, field_name))
+        label = _OUTCOME_FIELD_LABELS[field_name]
+        if before is not None and after is not None:
+            seconds = (after - before).total_seconds()
+            if seconds:
+                direction = "延后" if seconds > 0 else "提前"
+                absolute = abs(seconds)
+                amount = f"{absolute / 86400:g} 天" if absolute >= 86400 else f"{absolute / 3600:g} 小时"
+                impact.append(f"{label}已{direction} {amount}")
+            else:
+                impact.append(f"{label}的具体时间已更改")
+        elif before is None and after is not None:
+            impact.append(f"{label}已补充")
+        elif before is not None and after is None:
+            impact.append(f"{label}已移除，需重新确认安排")
+        else:
+            impact.append(f"{label}已调整")
+        break
+    impact.extend(_IMPACT_LABELS[field] for field in ("recurrence", "all_day") if field in fields)
+    return list(dict.fromkeys(impact))
+
+
+def _information_impact(fields: list[str]) -> list[str]:
+    return list(dict.fromkeys(_IMPACT_LABELS[field] for field in fields if field in _IMPACT_LABELS))
+
+
+def _item_outcomes(
     previous: InformationItem | None, current: InformationItem
-) -> tuple[str, dict[str, Any]]:
-    confirmed = (
-        previous is not None
-        and previous.date_status in {"unknown", "tentative"}
-        and current.date_status == "confirmed"
-    )
-    group = (
-        "activities_added"
-        if previous is None
-        else "activities_confirmed"
-        if confirmed
-        else "activities_updated"
-    )
+) -> list[tuple[str, dict[str, Any]]]:
     kind = "deadline" if current.category in _DEADLINE_CATEGORIES else "activity"
-    return group, {
+    base = {
         "record_id": current.item_id,
         "title": current.title,
         "kind": kind,
-        "details": _item_outcome_details(previous, current),
         **_outcome_source(current),
     }
+    if previous is None:
+        return [("activities_added", {**base, "details": _item_outcome_details(None, current)})]
+    before = previous.model_dump(mode="json")
+    after = current.model_dump(mode="json")
+    date_fields = [field for field in _DATE_CHANGE_FIELDS if before[field] != after[field]]
+    information_fields = [field for field in _INFORMATION_CHANGE_FIELDS if before[field] != after[field]]
+    outcomes: list[tuple[str, dict[str, Any]]] = []
+    if date_fields:
+        outcomes.append(("activity_date_changes", {
+            **base,
+            "details": _item_outcome_details(previous, current, tuple(date_fields)),
+            "impact": _date_impact(previous, current, date_fields),
+        }))
+    if information_fields:
+        outcomes.append(("activity_information_changes", {
+            **base,
+            "details": _item_outcome_details(previous, current, tuple(information_fields)),
+            "impact": _information_impact(information_fields),
+        }))
+    return outcomes
 
 
 def _material_outcomes(
@@ -332,6 +503,73 @@ def _material_outcomes(
                 **_outcome_source(material),
             })
     return outcomes
+
+
+def _update_highlights(visible_courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Provide eligible highlight records in user importance order."""
+    groups: tuple[tuple[str, str, str], ...] = (
+        ("date", "日期变化", "activity_date_changes"),
+        ("information", "信息变化", "activity_information_changes"),
+        ("activity", "新增活动", "activities_added"),
+        ("material", "资料新增", "materials_added"),
+        ("material", "资料更新", "materials_updated"),
+        ("material", "资料移除", "materials_removed"),
+    )
+    highlights: list[dict[str, Any]] = []
+    for category, label, group in groups:
+        for course in visible_courses:
+            for entry in course[group]:
+                highlights.append({
+                    "category": category,
+                    "label": label,
+                    "course_id": course["course_id"],
+                    "course_title": course["course_title"],
+                    "record_id": entry["record_id"],
+                    "title": entry["title"],
+                    "details": entry.get("details", []),
+                    "impact": entry.get("impact", []),
+                    "relative_path": entry.get("relative_path"),
+                    "source_url": entry.get("source_url"),
+                    "text_path": entry.get("text_path"),
+                })
+
+    return highlights
+
+
+def _build_update_digest(
+    visible_courses: list[dict[str, Any]],
+    counts: dict[str, int],
+) -> dict[str, Any]:
+    """Create a short fallback digest from the validated audit buckets."""
+    highlights = _update_highlights(visible_courses)
+    highlight_limit = 6
+    total = sum(counts.get(action, 0) for action in ("added", "modified", "removed"))
+    digest_highlights = highlights[:highlight_limit]
+    omitted_count = max(0, len(highlights) - len(digest_highlights))
+    if not total:
+        headline = "本次整理未改变正式课程事实"
+        body = "Agent 已完成资料核对，当前没有需要写入日历的新增或变更。"
+    else:
+        headline = (
+            f"本次整理重点核对了 {counts.get('modified', 0)} 项已有信息"
+            if counts.get("modified", 0)
+            else f"本次整理新增了 {counts.get('added', 0)} 项课程信息"
+        )
+        body = (
+            f"已完成 {len(visible_courses)} 门课程的正式整理："
+            f"新增 {counts.get('added', 0)} 项，"
+            f"变更 {counts.get('modified', 0)} 项，"
+            f"移除 {counts.get('removed', 0)} 项。"
+        )
+        if counts.get("activity_date_changes", 0):
+            body += f" 其中 {counts['activity_date_changes']} 项日期变化需要优先留意。"
+    return {
+        "headline": headline,
+        "body": body,
+        "authored_by": "system",
+        "highlights": digest_highlights,
+        "omitted_count": omitted_count,
+    }
 
 
 def _change(
@@ -460,6 +698,8 @@ def _build_recent_update(
                 "activities_added": [],
                 "activities_updated": [],
                 "activities_confirmed": [],
+                "activity_date_changes": [],
+                "activity_information_changes": [],
                 "materials_added": [],
                 "materials_updated": [],
                 "materials_removed": [],
@@ -480,12 +720,14 @@ def _build_recent_update(
         item_changes = _item_changes(previous, current)
         course_bucket["changes"].extend(item_changes)
         if item_changes:
-            group, outcome = _item_outcome(previous, current)
-            course_bucket[group].append(outcome)
+            for group, outcome in _item_outcomes(previous, current):
+                course_bucket[group].append(outcome)
     outcome_groups = (
         "activities_added",
         "activities_updated",
         "activities_confirmed",
+        "activity_date_changes",
+        "activity_information_changes",
         "materials_added",
         "materials_updated",
         "materials_removed",
@@ -514,5 +756,15 @@ def _build_recent_update(
                 for group in outcome_groups
             },
         },
+        "digest": _build_update_digest(
+            visible_courses,
+            {
+                **counts,
+                **{
+                    group: sum(len(course[group]) for course in visible_courses)
+                    for group in outcome_groups
+                },
+            },
+        ),
         "courses": visible_courses,
     }).model_dump(mode="json")

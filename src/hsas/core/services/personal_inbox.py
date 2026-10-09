@@ -25,6 +25,7 @@ from hsas.application.ports.repositories import (
     PersonalInboxRepository,
 )
 from hsas.core.ports import HIQSPortError
+from hsas.core.services.information import persist_recent_information_update
 from hsas.domain.information import InformationStore
 from hsas.infrastructure.storage import (
     JsonInformationRepository,
@@ -56,12 +57,27 @@ class PersonalInboxService:
         normalized_entry_id = entry_id.strip()
         with self.mutation_lock:
             try:
+                before = load_information(
+                    self.resources_dir / "information.json", self.information_repository
+                )
+                inbox = load_personal_inbox(self.resources_dir, self.inbox_repository)
+                entry = next(
+                    (value for value in inbox.entries if value.entry_id == normalized_entry_id),
+                    None,
+                )
+                if entry is None:
+                    raise PersonalInboxError(
+                        f"Personal inbox entry was not found: {normalized_entry_id}"
+                    )
                 result = apply_personal_inbox_entry(
                     self.resources_dir,
                     normalized_entry_id,
                     confirmed=True,
                     inbox_repository=self.inbox_repository,
                     information_repository=self.information_repository,
+                )
+                audit = persist_recent_information_update(
+                    self.resources_dir, before, result.store, entry.update
                 )
             except (OSError, ValueError, PersonalInboxError) as exc:
                 raise HIQSPortError(str(exc)) from exc
@@ -71,6 +87,7 @@ class PersonalInboxService:
             "updated_courses": result.updated_courses,
             "created_items": result.created_items,
             "updated_items": result.updated_items,
+            "recent_update": audit,
         }
 
     def snapshot(

@@ -86,8 +86,10 @@ Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`Person
 使用注入的 repository，并由 `HIQSCore` 组合。应用更新与本地证据操作分别由
 `ApplicationLifecycleService`、`LocalEvidenceOperationService` 负责；同步来源命令由
 `InstitutionalSourceService` 负责，具体 gateway 在 `source_factories.py` 组合边界创建。
-CORE façade 只维持稳定 Port、服务装配和兼容入口。CLI 的通用查询入口通过 CORE，仍需
-终端交互回调的 collector 命令保留专用适配器。新增 AI 和用户入口必须分别放入 `mcp` 与 `web`。
+CORE façade 只维持稳定 Port、服务装配和兼容入口。MCP 是 Agent 的正式接口；CLI 是人工
+诊断、恢复和无 MCP 环境使用的薄适配器。CLI 不得重复实现校验、写入、报告或 checkpoint
+业务逻辑，仍需终端交互回调的 collector 命令仅保留界面适配。新增 AI 和用户入口必须分别
+放入 `mcp` 与 `web`。
 
 “需要确认”使用同一条只读链路：Dashboard read model 进入 application 层的确定性 attention
 用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
@@ -212,11 +214,17 @@ Tesseract/Poppler 批量识别。识别结果追加到文本副本并重新计�
 携带 `acknowledge_through`，因此生成批次后发生的新同步会使旧批次失效。
 
 ```text
-changes show → AI 阅读列出的 files → information apply --changes → checkpoint
+MCP get_pending_changes → Agent 阅读 evidence → apply_information_update → recent_update + checkpoint
 ```
 
 checkpoint 在信息写入成功后推进。信息已保存而游标确认失败时，变化保持 pending 以支持
 安全重试。审查确认课程事实保持一致时，使用带双重确认的独立 acknowledge。
+
+每次正式写入同时生成 `ai-state/recent-information-update.json` 的整理摘要。摘要先由已验证的
+差异和证据节点提供安全 fallback；Agent 读取 `apply_information_update` 返回的报告后，可通过
+MCP `save_recent_update_summary` 提交一段自己的总述和最多六个重点。CORE 只接受属于最新报告
+的课程、事项和来源引用，避免摘要脱离证据。首页优先显示摘要，完整字段差异仍通过明细入口
+查看。旧版没有摘要字段的报告继续按原结构读取，不会阻断日历或资料展示。
 
 HKU SIS 页面使用 `sis-course-info/history/` 和 `review-checkpoint.json` 维护独立增量队列。
 AI 先阅读变更记录指向的 `text_relative_path`，并以 `source_type: sis_course_info` 引用来源。

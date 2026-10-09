@@ -23,9 +23,9 @@ Find the nearest ancestor containing `pyproject.toml` with project name
 `hku-information-query-system`; call it `HIQS_ROOT`. Run commands from that
 directory. The installed CLI remains `hsas` for backward compatibility.
 
-Personal data lives in the private resources directory. Resolve that directory
-from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
-`--resources` override.
+Personal data lives in the private resources directory. MCP resolves it through
+its configured CORE instance. For recovery work, `hsas list-status` reports the
+directory and respects `HSAS_DATA_DIR` plus the global `--resources` override.
 
 ## Read the right instructions
 
@@ -37,38 +37,48 @@ from `hsas list-status`; respect `HSAS_DATA_DIR` and the global
 
 ## Default operating loop
 
+Use the HIQS MCP tools as the primary Agent interface. They are the only
+Agent-facing contract and route every query, validation, write, checkpoint and
+recent-update report through `HIQSPort`. Use the `hsas` CLI only as a human-run
+recovery fallback when the MCP server is unavailable; the CLI is a thin adapter
+to the same port and must not contain separate business logic.
+
 1. Resolve the exact course and source scope from stable identifiers.
-2. Start from `hsas sis-enrollment sync`, then export `hsas sis-enrollment changes --output <ENROLLMENT_CHANGES.json>`. Use its current-semester course list to scope Moodle collection and `hsas sis-course-info sync`; export the Moodle and SIS queues with `hsas changes show --output <CHANGES.json>` and `hsas sis-course-info changes --output <SIS_CHANGES.json>`. For official class sections, times and locations, synchronize Class Planner through the shared HKU Portal session.
-3. When `hsas class-planner changes --output <PLANNER_CHANGES.json>` reports
+2. Call `sync_student_center`, then `get_pending_changes(source="sis_enrollment")`.
+   Use its current-semester course list to scope `start_course_sync` and
+   `sync_sis_course_info`. Export current source batches with
+   `get_pending_changes` for `moodle`, `sis_course_info`, and `class_planner`.
+3. When `get_pending_changes(source="class_planner")` reports
    differences, read the field-level queue and the referenced snapshots, compare
    `mainTable` and `patterns` with current information items, and preserve conflicts.
-4. Run `hsas ocr status`; when queued files are relevant, run `hsas ocr run --confirmed` before reading them.
-5. Export the exact pending scope with `hsas changes show --output <CHANGES.json>`.
+4. Read `get_status`; when OCR is queued and relevant, call `run_ocr(confirmed=true)`.
+5. Export the exact Moodle scope with `get_pending_changes(source="moodle")`.
 6. For `full` courses read every listed file; for `incremental` courses read only the listed changed files and `course.json`. Read every changed HKU SIS `text_relative_path`; it is a cleaned, inert rendering of the official course page rather than a fact parser.
-7. Inspect `hsas information show`, especially IDs named by `affected_information_item_ids`.
-8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. For every reviewed course, reconcile the full current `hsas materials list --course <MOODLE_COURSE_ID>` manifest with `courses[].material_sections`: place every current material in exactly one freely named, evidence-derived section, preserve stable relative paths or URLs, and do not choose from a predefined taxonomy. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
+7. Inspect `get_information`, especially IDs named by `affected_information_item_ids`.
+8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. For every reviewed course, reconcile the full current `list_materials(course_ids=[...])` manifest with `courses[].material_sections`: place every current material in exactly one freely named, evidence-derived section, preserve stable relative paths or URLs, and do not choose from a predefined taxonomy. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
 9. Do not wait for every collector or require multiple sources to repeat the same fact. Write a supported fact from any available appropriate source; an absent source is not contradictory evidence and should not erase or block facts supplied elsewhere. Preserve a field as `unknown` only when no available source supports it. When available sources conflict, write the value supported by current Moodle course materials or activity metadata and retain the conflicting evidence in `warnings` and `sources`.
-10. Run `hsas information validate <UPDATE.json>`.
-11. When authorized, run `hsas information apply <UPDATE.json> --sis-enrollment-changes <ENROLLMENT_CHANGES.json> --changes <CHANGES.json> --class-planner-changes <PLANNER_CHANGES.json> --sis-course-info-changes <SIS_CHANGES.json> --confirmed`, omitting batch options for sources outside the review.
-12. When review confirms zero information changes, use `hsas changes acknowledge <CHANGES.json> --confirmed --reviewed-no-information-change`.
-13. For a reviewed Class Planner batch with zero information changes, advance
-    its independent checkpoint with `hsas class-planner acknowledge <PLANNER_CHANGES.json> --confirmed`.
-14. For a reviewed HKU SIS batch with zero information changes, run `hsas sis-course-info acknowledge <SIS_CHANGES.json> --confirmed`.
-15. For a reviewed Student Center batch with zero information changes, run `hsas sis-enrollment acknowledge <ENROLLMENT_CHANGES.json> --confirmed`.
-16. Verify with `hsas list-status` and answer from the resulting database.
+10. Call `validate_information_update(update)`.
+11. When authorized, call `apply_information_update(update, review_batches,
+    confirmed=true)`, supplying only the exact exported batches that were reviewed.
+12. When review confirms zero information changes for a source, call
+    `acknowledge_pending_changes(source, batch,
+    reviewed_no_information_change=true, confirmed=true)`.
+13. Repeat zero-change acknowledgement independently for each reviewed source.
+14. Verify with `get_status` and `get_information`, including the returned
+    `recent_update`, then answer from the resulting database.
 
 ## Personal information inbox
 
 When the user supplies a tutorial group, temporary room, personal reminder, or
 similar course-relevant fact, prepare a minimal complete `InformationUpdate` and
-run `hsas inbox add <UPDATE.json> --title <TITLE>`. Show the user the output of
-`hsas inbox list`, including create/update actions and field-level differences.
-Apply one draft with `hsas inbox apply <ENTRY_ID> --confirmed` only after the user
+call `add_personal_inbox_entry`. Show the user `list_personal_inbox`, including
+create/update actions and field-level differences. Apply one draft with
+`apply_personal_inbox_entry(entry_id, confirmed=true)` only after the user
 confirms that preview.
 
 ## RAG question workflow
 
-1. Resolve the course when possible and run `hsas query "<question>" --course <COURSE_ID>`.
+1. Resolve the course when possible and call `query_course(question, course_ids)`.
 2. Treat the JSON result as the evidence packet for answer generation.
 3. Prefer `information_items` for dates, schedules, formats and weights; use
    `material_evidence.hits` for course content and detailed requirements.
@@ -114,8 +124,10 @@ course list, term, capture time, source hash and pointer to the preserved visibl
 text. Use its course codes to scope the other collectors and review its independent
 change batch before adding or removing canonical course records.
 
-The calendar is a read-only projection of this file. AI updates pass through the
-CLI, where schema and cross-course validation preserve the last valid database.
+The calendar is a read-only projection of this file. Agent updates pass through
+the MCP tools and `HIQSPort`, where schema, cross-course validation, atomic write,
+checkpoint and recent-update reporting preserve the last valid database. The
+CLI exposes the same port only for human recovery and diagnostics.
 
 ## Core invariants
 
@@ -132,12 +144,18 @@ CLI, where schema and cross-course validation preserve the last valid database.
 - Keep conflicting evidence visible through `warnings` and separate source references while the canonical field follows Moodle.
 - Use stable IDs and incremental upserts; preserve omitted records.
 - Treat a removed source as a review signal. Re-check other evidence and retain the item with a warning or tentative status until the user authorizes a supported deletion workflow.
-- Write `information.json` through the validated CLI workflow.
+- Write `information.json` through the validated MCP workflow. Use the CLI only
+  when MCP is unavailable and state that it is a recovery path.
 - AI may help a student reason through or draft their own study plan when asked,
   while keeping suggestions separate from course facts. Plan persistence and
   management remain under the student's control.
 
-## Public commands
+## CLI recovery commands
+
+These commands remain available for human diagnosis, recovery and environments
+where the HIQS MCP server is not connected. They are adapters to the same
+`HIQSPort`, not a second Agent workflow. Agent workflows should use the MCP
+tools above.
 
 ```bash
 hsas information template [OUTPUT]

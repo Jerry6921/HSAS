@@ -16,6 +16,7 @@ class UnifiedBrowserSession(Protocol):
         self,
         courses: list[dict[str, str]],
         *,
+        download_materials: bool,
         progress_callback: ProgressCallback | None,
         cancel_requested: CancelRequested | None,
     ) -> dict[str, Any]: ...
@@ -61,6 +62,7 @@ class UnifiedCourseSyncService:
         self,
         courses: list[dict[str, str]],
         *,
+        download_materials: bool = True,
         progress_callback: ProgressCallback | None = None,
         cancel_requested: CancelRequested | None = None,
         source_scopes: dict[str, list[dict[str, str]] | None] | None = None,
@@ -75,6 +77,7 @@ class UnifiedCourseSyncService:
             if "moodle" in scopes:
                 tasks["moodle"] = session.sync_moodle(
                     scopes["moodle"] or [],
+                    download_materials=download_materials,
                     progress_callback=progress_callback,
                     cancel_requested=cancel_requested,
                 )

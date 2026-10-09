@@ -29,6 +29,7 @@ class RecentUpdateOutcome(StrictModel):
     title: str
     kind: Literal["activity", "deadline", "material"]
     details: list[str] = Field(default_factory=list)
+    impact: list[str] = Field(default_factory=list)
     relative_path: str | None = None
     source_url: str | None = None
     text_path: str | None = None
@@ -44,6 +45,8 @@ class RecentUpdateCourse(StrictModel):
     activities_added: list[RecentUpdateOutcome] = Field(default_factory=list)
     activities_updated: list[RecentUpdateOutcome] = Field(default_factory=list)
     activities_confirmed: list[RecentUpdateOutcome] = Field(default_factory=list)
+    activity_date_changes: list[RecentUpdateOutcome] = Field(default_factory=list)
+    activity_information_changes: list[RecentUpdateOutcome] = Field(default_factory=list)
     materials_added: list[RecentUpdateOutcome] = Field(default_factory=list)
     materials_updated: list[RecentUpdateOutcome] = Field(default_factory=list)
     materials_removed: list[RecentUpdateOutcome] = Field(default_factory=list)
@@ -58,9 +61,37 @@ class RecentUpdateSummary(StrictModel):
     activities_added: int = Field(default=0, ge=0)
     activities_updated: int = Field(default=0, ge=0)
     activities_confirmed: int = Field(default=0, ge=0)
+    activity_date_changes: int = Field(default=0, ge=0)
+    activity_information_changes: int = Field(default=0, ge=0)
     materials_added: int = Field(default=0, ge=0)
     materials_updated: int = Field(default=0, ge=0)
     materials_removed: int = Field(default=0, ge=0)
+
+
+class RecentUpdateHighlight(StrictModel):
+    """A bounded, source-linked highlight for the post-apply digest."""
+
+    category: Literal["date", "information", "activity", "material"]
+    label: str
+    course_id: str
+    course_title: str
+    record_id: str
+    title: str
+    details: list[str] = Field(default_factory=list)
+    impact: list[str] = Field(default_factory=list)
+    relative_path: str | None = None
+    source_url: str | None = None
+    text_path: str | None = None
+
+
+class RecentUpdateDigest(StrictModel):
+    """Human-readable summary derived only from the validated change report."""
+
+    headline: str
+    body: str
+    authored_by: Literal["system", "ai_agent"] = "system"
+    highlights: list[RecentUpdateHighlight] = Field(default_factory=list)
+    omitted_count: int = Field(default=0, ge=0)
 
 
 class RecentInformationUpdate(StrictModel):
@@ -68,4 +99,5 @@ class RecentInformationUpdate(StrictModel):
     applied_at: datetime
     updated_by: Literal["ai_agent", "import", "manual"]
     summary: RecentUpdateSummary
+    digest: RecentUpdateDigest | None = None
     courses: list[RecentUpdateCourse] = Field(default_factory=list)

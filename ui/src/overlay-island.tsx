@@ -44,7 +44,7 @@ function isMoodleUrl(value: string | null): value is string {
   } catch { return false; }
 }
 
-function Modal({ children, onClose, wide = false }: { children: ReactNode; onClose: () => void; wide?: boolean }) {
+function Modal({ children, onClose, wide = false, titleId }: { children: ReactNode; onClose: () => void; wide?: boolean; titleId?: string }) {
   const animate = useWorkspaceMotion();
   const dialog = useRef<HTMLElement>(null);
   const close = useRef(onClose); close.current = onClose;
@@ -58,7 +58,7 @@ function Modal({ children, onClose, wide = false }: { children: ReactNode; onClo
       if (dialogs[dialogs.length - 1] !== dialog.current) return;
       if (event.key === 'Escape') { event.preventDefault(); close.current(); }
       if (event.key === 'Tab') {
-        const nodes = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), summary, [tabindex="0"]') || []).filter(node => node.getClientRects().length);
+        const nodes = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') || []).filter(node => node.getClientRects().length);
         if (!nodes.length) { event.preventDefault(); return; }
         const first = nodes[0], last = nodes[nodes.length - 1];
         if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }
@@ -69,12 +69,12 @@ function Modal({ children, onClose, wide = false }: { children: ReactNode; onClo
     return () => { document.removeEventListener('keydown', key); document.body.style.overflow = oldOverflow; previous?.focus(); };
   }, []);
   return <motion.div className="hiqs-modal-backdrop" initial={animate ? { opacity: 0 } : false} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: animate ? .22 : 0 }} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <motion.section ref={dialog} role="dialog" aria-modal="true" aria-label="详情与操作" tabIndex={-1} className={`hiqs-modal ${wide ? "is-wide" : ""}`} initial={animate ? { opacity: 0, y: 22, scale: .985 } : false} animate={{ opacity: 1, y: 0, scale: 1 }} exit={animate ? { opacity: 0, y: 8, scale: .99 } : { opacity: 0 }} transition={{ duration: animate ? .34 : 0, ease: flowEase }}>{children}</motion.section>
+    <motion.section ref={dialog} role="dialog" aria-modal="true" {...(titleId ? { "aria-labelledby": titleId } : { "aria-label": "对话框" })} tabIndex={-1} className={`hiqs-modal ${wide ? "is-wide" : ""}`} initial={animate ? { opacity: 0, y: 22, scale: .985 } : false} animate={{ opacity: 1, y: 0, scale: 1 }} exit={animate ? { opacity: 0, y: 8, scale: .99 } : { opacity: 0 }} transition={{ duration: animate ? .34 : 0, ease: flowEase }}>{children}</motion.section>
   </motion.div>;
 }
 
-function ModalHeader({ eyebrow, title, onClose }: { eyebrow: string; title: string; onClose: () => void }) {
-  return <header className="hiqs-modal-header"><div><p>{eyebrow}</p><h2>{title}</h2></div><Button size="icon" aria-label="关闭" onClick={onClose}><X size={18} /></Button></header>;
+function ModalHeader({ eyebrow, title, onClose, titleId }: { eyebrow: string; title: string; onClose: () => void; titleId?: string }) {
+  return <header className="hiqs-modal-header"><div><p>{eyebrow}</p><h2 {...(titleId ? { id: titleId } : {})}>{title}</h2></div><Button size="icon" aria-label="关闭" onClick={onClose}><X size={18} /></Button></header>;
 }
 
 function SourceCards({ title, values, onOpen }: { title: string; values: CourseSource[]; onOpen: (source: CourseSource) => void }) {
@@ -106,7 +106,7 @@ function EvidenceExplanationPanel({ evidenceId, onOpenSource }: { evidenceId: st
 }
 
 function DetailModal({ detail, options, onClose, onOpenSource }: { detail: ModernDetailOptions; options: ModernOverlayOptions; onClose: () => void; onOpenSource: (source: CourseSource) => void }) {
-  return <Modal onClose={onClose} wide><ModalHeader eyebrow="CALENDAR ITEM" title={detail.title} onClose={onClose} /><div className={`hiqs-detail-body category-${detail.categoryKey}`}>
+  return <Modal onClose={onClose} wide titleId="hiqs-detail-modal-title"><ModalHeader eyebrow="CALENDAR ITEM" title={detail.title} titleId="hiqs-detail-modal-title" onClose={onClose} /><div className={`hiqs-detail-body category-${detail.categoryKey}`}>
     <div className="hiqs-detail-course">{detail.courseLabel}</div>
     <div className="hiqs-detail-pills"><Badge>{detail.category}</Badge><Badge>{detail.dateStateLabel}</Badge>{detail.weightLabel && <Badge>{detail.weightLabel}</Badge>}{detail.warningCount > 0 && <Badge>{detail.warningCount} 项提醒</Badge>}</div>
     {detail.description && <p className="hiqs-detail-description">{detail.description}</p>}
@@ -164,14 +164,15 @@ const categoryOptions = [["class","课程"],["tutorial","Tutorial"],["lab","实�
 
 function EventEditorModal({ defaults, options, onClose }: { defaults: EventEditorDefaults; options: ModernOverlayOptions; onClose: () => void }) {
   const [value, setValue] = useState<EventEditorValue>({ course_id: defaults.courseId || options.courses[0]?.courseId || "", title: "", category: "other", all_day: false, date: defaults.date, start_time: defaults.startTime, end_time: defaults.endTime, location: "", description: "" });
+  const [formError, setFormError] = useState("");
   const set = <K extends keyof EventEditorValue>(key: K, next: EventEditorValue[K]) => setValue((current) => ({ ...current, [key]: next }));
-  return <Modal onClose={onClose}><ModalHeader eyebrow="PERSONAL EVENT" title="添加事件" onClose={onClose} /><form className="hiqs-modern-form" onSubmit={(event) => { event.preventDefault(); if (!value.all_day && value.end_time <= value.start_time) { window.alert("结束时间必须晚于开始时间。"); return; } options.onSubmitEvent(value); }}>
+  return <Modal onClose={onClose}><ModalHeader eyebrow="PERSONAL EVENT" title="添加事件" onClose={onClose} /><form className="hiqs-modern-form" onSubmit={(event) => { event.preventDefault(); if (!value.all_day && value.end_time <= value.start_time) { setFormError("结束时间必须晚于开始时间。"); return; } setFormError(""); options.onSubmitEvent(value); }}>
     <label>课程<select value={value.course_id} onChange={(event) => set("course_id", event.target.value)} required>{options.courses.map((course) => <option key={course.courseId} value={course.courseId}>{course.label}</option>)}</select></label>
     <div><label>标题<input value={value.title} onChange={(event) => set("title", event.target.value)} maxLength={160} required placeholder="例如 小组讨论" /></label><label>分类<select value={value.category} onChange={(event) => set("category", event.target.value)}>{categoryOptions.map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
     <label className="hiqs-check"><input type="checkbox" checked={value.all_day} onChange={(event) => set("all_day", event.target.checked)} /><span>全天事件</span></label>
-    <div><label>日期<input type="date" value={value.date} onChange={(event) => set("date", event.target.value)} required /></label><label>开始<input type="time" value={value.start_time} disabled={value.all_day} onChange={(event) => set("start_time", event.target.value)} required /></label><label>结束<input type="time" value={value.end_time} disabled={value.all_day} onChange={(event) => set("end_time", event.target.value)} required /></label></div>
+    <div><label>日期<input type="date" value={value.date} onChange={(event) => set("date", event.target.value)} required /></label><label>开始<input type="time" value={value.start_time} disabled={value.all_day} onChange={(event) => set("start_time", event.target.value)} required /></label><label>结束<input type="time" value={value.end_time} disabled={value.all_day} onChange={(event) => set("end_time", event.target.value)} aria-invalid={Boolean(formError)} aria-describedby={formError ? "hiqs-event-form-error" : undefined} required /></label></div>
     <div><label>地点<input value={value.location} onChange={(event) => set("location", event.target.value)} maxLength={160} placeholder="可选" /></label><label>说明<input value={value.description} onChange={(event) => set("description", event.target.value)} maxLength={500} placeholder="可选" /></label></div>
-    <p>新增事件会写入本地 information.json；只有这里创建的个人事件可以删除。</p><div className="hiqs-modal-actions"><Button type="button" onClick={onClose}>取消</Button><Button type="submit" variant="default" disabled={options.operationRunning}>确认添加</Button></div>
+    <p>新增事件会写入本地 information.json；只有这里创建的个人事件可以删除。</p>{formError && <p id="hiqs-event-form-error" className="hiqs-form-error" role="alert">{formError}</p>}<div className="hiqs-modal-actions"><Button type="button" onClick={onClose}>取消</Button><Button type="submit" variant="default" disabled={options.operationRunning}>确认添加</Button></div>
   </form></Modal>;
 }
 

@@ -200,9 +200,9 @@ export function AttentionRadar({ snapshot, onAction, onReviewChanges, onCreateDr
           <span className="hiqs-attention-index-label">01 / REVIEW</span>
           <span className="hiqs-attention-heading-copy"><strong id="hiqs-attention-title">待确认</strong><small>未来 14 天内，优先核实会影响安排或提交的事项。</small></span>
           <span className={`hiqs-attention-count ${snapshot.state !== "ready" ? "is-status" : ""}`} aria-label={countLabel}>{snapshot.state === "ready" ? <><strong>{visible.length}</strong><em>项</em></> : <strong>{countLabel}</strong>}</span>
-          {snapshot.state === "ready" && visible.length > 0 && <button type="button" className="hiqs-attention-copy-prompt" title="复制一段让 AI 逐项询问并整理缺漏信息的提示词" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onCopyPrompt(visible); }}><Copy size={14} />复制 AI 问答提示词</button>}
           <ChevronDown className="hiqs-attention-chevron" size={17} aria-hidden="true" />
         </summary>
+        {snapshot.state === "ready" && visible.length > 0 && <div className="hiqs-attention-heading-actions"><button type="button" className="hiqs-attention-copy-prompt" title="复制一段让 AI 逐项询问并整理缺漏信息的提示词" onClick={() => onCopyPrompt(visible)}><Copy size={14} />复制 AI 问答提示词</button></div>}
         <div className="hiqs-attention-body">
       {snapshot.state === "loading" && <div className="hiqs-attention-loading" role="status"><i /><i /><i /><span>正在整理需要确认的事项…</span></div>}
       {snapshot.state === "error" && <div className="hiqs-attention-state is-error" role="status"><AlertTriangle size={16}/><span>风险摘要暂时无法读取；课程资料与日历仍可正常使用。</span></div>}
@@ -340,12 +340,47 @@ function OutcomeGroup({ title, description, tone, entries, onOpenSource }: {
           const canOpen = Boolean(entry.relative_path || entry.text_path || entry.source_url);
           return <article key={`${entry.course_id}:${entry.record_id}:${entry.action || tone}`}>
             <span>{entry.course_title}</span>
-            <div><strong>{entry.title}</strong>{entry.details.length > 0 && <p>{entry.details.join(" · ")}</p>}</div>
+            <div>
+              <strong>{entry.title}</strong>
+              {entry.details.length > 0 && <p>{entry.details.join(" · ")}</p>}
+              {!!entry.impact?.length && <ul className="hiqs-update-impact">{entry.impact.map((value) => <li key={value}>{value}</li>)}</ul>}
+            </div>
             {entry.action && <Badge className={`is-${entry.action}`}>{entry.action === "added" ? "新增" : entry.action === "modified" ? "更新" : "移除"}</Badge>}
             {canOpen && <Button size="sm" variant="ghost" onClick={() => onOpenSource({ ...entry, relative_path: entry.relative_path || entry.text_path })}>查看来源</Button>}
           </article>;
         })}
       </div>
+    </section>
+  );
+}
+
+function UpdateDigest({ digest, onOpenSource }: {
+  digest: NonNullable<HomeRecentUpdate["digest"]>;
+  onOpenSource: ModernHomeOptions["onOpenSource"];
+}) {
+  return (
+    <section className="hiqs-update-digest" aria-label="整理摘要">
+      <header>
+        <div><span>整理摘要</span><small>依据本次已验证写入生成</small></div>
+        <Badge>{digest.authored_by === "ai_agent" ? "Agent 摘要" : "自动摘要"}</Badge>
+      </header>
+      <strong className="hiqs-update-digest-headline">{digest.headline}</strong>
+      <p className="hiqs-update-digest-body">{digest.body}</p>
+      {!!digest.highlights.length && <ul className="hiqs-update-digest-highlights">
+        {digest.highlights.map((highlight) => {
+          const canOpen = Boolean(highlight.relative_path || highlight.text_path || highlight.source_url);
+          return <li key={`${highlight.course_id}:${highlight.record_id}:${highlight.label}`}>
+            <span className={`hiqs-update-digest-label is-${highlight.category}`}>{highlight.label}</span>
+            <div>
+              <strong>{highlight.course_title} · {highlight.title}</strong>
+              {!!highlight.details.length && <small>{highlight.details.slice(0, 2).join(" · ")}</small>}
+              {!!highlight.impact?.length && <small className="hiqs-update-digest-impact">{highlight.impact[0]}</small>}
+            </div>
+            {canOpen && <Button size="sm" variant="ghost" onClick={() => onOpenSource({ ...highlight, relative_path: highlight.relative_path || highlight.text_path })}>查看来源</Button>}
+          </li>;
+        })}
+      </ul>}
+      {digest.omitted_count > 0 && <p className="hiqs-update-digest-more">还有 {digest.omitted_count} 项变化已保留在“查看全部明细”中。</p>}
     </section>
   );
 }
@@ -356,8 +391,8 @@ export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
   onOpenSource: ModernHomeOptions["onOpenSource"];
 }) {
   const [expanded, setExpanded] = useState(false);
-  const completed = Boolean(recent?.courses?.length);
-  const courses = completed ? recent!.courses : pending;
+  const completed = Boolean(recent);
+  const courses = completed ? recent!.courses || [] : pending;
   const changes = courses.flatMap((course) => course.changes || []);
   const baselineCount = courses.reduce((sum, course) => sum + (!(course.changes || []).length ? (course.files || []).filter((file) => file.relative_path !== "course.json").length : 0), 0);
   const counts = {
@@ -367,10 +402,11 @@ export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
   };
   const total = counts.added + counts.modified + counts.removed;
   const maxCourseChanges = Math.max(1, ...courses.map((course) => (course.changes || []).length || (course.files || []).length));
-  const title = completed ? "最近一次资料更新" : pending.length ? "本轮待写入内容" : "最近没有内容变化";
-  const timestamp = completed ? formatDateTime(recent!.applied_at) : "等待下一次同步与 Agent 整理";
+  const title = completed ? "最近一次资料更新" : pending.length ? "本轮待写入内容" : "尚无更新摘要";
+  const timestamp = completed ? formatDateTime(recent!.applied_at) : pending.length ? "等待 Agent 校验写入" : "等待下一次 Agent 正式写入";
   const collect = (field: keyof Pick<HomeUpdateCourse,
     "activities_added" | "activities_updated" | "activities_confirmed" |
+    "activity_date_changes" | "activity_information_changes" |
     "materials_added" | "materials_updated" | "materials_removed"
   >, action?: string): OutcomeEntry[] => courses.flatMap((course) =>
     (course[field] || []).map((entry) => ({
@@ -381,22 +417,40 @@ export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
     })),
   );
   const activitiesAdded = collect("activities_added");
-  const activitiesConfirmed = collect("activities_confirmed");
-  const activitiesUpdated = collect("activities_updated");
+  const activityDateChanges = collect("activity_date_changes").length
+    ? collect("activity_date_changes")
+    : collect("activities_confirmed");
+  const activityInformationChanges = collect("activity_information_changes").length
+    ? collect("activity_information_changes")
+    : collect("activities_updated");
   const materialChanges = [
     ...collect("materials_added", "added"),
     ...collect("materials_updated", "modified"),
     ...collect("materials_removed", "removed"),
   ];
-  const outcomeCount = activitiesAdded.length + activitiesConfirmed.length + activitiesUpdated.length + materialChanges.length;
+  const outcomeCount = activitiesAdded.length + activityDateChanges.length + activityInformationChanges.length + materialChanges.length;
+  const outcomeSummary: Array<[string, number]> = [
+    ["新增活动", activitiesAdded.length] as [string, number],
+    ["日期变化", activityDateChanges.length] as [string, number],
+    ["信息变化", activityInformationChanges.length] as [string, number],
+    ["资料变化", materialChanges.length] as [string, number],
+  ].filter(([, count]) => count > 0);
+  const digest = recent?.digest || (recent ? {
+    headline: total ? "最近一次整理已完成" : "最近一次整理未产生事实变化",
+    body: `已完成 ${courses.length} 门课程的正式整理：新增 ${counts.added} 项，变更 ${counts.modified} 项，移除 ${counts.removed} 项。`,
+    highlights: [],
+    omitted_count: 0,
+  } : null);
 
   return (
     <section className={`hiqs-update-visual ${!total ? "is-empty" : ""}`} aria-labelledby="hiqs-update-visual-title">
       <header>
         <div><p>CHANGESET / LATEST</p><h2 id="hiqs-update-visual-title">{title}</h2><span>{completed ? `${timestamp} · 已通过校验写入资料库` : timestamp}</span></div>
-        {total > 0 && <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? "收起明细" : "查看全部明细"}<ChevronDown size={15} /></button>}
+        {total > 0 && <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} aria-controls="hiqs-update-outcome-details hiqs-update-details">{expanded ? "收起明细" : "查看全部明细"}<ChevronDown size={15} /></button>}
       </header>
-      {!total ? <p className="hiqs-update-visual-empty"><Check size={16} />资料库与来源保持一致；下一次完成更新后，这里会保留新增与变更摘要。</p> : <>
+      {digest && <UpdateDigest digest={digest} onOpenSource={onOpenSource} />}
+      {!total ? <p className="hiqs-update-visual-empty"><Check size={16} />{completed ? "最近一次正式写入没有产生事实变化。" : pending.length ? "当前变化尚未写入正式资料库。" : "没有可显示的更新报告；这不代表资料未发生变化。下一次 Agent 正式写入后会在这里保留摘要。"}</p> : <>
+        <div className="hiqs-update-full-summary" hidden={Boolean(recent) && !expanded}>
         <div className="hiqs-update-overview">
           <div className="hiqs-update-total"><strong>{String(total).padStart(2, "0")}</strong><span>项内容变化</span><small>横跨 {courses.length} 门课程</small></div>
           <div className="hiqs-update-breakdown">
@@ -410,15 +464,22 @@ export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
             </div>
           </div>
         </div>
+        </div>
         {outcomeCount > 0 && <section className="hiqs-update-outcomes" aria-label="本次整理结果">
-          <header><span>本次整理结果</span><small>同一活动的多个字段变化已合并显示</small></header>
-          <div>
-            <OutcomeGroup title="新增活动" description="本次加入日历或课程记录" tone="activity-added" entries={activitiesAdded} onOpenSource={onOpenSource} />
-            <OutcomeGroup title="信息已确认" description="日期由未知或暂定变为已确认" tone="confirmed" entries={activitiesConfirmed} onOpenSource={onOpenSource} />
-            <OutcomeGroup title="活动信息变更" description="时间、地点、提交或要求发生变化" tone="activity-updated" entries={activitiesUpdated} onOpenSource={onOpenSource} />
-            <OutcomeGroup title="资料变化" description="新增、更新或移除的课程资料" tone="materials" entries={materialChanges} onOpenSource={onOpenSource} />
+          <header><span>本次整理结果</span><small>{expanded ? "同一活动的多个字段变化已合并显示" : `共 ${outcomeCount} 项，展开查看具体证据`}</small></header>
+          <div className="hiqs-update-outcome-summary" hidden={expanded}>
+            {outcomeSummary.map(([label, count]) => <span key={label}><strong>{count}</strong>{label}</span>)}
+          </div>
+          <div id="hiqs-update-outcome-details" className="hiqs-update-outcome-details" hidden={!expanded}>
+            <div>
+              <OutcomeGroup title="新增活动" description="本次加入日历或课程记录" tone="activity-added" entries={activitiesAdded} onOpenSource={onOpenSource} />
+              <OutcomeGroup title="日期变化" description="只列出日期、时间或确认状态发生变化的活动" tone="confirmed" entries={activityDateChanges} onOpenSource={onOpenSource} />
+              <OutcomeGroup title="信息变化" description="只列出地点、提交、占分、要求等事实变化" tone="activity-updated" entries={activityInformationChanges} onOpenSource={onOpenSource} />
+              <OutcomeGroup title="资料变化" description="新增、更新或移除的课程资料" tone="materials" entries={materialChanges} onOpenSource={onOpenSource} />
+            </div>
           </div>
         </section>}
+        <div className="hiqs-update-full-summary" hidden={Boolean(recent) && !expanded}>
         <div className="hiqs-update-course-map">
           <div className="hiqs-update-course-map-heading"><span>按课程分布</span><small>条形长度代表本次变化数量</small></div>
           {courses.map((course, index) => {
@@ -434,10 +495,51 @@ export function RecentUpdateVisual({ recent, pending, onOpenSource }: {
             </article>;
           })}
         </div>
+        </div>
       </>}
-      {expanded && <div className="hiqs-update-visual-details">{courses.map((course) => <UpdateCourse key={course.course_id} course={course} onOpenSource={onOpenSource} />)}</div>}
+      <div id="hiqs-update-details" className="hiqs-update-visual-details" hidden={!expanded}>{courses.map((course) => <UpdateCourse key={course.course_id} course={course} onOpenSource={onOpenSource} />)}</div>
     </section>
   );
+}
+
+const HOME_TODO_KEY = "hiqs.home.todos.v1";
+
+function readCompletedTodos(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const value = JSON.parse(window.localStorage.getItem(HOME_TODO_KEY) || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+export function HomeTodoList({ entries, onOpen }: {
+  entries: ModernHomeOptions["todos"];
+  onOpen: ModernHomeOptions["onOpenNext"];
+}) {
+  const [completed, setCompleted] = useState<Record<string, boolean>>(readCompletedTodos);
+  const toggle = (key: string) => setCompleted((previous) => {
+    const next = { ...previous, [key]: !previous[key] };
+    try { window.localStorage.setItem(HOME_TODO_KEY, JSON.stringify(next)); } catch {}
+    return next;
+  });
+  const completedCount = entries.filter((entry) => completed[`${entry.itemId}:${entry.dateKey}`]).length;
+  if (!entries.length) return <p className="hiqs-home-empty">暂无已排定的近期任务。待确认日期可在日历中查看。</p>;
+  return <div className="hiqs-home-todos">
+    <p className="hiqs-todo-progress">{completedCount} / {entries.length} 已完成 <small>完成状态只保存在本机</small></p>
+    {entries.map((entry) => {
+      const key = `${entry.itemId}:${entry.dateKey}`;
+      const done = Boolean(completed[key]);
+      return <article className={`hiqs-todo-row ${done ? "is-complete" : ""}`} key={key}>
+        <label>
+          <input type="checkbox" checked={done} onChange={() => toggle(key)} aria-label={`标记 ${entry.title} 为${done ? "未完成" : "已完成"}`} />
+          <span><strong>{entry.title}</strong><small>{entry.meta}</small></span>
+        </label>
+        <Button size="sm" variant="ghost" onClick={() => onOpen(entry.itemId, entry.dateKey)}>详情<ArrowRight size={14} /></Button>
+      </article>;
+    })}
+  </div>;
 }
 
 export function HomeIsland({ options }: { options: ModernHomeOptions }) {
@@ -461,7 +563,7 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
       <motion.header className="hiqs-editorial-masthead" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={flowTransition}>
         <div className="hiqs-masthead-date"><span>{dateMonth}</span><strong>{dateNumber}</strong><span>{weekday}</span></div>
         <div className="hiqs-masthead-copy"><span className="hiqs-kicker">HIQS / STUDY JOURNAL · 01</span><h2>今天，值得掌握的事。</h2><p>课程日程与资料变化，按你的学习节奏排列。</p></div>
-        <div className="hiqs-masthead-facts"><span><strong>{options.today.length}</strong> 今天的安排</span><span><strong>{options.deadlines.length}</strong> 近期考核</span><span><strong>{options.statusTotal}</strong> 资料提醒</span></div>
+        <div className="hiqs-masthead-facts"><span><strong>{options.today.length}</strong> 今天的安排</span><span><strong>{options.todos.length}</strong> 近期任务</span><span><strong>{options.statusTotal}</strong> 资料提醒</span></div>
       </motion.header>
       <motion.div className="hiqs-feature-layout" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .5, delay: .07, ease: flowEase }}>
       <motion.button
@@ -483,7 +585,10 @@ export function HomeIsland({ options }: { options: ModernHomeOptions }) {
       <aside className="hiqs-feature-note"><span className="hiqs-kicker">AT A GLANCE / 02</span><strong>先看下一项，再进入细节。</strong><p>点击事项可查看时间、地点及相关来源；待核实信息会单独标明。</p><button type="button" onClick={() => setWorkspace(true)}>查看资料状态 <ArrowRight size={16}/></button></aside>
       </motion.div>
 
-      <motion.section className="hiqs-daily-grid" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .13, ease: flowEase }}>{[["今天的安排", options.today], ["接下来 · 考核与截止", options.deadlines]].map(([title, entries], index) => <section key={String(title)}><header className="hiqs-editorial-section-title"><span>0{index + 3} / AGENDA</span><h2>{String(title)}</h2></header>{(entries as ModernHomeOptions['today']).length ? (entries as ModernHomeOptions['today']).map((entry, row) => <button className="hiqs-agenda-row" key={`${entry.itemId}:${entry.dateKey}`} onClick={() => options.onOpenNext(entry.itemId, entry.dateKey)}><em>{String(row + 1).padStart(2, '0')}</em><span><strong>{entry.title}</strong><small>{entry.meta}</small></span><ArrowRight size={16}/></button>) : <p className="hiqs-home-empty">暂无已排定事项。待确认日期可在日历中查看。</p>}</section>)}</motion.section>
+      <motion.section className="hiqs-daily-grid" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .13, ease: flowEase }}>
+        <section><header className="hiqs-editorial-section-title"><span>03 / AGENDA</span><h2>今天的安排</h2></header>{options.today.length ? options.today.map((entry, row) => <button className="hiqs-agenda-row" key={`${entry.itemId}:${entry.dateKey}`} onClick={() => options.onOpenNext(entry.itemId, entry.dateKey)}><em>{String(row + 1).padStart(2, '0')}</em><span><strong>{entry.title}</strong><small>{entry.meta}</small></span><ArrowRight size={16}/></button>) : <p className="hiqs-home-empty">暂无已排定事项。待确认日期可在日历中查看。</p>}</section>
+        <section><header className="hiqs-editorial-section-title"><span>04 / TO-DO</span><h2>接下来的任务</h2></header><HomeTodoList entries={options.todos} onOpen={options.onOpenNext} /></section>
+      </motion.section>
       <motion.section className="hiqs-recent" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .18, ease: flowEase }}><header className="hiqs-editorial-section-title"><span>05 / ARCHIVE</span><h2>课程资料更新</h2></header>{options.updates.length ? options.updates.slice(0, 5).map((course, index) => <article key={course.course_id}><em>{String(index + 1).padStart(2, '0')}</em><strong>{course.course_title}</strong><span>{course.changes?.length || course.files?.length || 0} 项变更</span><Button size="sm" onClick={() => setWorkspace(true)}>查看更新</Button></article>) : <p>当前没有待整理的资料更新。</p>}</motion.section>
       <motion.button className="hiqs-health" initial={reveal} animate={{ opacity: 1, y: 0 }} transition={{ duration: .48, delay: .22, ease: flowEase }} onClick={() => setWorkspace(true)}><span>{syncing ? "正在同步课程资料…" : options.statusTotal ? `${options.statusTotal} 项资料状态需要关注` : "本地资料状态正常"}</span><span>打开资料中心 →</span></motion.button>
       </>}

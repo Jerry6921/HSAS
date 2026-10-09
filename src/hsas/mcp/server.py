@@ -62,6 +62,25 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         )
 
     @server.tool()
+    def save_recent_update_summary(
+        applied_at: str,
+        headline: str,
+        body: str,
+        highlights: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        """Save a concise Agent summary for the exact latest applied report.
+
+        Select at most six highlights by category, course_id and record_id from
+        the recent_update returned by apply_information_update.
+        """
+        return port.save_recent_update_summary({
+            "applied_at": applied_at,
+            "headline": headline,
+            "body": body,
+            "highlights": highlights or [],
+        })
+
+    @server.tool()
     def get_calendar() -> str:
         """Return the deterministic RFC 5545 calendar projection."""
         return port.calendar_ics().decode("utf-8")
@@ -171,6 +190,16 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
     def cancel_course_sync() -> dict[str, Any]:
         """Request cancellation of the active background sync."""
         return port.cancel_course_sync({})
+
+    @server.tool()
+    def hydrate_course_materials(course_id: str) -> dict[str, Any]:
+        """Download and index one deferred Moodle course when Agent needs its files.
+
+        The normal sync records Moodle structure and source links first. Call this
+        tool immediately before querying a course's local material evidence; it is
+        safe to call again because the course snapshot publisher preserves hashes.
+        """
+        return port.hydrate_course_materials({"course_id": course_id})
 
     @server.tool()
     def run_ocr(confirmed: bool = False) -> dict[str, Any]:

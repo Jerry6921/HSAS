@@ -4,11 +4,10 @@ Use this protocol when answering a student's question from HIQS.
 
 ## Retrieve
 
-Run:
-
-```bash
-hsas query "<the student's question>" [--course COURSE_ID]
-```
+Call MCP `query_course(question, course_ids)` with the student's question and,
+when known, the stable course ID. Use `get_status` first when the configured
+resources or material coverage is unclear. The CLI command `hsas query` is only
+the human recovery equivalent when MCP is unavailable.
 
 The result combines two retrieval paths:
 

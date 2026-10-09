@@ -45,6 +45,7 @@ export interface AttentionItem {
 }
 
 export interface MaterialSearchResult {
+  schema_version?: string;
   query: string;
   course_ids?: Array<string>;
   indexed_document_count: number;
@@ -55,12 +56,17 @@ export interface MaterialSearchResult {
 
 export interface MaterialHit {
   score: number;
+  evidence_id: string;
   course_id: string;
   course_title: string;
   activity_id: string;
   activity_name: string;
   source_kind?: string;
   filename: string;
+  record_id?: string | unknown;
+  heading?: string | unknown;
+  section_path?: string | unknown;
+  content_kind?: string;
   relative_text_path: string;
   page_start?: number | unknown;
   page_end?: number | unknown;
@@ -69,5 +75,8 @@ export interface MaterialHit {
   source_unit_end?: number | unknown;
   chunk_index: number;
   text: string;
+  text_character_count: number;
+  text_truncated?: boolean;
+  retrieval_hint?: string | unknown;
   content_tables?: Array<Record<string, unknown>>;
 }

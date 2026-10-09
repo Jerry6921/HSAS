@@ -1102,16 +1102,20 @@ def test_course_overview_combines_ai_facts_and_local_moodle_materials(
     assert course["objectives"] == ["Understand the core methods"]
     assert course["grade_distribution"][0]["item_id"] == "demo-assignment"
     activity = snapshot["items"][0]
-    assert "hsas query" in activity["agent_prompt"]
+    assert "HIQS MCP" in activity["agent_prompt"]
+    assert "query_course" in activity["agent_prompt"]
     assert "demo-assignment" in activity["agent_prompt"]
     assert "最相关的课件/资料" in activity["agent_prompt"]
     assert course["materials"]["sections"][0]["title"] == "Foundations and limit arguments"
     classified = course["materials"]["sections"][0]["materials"][0]
     assert classified["title"] == "lecture-1.pptx"
     assert classified["material_type"] == "Concept deck"
-    assert "定位并阅读这份课件" in classified["agent_prompt"]
+    assert "只返回定位结果" in classified["agent_prompt"]
     assert stored_file.relative_path in classified["agent_prompt"]
+    assert "不要生成笔记" in classified["agent_prompt"]
+    assert "search_materials" in classified["agent_prompt"]
     assert "最近一次已经发生的 Lecture" in course["agent_prompts"]["recent_lecture_materials"]
+    assert "detailed_notes" not in course["agent_prompts"]
     assert course["materials"]["unclassified"]
     assert service.material_file(stored_file.relative_path)[0] == material_path
     preview = service.source_preview(stored_file.relative_path, [2])

@@ -241,6 +241,15 @@ class HIQSCore:
             "information": self.information_snapshot(),
         }
 
+    def save_recent_update_summary(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save an Agent digest for the latest applied information update."""
+        try:
+            return self.information_contract_service.save_recent_update_summary(
+                payload, self.mutation_lock
+            )
+        except (OSError, ValueError, ValidationError) as exc:
+            raise DashboardError(str(exc)) from exc
+
     def application_update_status(self) -> dict[str, object]:
         """Check the fixed public HIQS repository without mutating local files."""
         return self.lifecycle_service.status()
@@ -374,6 +383,9 @@ class HIQSCore:
 
     def cancel_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.sync_workflow.cancel_course_sync(payload)
+
+    def hydrate_course_materials(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.sync_workflow.hydrate_course_materials(payload)
 
 
     def login_class_planner(self, payload: dict[str, Any]) -> dict[str, Any]:

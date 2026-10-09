@@ -29,6 +29,8 @@ jobs:
         run: python -m ruff check src tests scripts
       - name: Verify Agent contract snapshots
         run: python scripts/generate_agent_contracts.py && git diff --exit-code -- contracts
+      - name: Verify generated UI and TypeScript contracts
+        run: python scripts/check_generated.py
       - name: Test
         run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
       - name: Build wheel
@@ -79,4 +81,4 @@ jobs:
         working-directory: ui
         run: pnpm run build
       - name: Check generated assets
-        run: git diff --exit-code -- src/hsas/ui/web/modern-assets
+        run: git diff --exit-code -- src/hsas/web/static/modern-assets

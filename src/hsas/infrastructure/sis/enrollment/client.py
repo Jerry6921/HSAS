@@ -159,6 +159,14 @@ async def _student_center_text(
     cancel_requested: Callable[[], bool] | None = None,
 ) -> str:
     page = context.pages[0] if context.pages else await context.new_page()
+    # Establish the PeopleSoft session endpoint first. A Moodle/Portal cookie
+    # alone is not always enough for Student Center: SIS may issue its own
+    # PS_TOKEN only after this sign-on URL is visited.
+    await page.goto(
+        LOGIN_URL,
+        wait_until="domcontentloaded",
+        timeout=timeout_seconds * 1000,
+    )
     await page.goto(
         STUDENT_CENTER_URL,
         wait_until="domcontentloaded",
@@ -200,6 +208,7 @@ class SisEnrollmentBrowserGateway:
         *,
         timeout_seconds: int = 90,
         auto_login: bool = True,
+        interactive_login: bool = True,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         async def capture(
@@ -237,9 +246,12 @@ class SisEnrollmentBrowserGateway:
                 )
             )
         except (SisEnrollmentAuthenticationError, PlaywrightTimeoutError):
-            if not auto_login:
+            if not auto_login or not interactive_login:
                 self._write_status("expired")
-                raise
+                raise SisEnrollmentAuthenticationError(
+                    "HKU SIS session is unavailable after the shared Moodle Portal login; "
+                    "no additional SIS browser was opened."
+                )
             self._write_status("login_required")
             text = asyncio.run(
                 capture(

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { AttentionRadar, RecentUpdateVisual } from "./home-island";
+import { AttentionRadar, HomeTodoList, RecentUpdateVisual } from "./home-island";
 import type { HomeAttentionItem, HomeAttentionSnapshot, HomeRecentUpdate } from "./types";
 
 function item(index: number): HomeAttentionItem {
@@ -76,12 +76,23 @@ describe("AttentionRadar", () => {
 });
 
 describe("RecentUpdateVisual", () => {
-  it("shows Agent results as activities, confirmations, updates, and materials", () => {
-    const outcome = (record_id: string, title: string, details: string[]) => ({
+  it("does not describe a missing report as proof that nothing changed", () => {
+    const markup = renderToStaticMarkup(
+      <RecentUpdateVisual recent={null} pending={[]} onOpenSource={() => undefined} />,
+    );
+
+    expect(markup).toContain("尚无更新摘要");
+    expect(markup).toContain("这不代表资料未发生变化");
+    expect(markup).not.toContain("资料库与来源保持一致");
+  });
+
+  it("separates date changes, information changes, impacts, and materials", () => {
+    const outcome = (record_id: string, title: string, details: string[], impact: string[] = []) => ({
       record_id,
       title,
       kind: "deadline" as const,
       details,
+      impact,
     });
     const recent: HomeRecentUpdate = {
       applied_at: "2026-09-28T10:00:00+08:00",
@@ -92,9 +103,25 @@ describe("RecentUpdateVisual", () => {
         change_count: 6,
         course_count: 1,
         activities_added: 1,
-        activities_updated: 1,
-        activities_confirmed: 1,
+        activity_date_changes: 1,
+        activity_information_changes: 1,
         materials_added: 1,
+      },
+      digest: {
+        headline: "本次整理重点核对了 4 项已有信息",
+        body: "已完成 1 门课程的正式整理：新增 2 项，变更 4 项，移除 0 项。",
+        highlights: [{
+          category: "date",
+          label: "日期变化",
+          course_id: "DEMO1001-2026-S1",
+          course_title: "Demo Course",
+          record_id: "assignment-1",
+          title: "Assignment 1",
+          kind: "deadline",
+          details: ["截止日期：已移除 → 2026-10-15"],
+          impact: ["截止日期已补充"],
+        }],
+        omitted_count: 2,
       },
       courses: [{
         course_id: "DEMO1001-2026-S1",
@@ -102,8 +129,8 @@ describe("RecentUpdateVisual", () => {
         mode: "completed",
         changes: [],
         activities_added: [outcome("quiz-1", "Quiz 1", ["截止日期：2026-10-02"])],
-        activities_confirmed: [outcome("assignment-1", "Assignment 1", ["日期状态：已确认", "截止日期：2026-10-15"])],
-        activities_updated: [outcome("tutorial-1", "Tutorial", ["地点：MB201"])],
+        activity_date_changes: [outcome("assignment-1", "Assignment 1", ["日期状态：未知 → 已确认", "截止日期：已移除 → 2026-10-15"], ["日期已由暂定或未知转为确认"])],
+        activity_information_changes: [outcome("tutorial-1", "Tutorial", ["地点：MB201 → KB223"], ["地点已更改"])],
         materials_added: [{...outcome("slides-1", "Week 1 slides", ["归类：Lecture slides"]), kind: "material"}],
       }],
     };
@@ -114,11 +141,35 @@ describe("RecentUpdateVisual", () => {
 
     expect(markup).toContain("本次整理结果");
     expect(markup).toContain("新增活动");
-    expect(markup).toContain("信息已确认");
-    expect(markup).toContain("活动信息变更");
+    expect(markup).toContain("日期变化");
+    expect(markup).toContain("信息变化");
     expect(markup).toContain("资料变化");
     expect(markup).toContain("Assignment 1");
-    expect(markup).toContain("日期状态：已确认 · 截止日期：2026-10-15");
-    expect(markup.match(/Assignment 1/g)).toHaveLength(1);
+    expect(markup).toContain("日期状态：未知 → 已确认 · 截止日期：已移除 → 2026-10-15");
+    expect(markup).toContain('class="hiqs-update-impact"');
+    expect(markup).toContain("日期已由暂定或未知转为确认");
+    expect(markup.match(/Assignment 1/g)).toHaveLength(2);
+    expect(markup).toContain("整理摘要");
+    expect(markup).toContain("本次整理重点核对了 4 项已有信息");
+    expect(markup).toContain("还有 2 项变化已保留在“查看全部明细”中。");
+    expect(markup).toContain('class="hiqs-update-outcome-summary"');
+    expect(markup).toMatch(/class="hiqs-update-outcome-details" hidden/);
+  });
+});
+
+describe("HomeTodoList", () => {
+  it("renders upcoming work as local completion controls with a detail action", () => {
+    const markup = renderToStaticMarkup(<HomeTodoList entries={[{
+      itemId: "assignment-1",
+      dateKey: "2026-10-15",
+      title: "Assignment 1",
+      meta: "2026-10-15 · DEMO1001",
+    }]} onOpen={() => undefined} />);
+
+    expect(markup).toContain("0 / 1 已完成");
+    expect(markup).toContain("完成状态只保存在本机");
+    expect(markup).toContain("Assignment 1");
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain("详情");
   });
 });

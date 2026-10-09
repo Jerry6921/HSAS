@@ -1,0 +1,4 @@
+interface:
+  display_name: "HIQS Product Development"
+  short_description: "Build complete, evidence-safe HIQS product changes"
+  default_prompt: "Improve HIQS as a product engineer: infer reasonable missing requirements, preserve its trust boundaries, implement the complete vertical slice, and verify observable behavior."

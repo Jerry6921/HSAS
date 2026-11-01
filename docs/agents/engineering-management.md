@@ -52,9 +52,11 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 
 ### 5. Protect the offline, fast suite
 
-- `python -m pytest` must stay fully offline and under roughly 60 seconds.
-- Anything that needs network, login, MFA, a browser session, an installed app, or a
-  real account is excluded from the default run and opted into explicitly.
+- `python -m pytest` must stay fully offline and under roughly 60 seconds. The default
+  run already applies `-m 'not slow'` from `pyproject.toml`; keep it that way.
+- Anything that needs network, login, MFA, a browser session, an installed app, or a real
+  account is marked `@pytest.mark.slow` and opted into explicitly. Mark it — do not delete
+  it, and never let it leak into the default run.
 - Do not add `sleep`-based coordination tests. A slow or flaky suite is deleted within a
   month, and with it the only cheap way to verify a change.
 
@@ -86,12 +88,14 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 
 ### 9. Definition of done
 
+Run `python scripts/check_all.py` first. It is the single local gate and mirrors what CI
+enforces (lint, both contract snapshots, generated UI/TypeScript contracts, the default
+test suite). Do not rediscover the individual commands from `.github/workflows/quality.yml`
+— if a gate exists in CI and not in `scripts/check_all.py`, the script is incomplete.
+
 A task is complete only when all of the following hold:
 
-- [ ] `python -m ruff check src tests scripts` is clean.
-- [ ] `python -m pytest` is clean, still offline, still fast.
-- [ ] Contracts regenerated; `git diff --exit-code -- contracts` is clean.
-- [ ] Generated UI and TypeScript contracts verified with `scripts/check_generated.py`.
+- [ ] `python scripts/check_all.py` is green.
 - [ ] `docs/integrations.md` updated if any external system was exercised.
 - [ ] No private runtime data added inside the checkout.
 - [ ] Product Skills reinstalled via `scripts/install_agent_skills.py` **only when

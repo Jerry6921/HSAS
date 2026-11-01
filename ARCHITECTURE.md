@@ -10,6 +10,7 @@ HIQS 的产品主体是 `skills/` 中的 AI Skill Set。Skills 负责意图解�
 skills/                          产品 Skills 的唯一源，独立打包分发
 ├── hiqs-course-information/      事实审阅、证据问答与受控更新
 ├── hiqs-course-notes/            完整阅读、教学写作与分批交付
+├── hiqs-course-planning/         选课组合、时间表、授权内自动 enrolment
 └── hiqs-notion-workspace/        展示、发布、视图与交付核验
 src/hsas/                        Python 复用服务，保留现有包名和运行数据兼容
 contracts/                       服务合同快照

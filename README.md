@@ -1,27 +1,111 @@
-# HIQS — HKU Information Query System
+# HIQS — AI Skill Set for HKU
 
-> 将分散在 Moodle、Student Center、SIS、Class Planner、课程公告、syllabus 与课件中的信息，整理成一个清晰、可查询的课程中心。
+HIQS 是以 AI Skills 为主体的 HKU 学习工作流：Agent 阅读资料、理解问题、组织事实并
+撰写笔记，Notion 提供课程、课程档案、资料与笔记的可视化工作台；Apple 管理待办与日历。Python 是 Skills 共用的
+本地服务库，负责登录采集、OCR、检索、校验、保存与投影同步。
 
-课程时间、DDL、评分方式、活动要求和学习资料往往散落在不同页面与文件中。HIQS 帮助 HKU
-学生集中同步这些资料，再由 Agent 整理为可以核对来源的课程信息、活动列表和可视化日历。
+## 产品 Skills
 
-## 核心功能
+| Skill | 负责的工作 |
+| --- | --- |
+| [hiqs-course-information](skills/hiqs-course-information/SKILL.md) | 审阅 Moodle／SIS／Class Planner 来源，回答带引用的问题，生成并提交校验过的课程事实。 |
+| [hiqs-course-notes](skills/hiqs-course-notes/SKILL.md) | 完整阅读讲义与可用试题，一次完成分单元学习笔记、题目对应表和快速复习，并保存恢复点。 |
+| [hiqs-course-planning](skills/hiqs-course-planning/SKILL.md) | 根据 syllabus／SIS 规划完整班别组合；在授权候选池内 enrol、对账和失败重排，固定已成功课程。 |
+| [hiqs-notion-workspace](skills/hiqs-notion-workspace/SKILL.md) | 在对应 Notion 工作台展示课程档案、原文件与笔记，提供原生课程与笔记导航并核验交付结果。 |
 
-- **集中课程资料**：统一收集 Moodle、Student Center、SIS Course Information、Class
-  Planner、课程公告、syllabus 与课件，不再逐个页面查找。
-- **Agent 整合信息与资源**：核对 Assignment、Quiz、Project、Exam 等活动的日期、占分、
-  提交方式、要求和相关课件，并整理成结构化信息。
-- **跨课程可视化日历**：以月、周、日视图查看 Lecture、Tutorial、Lab、Assessment、DDL、
-  地点与课程变更，也可加入个人事项。
-- **AI 课件整理与问答**：按周次、主题、Assessment 或学习用途整理资料；从 UI 一键复制
-  定位提示词，让 Agent 查询资料、核对来源并定位页码或 slide。
-- **来源核对**：重要日期、占分和要求保留证据来源；尚未确定或互相冲突的信息会明确标示，
-  不会被当成已确认事实。
-- **需要确认**：首页集中列出未来两周最值得核实的日期、提交信息、真实来源冲突、同步失败
-  与待审变化；同一份结构化摘要也可由 Agent 读取。
-- **日历导出**：将课程安排、Assessment 和 DDL 导入 Apple Calendar 等日历应用。
+例如：
 
-### HIQS 如何处理和验证课程信息
+> 整理本学期新增的课程资料，核对 Assignment 的日期、要求和占分，并同步到 Notion。
+
+> 根据 ENGG1000 的 lecture 和可用 past papers／quizzes，生成一整套分段学习与复习笔记，保存到对应 Notion 课程下。
+
+Skills 决定阅读范围、证据解释、教学组织和写作。Python 提供可复用的确定性能力，
+不替 Agent 作事实判断或生成教学内容。后台只执行已配置的采集、上传和视图同步；
+新增课程事实仍经过 Agent 审阅与 validate／apply／checkpoint。
+
+## 项目结构
+
+```text
+HIQS/
+├── skills/                     产品主体：可分发的 AI Skills 与随附资源
+│   ├── hiqs-course-information/
+│   ├── hiqs-course-notes/
+│   └── hiqs-notion-workspace/
+├── src/hsas/                   可复用 Python 服务及其适配器
+│   ├── core/                   HIQSPort、服务装配与用例服务
+│   ├── domain/                 数据合同与确定性规则
+│   ├── application/            采集、检索、校验、笔记检查点及投影用例
+│   ├── infrastructure/         HKU 来源、文件、存储与 Notion 适配器
+│   ├── mcp/                    Skills 调用服务的正式接口
+│   ├── cli/                    人工设置、恢复诊断与确定性 worker
+│   ├── web/                    兼容本地 HTTP／静态客户端
+│   └── codegen/                合同生成工具
+├── contracts/                  服务的可检查数据合同
+├── docs/                       架构、Notion 接入与实现边界
+├── tests/                      复用服务与入口的行为验证
+├── scripts/                    Skill 打包、合同生成与兼容应用构建
+├── .agents/skills/             产品 Skill 链接与仓库工程 Skill
+├── ui/                         兼容 React 客户端源码
+└── packaging/                  兼容 macOS 应用打包
+```
+
+`skills/` 是产品 Skill 的唯一维护位置；`.agents/skills/` 使用相对链接指向同一份内容。
+旧 `src/AI_Skills` 也是兼容链接。工程开发 Skill 留在 `.agents/skills/hiqs-product-development`，
+不进入面向学生的 Skill 分发包。Python 保留 `hsas` 包名和命令，继续访问既有私有资料。
+详细职责和调用关系见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+## 开始使用
+
+1. 在本地安装 Python 服务依赖，并将 Agent 的 MCP stdio 命令设为项目虚拟环境中的
+   `hiqs-mcp`。仓库内从 `AGENTS.md` 定位 Skills；分发安装见下节。
+2. 按 [Notion 整合说明](docs/notion-integration.md) 配置并验证工作台连接。
+   Notion 是主要展示端；独立连接用于确定性同步，Agent 的 Notion 连接器用于页面编辑及笔记正文发布。
+3. 让 Agent 调用相应 Skill，盘点资料、采集来源或处理已有资料。机构登录与 MFA
+   由用户在官方页面完成。采集完成与 AI 整理完成分别显示。
+4. 在 Notion 查看课程、档案、资料与笔记；在 Apple 查看已确认且未过期的待办与日历。笔记先保存本地检查点，再发布到已核对的
+   课程父页并读回；连接未配置时仍保留本地成果并说明未完成的外部交付。
+
+本地开发环境：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -c requirements.lock -e '.[dev]'
+.venv/bin/hiqs-mcp
+```
+
+MCP 客户端通常负责启动最后一条 stdio 命令。机构浏览器采集还需在同一环境安装
+Playwright Chromium：`.venv/bin/python -m playwright install chromium`。
+连接状态可用 `hsas notion status`、`hsas notion check` 诊断。
+配置连接并不等于已同步；实际同步、文件上传和笔记发布结果须分别核验。
+
+## Skill 分发与服务依赖
+
+本机开发完成并通过检查后，Agent 会按仓库规则自动执行安装／更新：
+
+```bash
+.venv/bin/python scripts/install_agent_skills.py
+```
+
+默认安装到 `$CODEX_HOME/skills`（未设置则为 `~/.codex/skills`），校验安装内容并保留被
+替换版本的备份；下一轮对话可用。安装 Skills 与连接 HIQS MCP 分开处理。
+
+```bash
+.venv/bin/python scripts/package_agent_skills.py --output work/hiqs-agent-skills.zip
+```
+
+ZIP 从 `skills/` 打包产品 Skills 的正文、references、scripts、assets 和元数据，
+不打包工程 Skill、私有 resources 或认证配置。将解压后的 Skill 目录放入所用 Agent
+的技能目录，并连接本地 HIQS MCP。Skill 包与 Python 服务分别交付；安装 Skill
+不会自动安装服务、建立 Notion 连接或启动常驻 Agent。
+
+课程笔记完整遵循 `english-course-notes` 的英文教材式教学、例题、解题阶段、单位、复习及
+Notion 发布要求；完整规范随 Skill 分发。默认成果为对应 Notion 课程下经读回验证的页面，
+整套请求仍连续完成所有单元，无需逐段回复“继续”。
+可恢复检查点保存在私有 resources 的 `course-notes/<run_id>/`，每个 revision 导出
+完整 Markdown bundle。`sync_notion` 同步事实和资料，笔记正文由 Agent 定向发布。
+当前实现与验收边界见 [课程笔记实现说明](docs/course-notes-implementation.md)。
+
+## 证据与事实验证
 
 HIQS 将需要登录访问的课程信息、文件和日程保存为本地证据，并为 Agent 提供带来源的查询
 结果。已经核对的信息与尚未确认的信息分别保存。
@@ -41,7 +125,8 @@ Agent 提取学业事实
         ↓
 校验、冲突处理、人工确认
         ↓
-information.json / 日历 / 需要确认
+information.json → Notion 课程 / 档案 / 资料视图
+information.json → Apple Calendar / Reminders（已确认、未过期）
 ```
 
 #### 采集与验证机制
@@ -108,120 +193,20 @@ information.json / 日历 / 需要确认
 - HIQS 用于整理和核对课程信息；涉及提交截止时间、考试安排和课程政策时，用户仍可打开所列
   官方来源进行最终确认。
 
-## 界面展示
+## 兼容入口
 
-### 学习手记与今日安排
-
-![HIQS 学习手记：首页今日安排、近期考核与资料提醒](docs/images/ui/dashboard-today.png)
-
-### 资料闭环
-
-![HIQS 资料闭环：来源采集、Agent 整理、校验写入与 Checkpoint](docs/images/ui/dashboard-information-closure.png)
-
-### 本轮资料变化
-
-![HIQS 本轮待写入内容：按课程查看新增、变更与移除项目](docs/images/ui/dashboard-latest-changes.png)
-
-### 跨课程周日历
-
-![HIQS 周日历：集中查看课程、Tutorial 与 Assignment](docs/images/ui/calendar-week-view.png)
-
-### 课程概览与成绩构成
-
-![HIQS 课程概览：课程信息、来源与 Assessment 权重](docs/images/ui/course-overview-assessments.png)
-
-### 课程活动与确切要求
-
-![HIQS 课程活动：按项目、报告与汇报查看日期、占分和状态](docs/images/ui/course-activity-groups.png)
-
-## 界面功能
-
-### 首页
-
-- 查看今天的课程、下一项安排、近期考核与资料更新。
-- 查看 Agent 最近一次整理后新增的活动与资料，以及哪些活动的信息发生变化或由未知、暂定状态得到确认；字段级差异仍保留用于核对来源。
-- 在“需要确认”中优先处理最多三项近期问题，并可查看事项、证据或精确重试来源。
-- 一键同步课程来源，并查看进度、失败项目和待整理资料。
-- 搜索本地课程信息和课件。
-- 复制 Agent 整理指令，处理本轮新增或变化的内容。
-- 添加、移除和管理课程。
-
-### 日历
-
-- 在月、周、日视图中集中查看所有课程和活动。
-- 按课程或关键字筛选，并查看日期、地点、占分、提交方式和要求。
-- 在事项详情中查看证据确认状态、处理方式、来源、警告与当前限制。
-- 显示假期、Reading Week、补课、取消、改时与教室变更。
-- 保留日期尚未确认的活动，方便之后继续核对。
-- 添加个人事项，或导出为 ICS 日历文件。
-
-### 课程概览
-
-- 查看课程简介、学习目标、教师、教学日期和成绩构成。
-- 在课件与活动之间切换，快速找到 Assignment、Quiz、Project、Exam 及相关 DDL。
-- 从活动卡直接复制 Agent 提示词，查询要求、来源和相关课件。
-
-### 课件与来源
-
-- 按课程自身的周次、主题或学习用途浏览完整课件。
-- 搜索 PDF、DOCX、PPTX 文本以及 Moodle 页面正文；Text and media area 的表格会保留
-  行列、空单元格和合并关系供 Agent 阅读。
-- 对 Moodle 活动页中的同源嵌套链接做有界深度递归采集；中间页面正文、来源和深度会进入
-  活动证据，链接指向的文件会进入该活动的文件清单和文本索引。
-- 预览 PDF、图片、DOCX 和 PPTX 的内容，并打开原文件或 Moodle 来源。
-- 从课件卡复制定位提示词，让 Agent 查询资料、核对来源并定位页码或 slide。
-- 对照当前注册课程、Moodle 和其他官方资料，找出缺项与待确认信息。
-
-## 开始使用
-
-如果尚未安装 HIQS，可将下面的指令交给能够操作本地终端的 Agent：
-
-```text
-请从 https://github.com/Jerry6921/HSAS 安装或更新 HIQS，并按照项目内的说明完成检查与启动。
-请保留现有课程资料和未提交修改。HKU Portal、SSO 与 MFA 登录由我在官方页面亲自
-完成；不要读取或输出我的密码、验证码、Cookie 或访问令牌。完成后告诉我如何打开 HIQS。
-```
-
-首次使用：
-
-1. 打开 HIQS，在首页选择 **开始同步**。
-2. 按提示完成一次 HKU Portal 登录；HIQS 随后通过共享会话连接 SIS，并直接访问 Moodle
-   的 HKU Portal CAS 登录入口。
-3. 同步完成后选择 **复制 Agent 整理指令**。
-4. 将指令交给 Agent，整理新增或变化的课程资料。
-5. 回到 HIQS，在首页、日历和课程概览中查看结果。
-
-## 使用 Agent
-
-Agent 通过 HIQS MCP 接口读取证据、校验更新、写入正式数据并推进来源 checkpoint。
-这些操作共用同一个 `HIQSPort`，写入结果会同时生成最近更新摘要。`hsas` CLI 保留给人工
-诊断、恢复和未连接 MCP 的环境，并作为同一 Port 的薄适配器，不维护另一套业务规则。
-
-- **查询课程活动**：询问 Assignment、Quiz、Project 或 Exam 的日期、占分、范围、提交方式
-  与要求。
-- **阅读课件**：总结指定资料、解释概念、整理公式，并定位相关页码或 slide。
-- **准备复习**：按课程、主题或 Assessment 找出相关讲义、练习与阅读材料。
-- **核对来源**：检查答案依据，并识别仍待确认或互相冲突的信息。
-- **补充个人信息**：加入 Tutorial group、临时教室或个人提醒；预览内容后再确认保存。
-
-## 支持的课程资料
-
-- PDF，包括扫描版课件；
-- DOCX 文档；
-- PPTX 简报及 speaker notes；
-- Google Docs、Slides 与 Sheets；
-- 图片、音视频、代码、Notebook、压缩包及其他课程附件。
-
-无法直接读取文字的文件仍会保留原件与来源，方便之后查看或进一步处理。
+现有 React Dashboard、`hsas ui` 和 macOS 应用保留为兼容／恢复入口。
+配置 Notion 后，UI 入口打开对应工作台；连接未配置时仍可使用本地页面。
+功能和历史截图见 [本地兼容界面](docs/compatibility-ui.md)。新产品工作流以 Skills
+和 Notion 为起点，兼容客户端继续复用相同服务与课程事实。
 
 ## 隐私与信息可信度
 
-- 课程资料与个人信息保存在用户自己的设备上。
-- 密码、MFA、Cookie 和访问令牌不会进入课程信息库。
-- 日期、地点、占分、要求与政策尽量附带来源，方便随时回查。
-- 尚无可靠证据的信息会标为待确认；来源冲突会保留并明确提示。
-- 同步或整理失败时保留上一份有效资料，避免破坏现有课程信息。
-- 个人补充信息和删除操作需要用户确认。
+- 本地课程原文件、证据和检查点保存在私有 resources；授权的 Notion 同步会将所选投影及原文件上传到对应工作区。
+- 密码、MFA、Cookie 和访问令牌留在用户管理的认证范围，不进入课程信息库和 Skill 分发包。
+- 日期、地点、占分、要求与政策保留可核对来源；未知或冲突信息明确显示。
+- 同步或整理失败保留上一份有效资料；个人补充信息通过预览和确认进入正式事实。
+- Notion 的用户正文、笔记与草稿由学生管理；Apple 提醒事项中的完成状态独立保留。
 
 ## License
 

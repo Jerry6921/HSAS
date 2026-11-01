@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from pydantic import ValidationError
 
 from hsas.application.ports.repositories import InformationRepository
+from hsas.application.information_audit import audit_information, blocking_update_findings
 from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.domain.information import (
     CourseRecord,
@@ -74,6 +75,21 @@ def apply_information_update(
     if resources_dir is not None:
         validate_material_coverage(resources_dir, current, update)
 
+    result = merge_information_update(current, update)
+    audit = audit_information(result.store)
+    blockers = blocking_update_findings(audit, {item.item_id for item in update.items})
+    if blockers:
+        raise InformationServiceError("Resolve inconsistent incoming dates before apply: " +
+            ", ".join(f"{finding['item_id']}:{finding['code']}" for finding in blockers))
+    repository.save(path, result.store)
+    return result
+
+
+def merge_information_update(
+    current: InformationStore, update: InformationUpdate,
+) -> InformationApplyResult:
+    """Build and validate the exact candidate used by preview and persistence."""
+
     courses, created_courses, updated_courses = _upsert(
         current.courses,
         update.courses,
@@ -96,7 +112,6 @@ def apply_information_update(
         raise InformationServiceError(
             f"Merged information database is invalid: {exc}"
         ) from exc
-    repository.save(path, store)
     return InformationApplyResult(
         store=store,
         created_courses=created_courses,

@@ -22,6 +22,95 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
     )
 
     @server.tool()
+    def get_apple_sync_status() -> dict[str, Any]:
+        """Return Apple Calendar/Reminders configuration, receipt and login worker status."""
+        return port.apple_status()
+
+    @server.tool()
+    def get_apple_sync_projection() -> dict[str, Any]:
+        """Preview source-backed events and actionable reminders without changing Apple data."""
+        return port.apple_projection()
+
+    @server.tool()
+    def configure_apple_sync(account_mode: str = "icloud", confirmed: bool = False) -> dict[str, Any]:
+        """Choose the authorized Apple account and request native macOS permissions."""
+        return port.apple_configure({"account_mode": account_mode, "confirmed": confirmed})
+
+    @server.tool()
+    def check_apple_sync() -> dict[str, Any]:
+        """Read native permission/account inventory; never substitute a different account."""
+        return port.apple_check()
+
+    @server.tool()
+    def sync_apple() -> dict[str, Any]:
+        """Sync authorized HIQS facts to dedicated Apple containers and verify readback.
+
+        Requires user authorization for Apple/iCloud delivery. Preserves personal
+        completion/alarms/notes; this never writes canonical facts or Notion status.
+        """
+        return port.apple_sync()
+
+    @server.tool()
+    def configure_apple_sync_worker(enabled: bool = True, interval_seconds: int = 300,
+                                    confirmed: bool = False) -> dict[str, Any]:
+        """Enable/disable automatic Apple delivery after verified setup; retain Apple data."""
+        return port.apple_worker({"enabled": enabled, "interval_seconds": interval_seconds, "confirmed": confirmed})
+
+    @server.tool()
+    def get_notion_controls() -> dict[str, Any]:
+        """Return real source-sync progress and the existing AI review prompt."""
+        return port.notion_controls()
+
+    @server.tool()
+    def get_notion_projection() -> dict[str, Any]:
+        """Return stable-ID courses, tasks, calendar occurrences and original files.
+
+        This reads validated information.json. Notion personal status, notes and
+        user-created page content must never be replaced during an upsert.
+        """
+        return port.notion_projection()
+
+    @server.tool()
+    def get_notion_status() -> dict[str, Any]:
+        """Return local connection and last-sync results without credentials."""
+        return port.notion_status()
+
+    @server.tool()
+    def check_notion_connection() -> dict[str, Any]:
+        """Verify the independently configured connection and database access."""
+        return port.notion_check()
+
+    @server.tool()
+    def sync_notion() -> dict[str, Any]:
+        """Upsert course facts and upload original materials to configured Notion.
+
+        External write: use only when the user has authorized HIQS-to-Notion sync.
+        Stable IDs prevent duplicates; personal status and notes are preserved.
+        Partial failures are resumable. This never applies canonical facts.
+        """
+        return port.notion_sync()
+
+    @server.tool()
+    def export_notion(
+        destination: str | None = None,
+        include_files: bool = True,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Export CSV/Markdown/ICS and an optional ZIP of original materials.
+
+        The package contains private course content. Omitting ``destination``
+        writes under the private resources ``exports/`` directory; Agent calls
+        cannot write outside that directory. Requires ``confirmed=True``.
+        """
+        return port.notion_export(
+            {
+                "destination": destination,
+                "include_files": include_files,
+                "confirmed": confirmed,
+            }
+        )
+
+    @server.tool()
     def get_information() -> dict[str, Any]:
         """Return validated courses, information items, provenance and review status."""
         return port.information_snapshot()
@@ -43,7 +132,12 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
 
     @server.tool()
     def validate_information_update(update: dict[str, Any]) -> dict[str, Any]:
-        """Validate a complete course-information update without changing data."""
+        """Validate the merged candidate without writing; inspect quality_audit.
+
+        Audit findings identify unknown action dates, weak provenance, duplicate
+        candidates and inconsistent dates. Schema validity is not source-reading
+        completeness or semantic accuracy.
+        """
         return port.validate_information_update({"update": update})
 
     @server.tool()
@@ -103,8 +197,133 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         )
 
     @server.tool()
+    def get_course_planning_schema() -> dict[str, Any]:
+        """Return request, official observation and scoped authorization JSON schemas."""
+        return port.course_planning_schema()
+
+    @server.tool()
+    def create_course_plan(request: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
+        """Persist a reviewed candidate pool, goals and constraints. No SIS submission.
+
+        Use hiqs-course-planning for syllabus/SIS evidence and browser execution.
+        All required lecture/tutorial/lab components belong to one option.
+        """
+        return port.create_course_plan({"request": request, "confirmed": confirmed})
+
+    @server.tool()
+    def get_course_plan(run_id: str | None = None, observation_sha256: str | None = None) -> dict[str, Any]:
+        """List runs or read exact plans, attempts, locks and actual official readback.
+
+        Pass a plan/attempt observation_sha256 to read its immutable input snapshot.
+        Check executor/background_running; stored waiting is not a running worker.
+        """
+        return port.course_plan(run_id, observation_sha256)
+
+    @server.tool()
+    def authorize_course_plan(run_id: str, expected_revision: int, request_sha256: str,
+                             authorization: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
+        """Bind human authorization to an exact account, term, candidate pool and limits.
+
+        Development instructions alone never authorize a real SIS enrolment.
+        """
+        return port.authorize_course_plan({"run_id": run_id, "expected_revision": expected_revision,
+            "request_sha256": request_sha256, "authorization": authorization, "confirmed": confirmed})
+
+    @server.tool()
+    def reconcile_course_plan(run_id: str, expected_revision: int,
+                              observation: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
+        """Save complete official account/component readback and replan remaining goals.
+
+        Agent supplies observed source, locator, hash, capture time and raw school
+        status. Clicks/HTTP success are insufficient. Include explicit absent +
+        classified attempt outcome to resolve an unknown submission as failed.
+        This tool validates evidence structure; it does not independently fetch SIS.
+        """
+        return port.reconcile_course_plan({"run_id": run_id, "expected_revision": expected_revision,
+            "observation": observation, "confirmed": confirmed})
+
+    @server.tool()
+    def next_course_plan_action(run_id: str, expected_revision: int,
+                                confirmed: bool = False) -> dict[str, Any]:
+        """Reserve at most one foreground Agent submission in the authorized scope.
+
+        submit is a one-use browser instruction, not an SIS request. Recheck the
+        official preflight immediately and respect valid_until. On interruption,
+        fetch/reconcile the unknown attempt instead of replaying it. No drop/swap.
+        """
+        return port.next_course_plan_action({"run_id": run_id, "expected_revision": expected_revision,
+                                            "confirmed": confirmed})
+
+    @server.tool()
+    def cancel_course_plan(run_id: str, expected_revision: int,
+                           confirmed: bool = False) -> dict[str, Any]:
+        """Stop future actions; preserve enrolled courses and unresolved submissions."""
+        return port.cancel_course_plan({"run_id": run_id, "expected_revision": expected_revision,
+                                       "confirmed": confirmed})
+
+    @server.tool()
+    def create_course_notes(
+        course_id: str, scope: str, language: str = "English", confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Start a local notes run from an exact archived course ID.
+
+        Snapshots the material inventory and hashes, without changing course facts
+        or starting background generation. Use hiqs-course-notes to author the
+        entire set in internal batches. Reuse get_course_notes runs on retry.
+        """
+        return port.create_course_notes({
+            "course_id": course_id, "scope": scope, "language": language, "confirmed": confirmed,
+        })
+
+    @server.tool()
+    def get_course_notes_schema() -> dict[str, Any]:
+        """Return the exact checkpoint schema for save_course_notes.update."""
+        return port.course_notes_schema()
+
+    @server.tool()
+    def get_course_notes(run_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
+        """List resumable runs or read one checkpoint/artifact and verify local delivery."""
+        return port.course_notes(run_id, artifact_id)
+
+    @server.tool()
+    def read_course_note_source(
+        run_id: str, source_id: str, offset: int = 0, limit: int = 12000,
+    ) -> dict[str, Any]:
+        """Read bounded source text with next_offset/eof; continue until eof.
+
+        Source IDs belong to one run. Original paths and extraction warnings
+        remain in its inventory for visual review. Text delivery does not prove
+        reading or visual completeness; record the Agent review in a checkpoint.
+        """
+        return port.read_course_note_source({
+            "run_id": run_id, "source_id": source_id, "offset": offset, "limit": limit,
+        })
+
+    @server.tool()
+    def save_course_notes(
+        run_id: str, expected_revision: int, update: dict[str, Any], confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Atomically checkpoint notes and read back Markdown exports.
+
+        Call get_course_notes_schema for the exact update schema.
+        Updates upsert source_reviews/artifacts; units/questions replace their
+        respective plans when supplied. Complete requires all planned units,
+        source reviews, overview, question-map, review and coverage artifacts.
+        Partial/blocked needs status_note. Stale revisions fail without writes.
+        External publication receipts are Agent-reported, separate from content.
+        """
+        return port.save_course_notes({
+            "run_id": run_id, "expected_revision": expected_revision,
+            "update": update, "confirmed": confirmed,
+        })
+
+    @server.tool()
     def list_materials(course_ids: list[str] | None = None) -> dict[str, Any]:
-        """List downloaded files, hashes and extracted-text sidecars."""
+        """Inventory files, all activities and explicit collection/reading gaps.
+
+        Inspect coverage.gaps, OCR and unit counts before claiming full review.
+        inventory_ready is not a declaration that the Agent read the sources.
+        """
         return port.materials_manifest(course_ids)
 
     @server.tool()
@@ -174,22 +393,31 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         return port.course_sync_status()
 
     @server.tool()
-    def start_course_sync(course: str | None = None) -> dict[str, Any]:
-        """Start a background unified sync for all courses or one Moodle course."""
-        payload: dict[str, Any] = {}
+    def start_course_sync(
+        course: str | None = None,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Start a background unified sync for all courses or one course.
+
+        ``course`` accepts an HKU course code such as ``BMED2206``; omit it to
+        synchronize every current-semester course. Background collection opens a
+        browser session and rewrites course snapshots, so the call requires
+        ``confirmed=True``.
+        """
+        payload: dict[str, Any] = {"confirmed": confirmed}
         if course is not None:
             payload["course"] = course
         return port.start_course_sync(payload)
 
     @server.tool()
-    def retry_failed_course_sync() -> dict[str, Any]:
+    def retry_failed_course_sync(confirmed: bool = False) -> dict[str, Any]:
         """Retry only the courses that failed during the latest sync."""
-        return port.retry_failed_course_sync({})
+        return port.retry_failed_course_sync({"confirmed": confirmed})
 
     @server.tool()
-    def cancel_course_sync() -> dict[str, Any]:
+    def cancel_course_sync(confirmed: bool = False) -> dict[str, Any]:
         """Request cancellation of the active background sync."""
-        return port.cancel_course_sync({})
+        return port.cancel_course_sync({"confirmed": confirmed})
 
     @server.tool()
     def hydrate_course_materials(course_id: str) -> dict[str, Any]:
@@ -268,9 +496,9 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         return port.login_sis_course_info({"confirmed": confirmed})
 
     @server.tool()
-    def sync_sis_course_info(confirmed: bool = False) -> dict[str, Any]:
-        """Synchronize cleaned official HKU SIS course pages."""
-        return port.synchronize_sis_course_info({"confirmed": confirmed})
+    def sync_sis_course_info(confirmed: bool = False, course_codes: list[str] | None = None) -> dict[str, Any]:
+        """Read official catalogue pages, including explicit unselected course_codes."""
+        return port.synchronize_sis_course_info({"confirmed": confirmed, "course_codes": course_codes})
 
     @server.tool()
     def add_course(course: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
@@ -280,11 +508,21 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
     @server.tool()
     def delete_courses(
         course_ids: list[str],
+        confirmation: list[str],
         confirmed: bool = False,
     ) -> dict[str, Any]:
-        """Delete selected courses and related local data after confirmation."""
+        """Delete selected courses and related local data after confirmation.
+
+        ``confirmation`` must repeat ``course_ids`` exactly: the destructive
+        service gate checks both ``confirmed`` and the repeated target list, so
+        an accidental or hallucinated deletion cannot pass on one flag alone.
+        """
         return port.delete_courses(
-            {"course_ids": course_ids, "confirmed": confirmed}
+            {
+                "course_ids": course_ids,
+                "confirmation": confirmation,
+                "confirmed": confirmed,
+            }
         )
 
     return server

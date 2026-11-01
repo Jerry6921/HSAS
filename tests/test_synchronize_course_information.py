@@ -86,7 +86,12 @@ def test_sis_session_cookies_survive_browser_process_restart(tmp_path: Path) -> 
     class Context:
         restored = []
 
+        def __init__(self, *, saved=False):
+            self.saved = saved
+
         async def cookies(self, _urls):
+            if not self.saved:
+                return []
             return [
                 {"name": "PS_TOKEN", "value": "private", "domain": "sis-main.hku.hk", "path": "/"},
                 {"name": "unrelated", "value": "drop", "domain": "example.invalid", "path": "/"},
@@ -96,13 +101,39 @@ def test_sis_session_cookies_survive_browser_process_restart(tmp_path: Path) -> 
             self.restored = cookies
 
     state_path = tmp_path / "shared-profile" / "sis-session.json"
-    first = Context()
+    first = Context(saved=True)
     asyncio.run(save_sis_session(first, state_path))
     second = Context()
     asyncio.run(restore_sis_session(second, state_path))
 
     assert [cookie["name"] for cookie in second.restored] == ["PS_TOKEN"]
     assert state_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_legacy_sis_cookies_do_not_replace_fresh_shared_login(tmp_path: Path) -> None:
+    import json
+
+    current = {
+        "name": "PS_TOKEN", "value": "fresh", "domain": "sis-main.hku.hk", "path": "/",
+    }
+    legacy = {**current, "value": "stale"}
+    missing = {**legacy, "name": "PS_SESSION"}
+    state_path = tmp_path / "sis-session.json"
+    state_path.write_text(json.dumps({"cookies": [legacy, missing]}))
+
+    class Context:
+        restored = []
+
+        async def cookies(self, _urls):
+            return [current]
+
+        async def add_cookies(self, cookies):
+            self.restored.extend(cookies)
+
+    context = Context()
+    asyncio.run(restore_sis_session(context, state_path))
+
+    assert context.restored == [missing]
 
 
 def test_sis_login_detects_new_people_soft_token_before_page_redirect() -> None:

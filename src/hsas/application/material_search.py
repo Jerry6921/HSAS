@@ -124,15 +124,45 @@ def list_materials(
     selected = set(course_ids or [])
     documents: list[dict[str, object]] = []
     page_content: list[dict[str, object]] = []
+    activities: list[dict[str, object]] = []
+    gaps: list[dict[str, object]] = []
+    found_courses: set[str] = set()
+    resources = resources_dir.resolve()
+
+    def available(relative: str | None) -> bool:
+        if not relative:
+            return False
+        path = (resources / relative).resolve()
+        return path.is_relative_to(resources) and path.is_file()
+
     for archive_path in sorted((resources_dir / "courses").glob("*/course.json")):
         index = ArchiveIndex.from_json(archive_path)
         course_id = index.archive.course.course_id
         if selected and course_id not in selected:
             continue
+        found_courses.add(course_id)
         course_relative_path = archive_path.relative_to(resources_dir).as_posix()
         for activity in iter_activities(index.archive):
+            activity_key = {"course_id": course_id, "activity_id": activity.module_id}
+            activities.append({**activity_key, "activity_name": activity.name,
+                "evidence_id": f"activity:{activity.module_id}",
+                "relative_path": course_relative_path,
+                "download_status": activity.download_status,
+                "download_error": activity.download_error,
+                "collection_report": activity.collection_report.model_dump(mode="json"),
+                "linked_pages": [page.model_dump(mode="json") for page in activity.linked_pages]})
+            if activity.download_status in {"failed", "pending", "external", "skipped"}:
+                gaps.append({**activity_key, "code": "ACTIVITY_" + activity.download_status.upper()})
+            if activity.collection_report.truncated:
+                gaps.append({**activity_key, "code": "COLLECTION_TRUNCATED"})
+            if not activity.access_visible or not activity.user_visible:
+                gaps.append({**activity_key, "code": "ACTIVITY_RESTRICTED"})
+            for page in activity.linked_pages:
+                if page.status != "complete" or not page.content_text.strip():
+                    gaps.append({**activity_key, "code": "LINKED_PAGE_INCOMPLETE",
+                                 "evidence_id": linked_page_evidence_id(activity.module_id, page)})
             content_text = activity.content_text
-            if isinstance(content_text, str) and content_text.strip():
+            if (isinstance(content_text, str) and content_text.strip()) or activity.content_tables:
                 page_content.append(
                     {
                         "course_id": course_id,
@@ -165,6 +195,16 @@ def list_materials(
                 )
         for activity, stored_file in iter_files(index.archive):
             analysis = stored_file.analysis
+            text_relative = analysis.extracted_text_path if analysis else None
+            file_key = {"course_id": course_id, "relative_path": stored_file.relative_path}
+            if not available(stored_file.relative_path):
+                gaps.append({**file_key, "code": "ORIGINAL_UNAVAILABLE"})
+            if not available(text_relative):
+                gaps.append({**file_key, "code": "TEXT_UNAVAILABLE_REQUIRES_FORMAT_READER"})
+            if analysis and (analysis.ocr_required or analysis.status != "complete"):
+                gaps.append({**file_key, "code": "EXTRACTION_INCOMPLETE"})
+            if analysis and analysis.pages_with_text < analysis.page_count:
+                gaps.append({**file_key, "code": "VISUAL_UNITS_REQUIRE_REVIEW"})
             documents.append(
                 {
                     "course_id": course_id,
@@ -187,14 +227,31 @@ def list_materials(
                     ),
                     "analysis_status": analysis.status if analysis else None,
                     "analysis_warnings": analysis.warnings if analysis else [],
+                    "evidence_id": f"file:{activity.module_id}:{stored_file.relative_path}",
+                    "original_available": available(stored_file.relative_path),
+                    "text_available": available(text_relative),
+                    "text_relative_path": text_relative,
+                    "text_sha256": analysis.extracted_text_sha256 if analysis else None,
+                    "ocr_required": analysis.ocr_required if analysis else None,
+                    "unit_count": analysis.page_count if analysis else None,
+                    "units_with_text": analysis.pages_with_text if analysis else None,
+                    "unit_label": analysis.unit_label if analysis else None,
                 }
             )
+    for course_id in sorted(selected - found_courses):
+        gaps.append({"course_id": course_id, "code": "COURSE_ARCHIVE_UNAVAILABLE"})
     return {
         "resources_dir": str(resources_dir.resolve()),
         "document_count": len(documents),
         "documents": documents,
         "page_content_count": len(page_content),
         "page_content": page_content,
+        "activity_count": len(activities),
+        "activities": activities,
+        "coverage": {"status": "gaps_detected" if gaps else "inventory_ready",
+                     "source_reading_verified": False,
+                     "course_ids": sorted(found_courses),
+                     "known_gap_count": len(gaps), "gaps": gaps},
     }
 
 

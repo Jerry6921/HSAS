@@ -73,8 +73,16 @@ async def restore_sis_session(context: BrowserContext, path: Path) -> None:
         if isinstance(cookie, dict)
         and str(cookie.get("domain", "")).lstrip(".").endswith("hku.hk")
     ]
-    if safe_cookies:
-        await context.add_cookies(safe_cookies)
+    # Shared browser state has already been restored. The legacy SIS snapshot
+    # may predate a fresh Portal login, so use it only for missing cookies.
+    current_cookies = await context.cookies([LOGIN_URL, SEARCH_URL])
+    cookie_key = lambda cookie: (
+        cookie.get("name"), cookie.get("domain"), cookie.get("path")
+    )
+    current_keys = {cookie_key(cookie) for cookie in current_cookies}
+    missing_cookies = [cookie for cookie in safe_cookies if cookie_key(cookie) not in current_keys]
+    if missing_cookies:
+        await context.add_cookies(missing_cookies)
 
 
 async def save_sis_session(context: BrowserContext, path: Path) -> None:
@@ -166,9 +174,13 @@ async def open_login_until_authenticated(
     cancel_requested: Callable[[], bool] | None = None,
 ) -> Page:
     """Stay on SIS sign-on until the user-managed login has completed."""
+    if cancel_requested is not None and cancel_requested():
+        raise InterruptedError("HKU SIS login was cancelled")
     page = context.pages[0] if context.pages else await context.new_page()
     previous_token = await _sis_token(context)
-    await page.goto(login_url, wait_until="domcontentloaded")
+    await page.goto(
+        login_url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000
+    )
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
     while loop.time() < deadline:

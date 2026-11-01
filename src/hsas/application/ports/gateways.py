@@ -142,6 +142,7 @@ class SisCourseInfoGateway(Protocol):
         *,
         timeout_seconds: int = 90,
         selected_courses: list[dict[str, str]] | None = None,
+        preserve_other_courses: bool = False,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> SisCourseInfoSyncResult: ...

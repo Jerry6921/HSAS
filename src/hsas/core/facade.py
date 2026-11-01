@@ -9,6 +9,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Callable
 
 from pydantic import ValidationError
+from hsas.application.course_notes import NotesCheckpoint
 
 from hsas.application.change_tracking import (
     ChangeQueueError,
@@ -43,6 +44,11 @@ from hsas.core.sync.controller import CourseSyncController
 from hsas.core.services.dashboard import DashboardProjectionService, pending_summary
 from hsas.core.services.attention import AttentionService
 from hsas.core.services.materials import MaterialQueryService
+from hsas.core.services.course_planning import CoursePlanningService
+from hsas.core.services.course_notes import CourseNotesService
+from hsas.core.services.notion import NotionDeliveryService
+from hsas.core.services.apple import AppleDeliveryService
+from hsas.core.services.notion_controls import NotionControlsService
 from hsas.core.sync.workflow import CourseSyncWorkflow
 from hsas.core.services.runtime import (
     ApplicationLifecycleService,
@@ -95,8 +101,14 @@ class HIQSCore:
     lifecycle_service: ApplicationLifecycleService = field(init=False, repr=False)
     evidence_operation_service: LocalEvidenceOperationService = field(init=False, repr=False)
     source_service: InstitutionalSourceService = field(init=False, repr=False)
+    notion_service: NotionDeliveryService = field(init=False, repr=False)
+    apple_service: AppleDeliveryService = field(init=False, repr=False)
+    notion_controls_service: NotionControlsService = field(init=False, repr=False)
+    course_notes_service: CourseNotesService = field(init=False, repr=False)
+    course_planning_service: CoursePlanningService = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        self.course_planning_service = CoursePlanningService(self.resources_dir, self.clock)
         self.record_service = CourseRecordService(self.resources_dir, self.mutation_lock)
         self.information_contract_service = InformationContractService(
             self.resources_dir, INFORMATION_REPOSITORY
@@ -107,6 +119,9 @@ class HIQSCore:
             self.mutation_lock,
         )
         self.material_query_service = MaterialQueryService(self.resources_dir)
+        self.course_notes_service = CourseNotesService(self.resources_dir, self.material_query_service)
+        self.notion_service = NotionDeliveryService(self.resources_dir, self.material_query_service)
+        self.apple_service = AppleDeliveryService(self.resources_dir, clock=self.clock)
         self.dashboard_projection_service = DashboardProjectionService(
             self.resources_dir,
             self.review_service,
@@ -150,6 +165,9 @@ class HIQSCore:
             self._pending_review_summary,
             collect_sis_enrollment_changes,
         )
+        self.notion_controls_service = NotionControlsService(
+            self.resources_dir, self.course_sync_status, self.information_snapshot,
+            self.start_course_sync, self.retry_failed_course_sync, self.cancel_course_sync)
         self.services = CoreServices(
             records=self.record_service,
             reviews=self.review_service,
@@ -163,6 +181,11 @@ class HIQSCore:
             lifecycle=self.lifecycle_service,
             evidence_operations=self.evidence_operation_service,
             sources=self.source_service,
+            notion=self.notion_service,
+            apple=self.apple_service,
+            notion_controls=self.notion_controls_service,
+            course_notes=self.course_notes_service,
+            course_planning=self.course_planning_service,
         )
 
     @property
@@ -193,9 +216,85 @@ class HIQSCore:
     def sync_job(self, value: dict[str, Any]) -> None:
         self.sync_controller.job = value
 
+    def course_planning_schema(self) -> dict[str, Any]:
+        return self.course_planning_service.schema()
+
+    def create_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_planning_service.create(payload)
+
+    def course_plan(self, run_id: str | None = None, observation_sha256: str | None = None) -> dict[str, Any]:
+        return self.course_planning_service.get(run_id, observation_sha256)
+
+    def authorize_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_planning_service.authorize(payload)
+
+    def reconcile_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_planning_service.reconcile(payload)
+
+    def next_course_plan_action(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_planning_service.next_action(payload)
+
+    def cancel_course_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_planning_service.cancel(payload)
+
     def information_snapshot(self) -> dict[str, Any]:
         """Return the validated AI-authored database used by the calendar UI."""
         return self.dashboard_projection_service.information_snapshot()
+
+    def notion_projection(self) -> dict[str, Any]:
+        return self.notion_service.projection()
+
+    def apple_status(self) -> dict[str, Any]:
+        return self.apple_service.status()
+
+    def apple_configure(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.apple_service.configure(payload)
+
+    def apple_projection(self) -> dict[str, Any]:
+        return self.apple_service.projection()
+
+    def apple_check(self) -> dict[str, Any]:
+        return self.apple_service.check()
+
+    def apple_sync(self) -> dict[str, Any]:
+        return self.apple_service.synchronize()
+
+    def apple_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.apple_service.worker(payload)
+
+    def notion_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.notion_service.export(payload)
+
+    def notion_status(self) -> dict[str, Any]:
+        return self.notion_service.status()
+
+    def notion_configure(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.notion_service.configure(payload)
+
+    def notion_check(self) -> dict[str, Any]:
+        return self.notion_service.check()
+
+    def notion_sync(self) -> dict[str, Any]:
+        return self.notion_service.synchronize()
+
+    def notion_worker(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.notion_service.worker(payload)
+
+    def notion_controls(self) -> dict[str, Any]:
+        return self.notion_controls_service.snapshot()
+
+    def notion_controls_tick(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        allow_start = (payload or {}).get("allow_start", True)
+        if not isinstance(allow_start, bool):
+            raise HIQSPortError("allow_start must be a boolean")
+        try:
+            return self.notion_controls_service.tick(allow_start=allow_start)
+        except HIQSPortError:
+            raise
+        except (RuntimeError, ValueError, OSError) as exc:
+            from hsas.infrastructure.notion.client import NotionAPIError
+            raise HIQSPortError(str(exc) if isinstance(exc, NotionAPIError) else
+                                "Notion request queue is not available") from None
 
     def status_snapshot(self) -> dict[str, Any]:
         """Return one compact operational status packet for agents and schedulers."""
@@ -312,6 +411,21 @@ class HIQSCore:
     def personal_inbox_entry(self, entry_id: str) -> dict[str, Any]:
         """Return one complete validated personal draft."""
         return self.personal_inbox_service.get(entry_id)
+
+    def create_course_notes(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_notes_service.create(payload)
+
+    def course_notes_schema(self) -> dict[str, Any]:
+        return NotesCheckpoint.model_json_schema()
+
+    def course_notes(self, run_id: str | None = None, artifact_id: str | None = None) -> dict[str, Any]:
+        return self.course_notes_service.get(run_id, artifact_id)
+
+    def read_course_note_source(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_notes_service.read_source(payload)
+
+    def save_course_notes(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.course_notes_service.save(payload)
 
     def materials_manifest(self, course_ids: list[str] | None = None) -> dict[str, Any]:
         """List local source files and extracted-text sidecars."""

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import webbrowser
 
 from hsas.application.moodle_sync import CourseSynchronizationService
 from hsas.core import HIQSPortError, build_port
@@ -26,12 +27,18 @@ from .commands.ocr import ocr_app
 from .commands.course_information import sis_course_info_app
 from .commands.enrollment import sis_enrollment_app
 from .commands.materials import materials_app
+from .commands.notion import notion_app
+from .commands.apple import apple_app
+from .commands.course_planning import course_planning_app
 from hsas.web.server import serve_dashboard
 
 
 app = typer.Typer(no_args_is_help=True, help="HKU Information Query System")
 app.add_typer(information_app, name="information")
 app.add_typer(materials_app, name="materials")
+app.add_typer(notion_app, name="notion")
+app.add_typer(apple_app, name="apple")
+app.add_typer(course_planning_app, name="course-planning")
 app.add_typer(changes_app, name="changes")
 app.add_typer(inbox_app, name="inbox")
 app.add_typer(ocr_app, name="ocr")
@@ -198,7 +205,13 @@ def ui(
         typer.Option("--open/--no-open", help="Open the calendar in the default browser"),
     ] = True,
 ) -> None:
-    """Run the private information calendar on this Mac only."""
+    """Open Notion after migration; retain local recovery until configured."""
+    workspace = build_port(_resources(ctx)).notion_status().get("workspace_url")
+    if workspace:
+        typer.echo(workspace)
+        if open_browser:
+            webbrowser.open(workspace)
+        return
     serve_dashboard(_resources(ctx), port=port, open_browser=open_browser)
 
 

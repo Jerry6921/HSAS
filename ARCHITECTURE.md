@@ -1,7 +1,39 @@
 # HIQS 架构与数据流
 
-HIQS 把课程资料收集、AI 理解和日历展示分开。程序负责完整保存资料、提供可读副本、验证
-AI 写入的事实，并把事实确定性映射到日历；完整 Assessment 由 AI 依据来源归纳。
+HIQS 的产品主体是 `skills/` 中的 AI Skill Set。Skills 负责意图解析、来源理解、
+任务编排和内容写作；Notion 是主要可视化与资料展示端；Python 只提供这些工作流共用的
+确定性服务。服务通过 `HIQSPort` 暴露，MCP 是 Agent 调用服务的正式适配器。
+
+## 产品结构与职责
+
+```text
+skills/                          产品 Skills 的唯一源，独立打包分发
+├── hiqs-course-information/      事实审阅、证据问答与受控更新
+├── hiqs-course-notes/            完整阅读、教学写作与分批交付
+└── hiqs-notion-workspace/        展示、发布、视图与交付核验
+src/hsas/                        Python 复用服务，保留现有包名和运行数据兼容
+contracts/                       服务合同快照
+.agents/skills/                  产品 Skill 相对链接及仓库工程 Skill
+ui/ + src/hsas/web/ + packaging/  本地兼容客户端与打包
+```
+
+工程 Skill 保留在 `.agents/skills/hiqs-product-development`，不进入产品 Skill 包。
+旧 `src/AI_Skills` 指向 `skills/hiqs-course-information`，供已复制的旧提示词继续使用。
+迁移移动整个 Skill 目录，保留 references 和 agents 元数据；只有 `skills/` 中的文件
+是产品 Skill 的维护源。Python 不导入或执行 Skill Markdown。
+
+| 所属层 | 拥有的职责 | 修改位置 |
+| --- | --- | --- |
+| AI Skills | 选择任务路径、解释证据、组织课程事实、教学推导与正文、决定何时交付 | `skills/<skill>/` |
+| Python 复用服务 | 机构采集、文本/OCR、检索、验证、原子保存、版本检查、稳定 ID 投影与上传 | `src/hsas/` |
+| Notion | 课程/课程档案/资料展示、笔记页面与用户正文 | 已验证的工作台与数据源 |
+| MCP／CLI | 将调用转交同一 `HIQSPort`，CLI 同时承载设置、恢复和确定性 worker | `src/hsas/mcp`、`src/hsas/cli` |
+| 本地兼容客户端 | 旧安装和恢复诊断，复用同一服务 | `ui/`、`src/hsas/web`、`packaging/` |
+
+新增需求先判断是 Agent 的理解/编排/写作，还是可跨 Skills 复用的确定性能力。
+前者进入 Skill，后者进入现有 service；MCP 和 CLI 仅增加必要入口，避免增加透传服务层。
+后台 worker 只采集、上传和同步投影，不运行 Agent、不自动抽取或批准新课程事实。
+现有 Python 用例编排负责事务、取消和重试等机械执行；学习流程及内容判断留在 Skills。
 
 ## 主链路
 
@@ -31,7 +63,12 @@ flowchart LR
     Update --> Validator[Schema 校验与原子 upsert]
     Validator --> Store[information.json]
     Validator --> Checkpoint[成功后推进 AI 处理游标]
-    Store --> Calendar[本地查询日历]
+    Store --> Projection[稳定 ID 的课程/资料投影]
+    Projection --> Notion[Notion 工作台]
+    Store --> Local[本地兼容日历]
+    AI --> Notes[笔记正文与独立检查点]
+    Notes --> Publish[Agent 定向发布并读回]
+    Publish --> Notion
 ```
 
 职责边界：
@@ -44,30 +81,65 @@ flowchart LR
 - Change Queue：区分首次全量与后续增量，提供精确文件路径并记录处理游标；
 - OCR Queue：识别扫描 PDF 与图片型 PPT，调用本地 OCR 并更新可搜索 sidecar；
 - Personal Inbox：暂存用户通过 AI 补充的课程信息，并在逐字段预览与确认后进入统一校验；
-- Calendar：只读投影，展开重复时间并显示具体项目；
+- Notion：主要展示端，使用同一事实投影与资料身份，个人状态和正文由学生管理；
+- Calendar：确定性展开重复时间，供 Apple、ICS 和本地兼容客户端复用；
 - 用户：授权资料范围，并可通过 AI 对话确认额外事实或更正。
 
-## CORE、MCP、UI 与 PORT
+## Python 复用服务与调用入口
+
+产品调用路径为 `Skill → MCP → HIQSPort → 复用服务`；事实和资料通过确定性
+Notion adapter 交付，笔记正文通过 Agent 的 Notion 连接器发布。两者分别核验结果。
+
+| 能力 | 现有复用实现 |
+| --- | --- |
+| 机构来源与采集控制 | `core/services/sources.py`、`core/sync/`、`infrastructure/{moodle,sis,class_planner}/` |
+| 原文件、全文清单与带引用检索 | `core/services/materials.py`、`application/material_search.py` |
+| PDF/Office/OCR | `infrastructure/documents/`、`core/services/runtime.py` |
+| 事实合同、校验、写入与审阅游标 | `core/services/{information,records,reviews}.py` |
+| 笔记来源、revision 检查点与导出 | `core/services/course_notes.py`、`application/course_notes.py` |
+| Notion 只读投影、原文件与稳定 ID 同步 | `core/services/notion.py`、`application/notion_projection.py`、`infrastructure/notion/` |
+| Notion 按钮请求与采集进度 | `core/services/notion_controls.py`、`application/notion_controls.py` |
+
+这些实现保留现有分层与 import 路径，不为改目录额外包一层透传服务。
+
+课程笔记走独立链路：`hiqs-course-notes` 编排 Agent 阅读和教学写作，
+`CourseNotesPort` → `CourseNotesService` 在私有 resources 的 `course-notes/`
+保存输入哈希、来源审阅、单元计划、题目关联、正文及发布回执。检查点是原子 JSON；
+每个 revision 的 Markdown bundle 是可重建的交付投影，保存后读回核验。
+版本校验及进程文件锁拒绝旧状态覆盖；用户编辑的当前导出必须读回合并后才能继续保存。
+该链路不写 `information.json`，不推进课程事实审阅游标，也不创建后台生成服务。
+结构完成、Agent 的来源阅读声明、教学质量、学生掌握及外部发布分别报告。
+接口及验收边界见 [课程笔记实现说明](docs/course-notes-implementation.md)。
+
+Notion delivery 也通过 `HIQSPort`：`NotionDeliveryService` 从已校验的
+Information Store 与受限资料解析器构建课程库只读投影；REST adapter 发布课程、
+课程档案属性与哈希去重的原文件。默认不向 Notion 投影待办或日历；它们由
+独立 Apple 同步服务管理。CSV/Markdown/ZIP 和
+Notion connector adapter 使用同一投影。个人执行状态与正文归 Notion
+所有，同步不反向写入 canonical facts。连接凭据、派生检查点和后台日志
+只位于私有 resources/notion；多个进程通过独立文件锁避免重复写入。
 
 ```text
 src/hsas/
 ├── core/             稳定 Port、façade、服务容器与同步编排
 ├── mcp/              面向 AI 的 MCP tools
-├── web/              面向用户的本地 HTTP API 与生产静态资源
+├── web/              兼容本地 HTTP API 与生产静态资源
 ├── domain/           CORE 内部纯模型与规则
 ├── application/      CORE 内部用例
 ├── infrastructure/   CORE 内部来源、存储和运行时适配器
 ├── cli/              Typer CLI 入口与命令组
 └── codegen/          JSON Schema 衍生代码生成器
-ui/                    React + TypeScript 前端源码
+ui/                    兼容 React + TypeScript 客户端源码
 ```
 
-`HIQSPort` 是 CORE 对外的聚合契约，由四个较小的能力接口组成：
+`HIQSPort` 是 CORE 对外的聚合契约，由按用例划分的能力接口组成：
 
 - `InformationQueryPort`：信息、材料、证据与日历的只读查询；
 - `InformationCommandPort`：经验证和明确确认的信息变更；
 - `CourseSyncPort`：HKU 来源认证、同步与后台任务控制；
 - `ApplicationLifecyclePort`：固定 commit 的本地应用更新。
+- `CourseNotesPort`：整套学习笔记的输入清单、完整正文读取、检查点和本地交付。
+- `NotionDeliveryPort`：连接检查、稳定投影、原文件同步、导出与同步控件状态。
 
 MCP 与 UI 接受注入的 Port，不导入 domain、application、infrastructure 或彼此的实现：
 
@@ -88,8 +160,8 @@ Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`Person
 `InstitutionalSourceService` 负责，具体 gateway 在 `source_factories.py` 组合边界创建。
 CORE façade 只维持稳定 Port、服务装配和兼容入口。MCP 是 Agent 的正式接口；CLI 是人工
 诊断、恢复和无 MCP 环境使用的薄适配器。CLI 不得重复实现校验、写入、报告或 checkpoint
-业务逻辑，仍需终端交互回调的 collector 命令仅保留界面适配。新增 AI 和用户入口必须分别
-放入 `mcp` 与 `web`。
+业务逻辑，仍需终端交互回调的 collector 命令仅保留界面适配。新增服务工具进入 `mcp`；
+新的展示工作流优先进入 Notion，兼容 HTTP 入口按实际需要进入 `web`。
 
 “需要确认”使用同一条只读链路：Dashboard read model 进入 application 层的确定性 attention
 用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
@@ -283,7 +355,16 @@ project、report、reading、deadline 和 other。
 逐字段 before/after。用户确认单条草稿后，应用服务调用现有 Information upsert，再把
 Inbox 条目标为 applied。
 
-## Dashboard
+## 本地兼容 Dashboard
+
+Apple Calendar/Reminders 是独立的确定性 delivery 路径，经同一 `HIQSPort` 将已校验
+事项单向同步到用户选择的 Apple 账户。原生 EventKit helper 保留个人完成状态、提醒
+铃声和个人备注，按稳定 identity 对账，并逐条读回。LaunchAgent 监听 canonical
+information 文件并周期性重试，不运行 AI、不批准事实；Apple 本地回执不代表 iCloud
+另一设备已收到。架构、账户边界及恢复详见 [Apple 整合](docs/apple-integration.md)。
+
+以下描述保留的本地客户端，不代表产品需要为每个新 Skill 增加 React 页面。
+Notion 配置和真实同步的状态边界见 [Notion 整合说明](docs/notion-integration.md)。
 
 本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
 store，并通过独立的 `GET /api/attention` 获取只读的“需要确认”摘要。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
@@ -304,7 +385,11 @@ AI 关联的学习材料和来源。`GET /api/source-preview` 只接受当前课
 预览，DOCX/PPTX 使用已提取文本预览，并保留打开原文件的入口。首页问答式搜索只匹配本地
 结构化事项和课件目录。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
 
-## macOS App 与发布包
+## 兼容 macOS App 与发布包
+
+配置了 Notion 工作台时，现有启动入口打开该工作台；下面的 WebKit/后端路径
+用于未配置连接的兼容模式。产品 Skill ZIP 与 Python 服务是主要独立交付物，
+macOS 应用保留现有构建支持。
 
 `HIQS.app` 使用 Swift/AppKit 创建原生窗口，并以 WKWebView 承载 Dashboard。App 启动时从
 源码构建配置指向当前项目的 `.venv/bin/hsas`；完整发布构建则从 Bundle Resources 运行
@@ -332,3 +417,19 @@ DMG 压缩与 SHA-256 输出。版本来自 `src/hsas/__init__.py`，并同步�
 旧 CLI 名称 `hsas` 和默认数据目录 `HSAS` 保留，以继续访问用户已经下载的资料。
 读取旧 `course.json` 时会忽略历史 `assessments` 字段；Planner、Student Profile、
 Execution Log、Assessment Parser 及其命令均已从代码库移除。
+
+## 课程规划与 enrolment 任务
+
+`skills/hiqs-course-planning` 编排 syllabus／SIS 阅读、候选推荐与真实页面操作；
+`CoursePlanningPort` → `CoursePlanningService` 使用 application 层的日期／组件约束求解器，
+在私有 `course-planning/<run_id>/state.json` 保存目标、已认可候选池、计划版本、授权、
+官方状态观察、成功锁定集合和逐项尝试。执行状态不进入 `information.json`。
+MCP 与 CLI 仅委托同一 Port；当前不增加兼容 UI 页面。
+
+`next_course_plan_action` 在进程文件锁及 revision 检查下，先原子保存一笔 unknown 尝试，
+再返回一次性 submit 指令。Agent 在官方页面执行一次 add/enrol，读回完整账户、学期、
+组件与原始状态，再调用 reconcile；恢复时未对账的尝试阻止重投，Pending／候补单独保存。
+成功课程保持固定，其他目标重新整体求解。同账户／学期的本地任务共享提交互斥，
+外部浏览器仍须操作前即时核验。真实状态由 Agent 提交证据，服务不声称独立访问 SIS。
+当前执行器是前台 Agent；检查点保留等待时间与恢复条件，但没有常驻抢课或监控进程。
+详细合同、验收与真实使用限制见 [实现说明](docs/course-planning-implementation.md)。

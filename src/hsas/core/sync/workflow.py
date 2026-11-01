@@ -23,6 +23,18 @@ class _WorkflowCancelled(RuntimeError):
     pass
 
 
+def courses_matching_scope(
+    courses: list[dict[str, Any]], course_scope: str
+) -> list[dict[str, Any]]:
+    """Return the enrollment entries whose course code matches ``course_scope``."""
+    key = course_scope.strip().upper()
+    return [
+        course
+        for course in courses
+        if str(course.get("course_code") or "").strip().upper() == key
+    ]
+
+
 def _workflow_stage_label(stage: str) -> str:
     return {
         "enrollment": "课程列表获取",
@@ -48,7 +60,17 @@ class CourseSyncWorkflow:
         """Start the cancellable multi-source course synchronization workflow."""
         if payload.get("confirmed") is not True:
             raise DashboardError("请先确认开始课程同步工作流。")
-        return self.controller.start(self.run)
+        raw_course = payload.get("course")
+        if raw_course is not None and (
+            not isinstance(raw_course, str) or not raw_course.strip()
+        ):
+            raise DashboardError("course 必须是非空课程代码，或省略以同步全部课程。")
+        course_scope = raw_course.strip() if isinstance(raw_course, str) else None
+        return self.controller.start(
+            lambda job_id, retry_tasks: self.run(
+                job_id, retry_tasks, course_scope=course_scope
+            )
+        )
 
     def retry_failed_course_sync(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Retry only the source/course pairs left by the latest workflow."""
@@ -100,6 +122,8 @@ class CourseSyncWorkflow:
         self,
         job_id: str,
         retry_tasks: list[dict[str, Any]] | None = None,
+        *,
+        course_scope: str | None = None,
     ) -> None:
         def report(values: dict[str, object]) -> None:
             with self.controller.lock:
@@ -246,13 +270,13 @@ class CourseSyncWorkflow:
                     report(
                         {
                             "stage": "authentication",
-                            "detail": "正在确认 SIS 会话并读取当前学期课程列表",
+                            "detail": "正在连接 SIS 并读取课程列表；若弹出验证窗口，请完成验证",
                         }
                     )
                     try:
                         enrollment = self.enrollment_gateway_factory(self.resources_dir).sync(
                             auto_login=True,
-                            interactive_login=False,
+                            interactive_login=True,
                             cancel_requested=self.controller.cancel_event.is_set,
                         )
                     except InterruptedError:
@@ -260,6 +284,12 @@ class CourseSyncWorkflow:
                             raise _WorkflowCancelled
                         raise
                     courses = list(enrollment["courses"])
+                    if course_scope is not None:
+                        courses = courses_matching_scope(courses, course_scope)
+                        if not courses:
+                            raise DashboardError(
+                                f"当前学期注册列表中没有课程：{course_scope}"
+                            )
                     begin_phase("enrollment", courses)
                     for index, course in enumerate(courses, start=1):
                         update_card(

@@ -62,8 +62,14 @@ def map_activity(raw: dict[str, Any]) -> CourseActivity:
             "scheduled_at",
         }
     }
+    raw_module_id = raw.get("id")
+    module_id = "" if raw_module_id is None else str(raw_module_id).strip()
+    if not module_id.isdigit():
+        raise ValueError(
+            f"invalid Moodle course-module id {raw_module_id!r}: expected an integer"
+        )
     return CourseActivity(
-        module_id=str(raw.get("id") or ""),
+        module_id=module_id,
         name=name,
         category=classify_activity(module, name),
         module=module,

@@ -236,8 +236,127 @@ def test_enrollment_sync_opens_shared_sis_login_after_short_probe(
     assert headless_modes == [True, False]
     assert timeouts == [5, 90]
     assert calls == [
+        ("login", module.LOGIN_URL, 5),
         ("student_center", 5),
         ("login", module.LOGIN_URL, 90),
         ("student_center", 90),
     ]
     assert result["courses"][0]["course_code"] == "BMED2206"
+
+
+@pytest.mark.parametrize("verification_required", [False, True])
+def test_enrollment_waits_for_sis_login_and_uses_authenticated_page(
+    tmp_path: Path, monkeypatch, verification_required: bool,
+) -> None:
+    import hsas.infrastructure.sis.enrollment.client as module
+
+    modes = []
+    calls = []
+
+    class Frame:
+        url = module.STUDENT_CENTER_URL
+
+        def locator(self, selector):
+            assert selector == "body"
+            return self
+
+        async def inner_text(self, **_kwargs):
+            return "2026-27 Semester 1\nBMED2206 Engineering    Enrolled"
+
+    class Page:
+        frames = [Frame()]
+
+        async def goto(self, url, **_kwargs):
+            calls.append(("goto", url))
+
+    page = Page()
+
+    @asynccontextmanager
+    async def fake_context(_profile, *, headless, **_kwargs):
+        modes.append(headless)
+        yield object()
+
+    async def fake_login(_context, **_kwargs):
+        calls.append(("login", modes[-1]))
+        if verification_required and modes[-1]:
+            raise module.SisCourseInfoAuthenticationError("SIS verification required")
+        return page
+
+    async def fake_save(_context, _path):
+        calls.append(("save",))
+
+    monkeypatch.setattr(module, "sis_context", fake_context)
+    monkeypatch.setattr(module, "open_login_until_authenticated", fake_login)
+    monkeypatch.setattr(module, "save_sis_session", fake_save)
+
+    result = SisEnrollmentBrowserGateway(tmp_path).sync()
+
+    assert modes == ([True, False] if verification_required else [True])
+    assert calls == [("login", True)] + (
+        [("login", False)] if verification_required else []
+    ) + [
+        ("goto", module.STUDENT_CENTER_URL), ("save",),
+    ]
+    assert result["courses"][0]["course_code"] == "BMED2206"
+    assert SisEnrollmentBrowserGateway(tmp_path).status()["login_status"] == "logged_in"
+
+
+@pytest.mark.parametrize(
+    "auto_login,interactive_login", [(False, True), (True, False)]
+)
+def test_enrollment_noninteractive_failure_preserves_snapshot(
+    tmp_path: Path, monkeypatch, auto_login: bool, interactive_login: bool,
+) -> None:
+    import hsas.infrastructure.sis.enrollment.client as module
+
+    root = tmp_path / "sis-enrollment"
+    root.mkdir()
+    snapshot = '{"term":"previous","courses":[{"course_code":"BMED2206"}]}'
+    (root / "latest.json").write_text(snapshot)
+    modes = []
+
+    @asynccontextmanager
+    async def fake_context(_profile, *, headless, **_kwargs):
+        modes.append(headless)
+        yield object()
+
+    async def fake_login(_context, **_kwargs):
+        raise module.SisCourseInfoAuthenticationError("verification required")
+
+    monkeypatch.setattr(module, "sis_context", fake_context)
+    monkeypatch.setattr(module, "open_login_until_authenticated", fake_login)
+
+    with pytest.raises(module.SisEnrollmentAuthenticationError, match="sign-in"):
+        SisEnrollmentBrowserGateway(tmp_path).sync(
+            auto_login=auto_login, interactive_login=interactive_login,
+        )
+
+    assert modes == [True]
+    assert (root / "latest.json").read_text() == snapshot
+    assert SisEnrollmentBrowserGateway(tmp_path).status()["login_status"] == "expired"
+
+
+def test_enrollment_cancel_does_not_open_recovery_browser(tmp_path: Path, monkeypatch) -> None:
+    import hsas.infrastructure.sis.enrollment.client as module
+
+    modes = []
+    cancelled = False
+
+    @asynccontextmanager
+    async def fake_context(_profile, *, headless, **_kwargs):
+        modes.append(headless)
+        yield object()
+
+    async def fake_login(_context, **_kwargs):
+        nonlocal cancelled
+        cancelled = True
+        raise module.SisCourseInfoAuthenticationError("verification required")
+
+    monkeypatch.setattr(module, "sis_context", fake_context)
+    monkeypatch.setattr(module, "open_login_until_authenticated", fake_login)
+
+    with pytest.raises(InterruptedError, match="cancelled"):
+        SisEnrollmentBrowserGateway(tmp_path).sync(cancel_requested=lambda: cancelled)
+
+    assert modes == [True]
+    assert not (tmp_path / "sis-enrollment" / "latest.json").exists()

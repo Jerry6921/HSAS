@@ -597,6 +597,27 @@ def test_class_planner_actions_require_confirmation_and_report_differences(
     assert calls == ["login", "sync"]
 
 
+def test_student_center_command_allows_sis_login_recovery(tmp_path: Path, monkeypatch) -> None:
+    class EnrollmentGateway:
+        def sync(self, *, auto_login, interactive_login):
+            assert auto_login is True
+            assert interactive_login is True
+            return {"term": "2026-27 Semester 1", "courses": [{"course_code": "BMED2206"}]}
+
+    monkeypatch.setattr(
+        "hsas.core.facade._sis_enrollment_gateway",
+        lambda _resources: EnrollmentGateway(),
+    )
+    service = DashboardService(tmp_path)
+
+    with pytest.raises(DashboardError, match="confirm"):
+        service.synchronize_sis_enrollment({"confirmed": False})
+    result = service.synchronize_sis_enrollment({"confirmed": True})
+
+    assert result["status"] == "synced"
+    assert result["course_count"] == 1
+
+
 def test_course_workflow_reports_progress_and_can_cancel(
     tmp_path: Path,
     monkeypatch,
@@ -752,8 +773,9 @@ def test_course_workflow_authenticates_before_sis_and_timetable(
             return SimpleNamespace(status="logged_in")
 
     class EnrollmentGateway:
-        def sync(self, *, auto_login, **_kwargs):
+        def sync(self, *, auto_login, interactive_login, **_kwargs):
             assert auto_login is True
+            assert interactive_login is True
             calls.append("sis_enrollment")
             return {"courses": [course]}
 

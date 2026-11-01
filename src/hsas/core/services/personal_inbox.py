@@ -30,6 +30,7 @@ from hsas.domain.information import InformationStore
 from hsas.infrastructure.storage import (
     JsonInformationRepository,
     JsonPersonalInboxRepository,
+    canonical_information_lock,
 )
 
 
@@ -55,7 +56,7 @@ class PersonalInboxService:
         if not isinstance(entry_id, str) or not entry_id.strip():
             raise HIQSPortError("entry_id 必须是有效的 Inbox 条目 ID。")
         normalized_entry_id = entry_id.strip()
-        with self.mutation_lock:
+        with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 before = load_information(
                     self.resources_dir / "information.json", self.information_repository

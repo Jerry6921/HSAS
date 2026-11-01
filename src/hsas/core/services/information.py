@@ -12,9 +12,11 @@ from hsas.application.information import (
     InformationServiceError,
     apply_information_update,
     load_information,
+    merge_information_update,
     validate_information_update,
     validate_material_coverage,
 )
+from hsas.application.information_audit import audit_information, blocking_update_findings
 from hsas.application.material_search import (
     invalidate_material_index,
     refresh_material_index,
@@ -27,7 +29,10 @@ from hsas.domain.information import (
     RecentInformationUpdate,
     RecentUpdateDigest,
 )
-from hsas.infrastructure.storage import JsonInformationRepository
+from hsas.infrastructure.storage import (
+    JsonInformationRepository,
+    canonical_information_lock,
+)
 from hsas.infrastructure.storage.json_store import read_json, write_json
 
 
@@ -49,6 +54,7 @@ _COURSE_FIELDS = (
 _ITEM_FIELDS = (
     "title",
     "category",
+    "task_role",
     "date_status",
     "opens_at",
     "starts_at",
@@ -80,6 +86,7 @@ _DEADLINE_CATEGORIES = {
     "deadline",
 }
 _OUTCOME_FIELD_LABELS = {
+    "task_role": "待办角色",
     "date_status": "日期状态",
     "opens_at": "开放时间",
     "starts_at": "开始时间",
@@ -107,7 +114,7 @@ _DATE_CHANGE_FIELDS = (
     "scheduled_on", "recurrence", "all_day",
 )
 _INFORMATION_CHANGE_FIELDS = (
-    "title", "category", "location", "description", "assessment_format",
+    "title", "category", "task_role", "location", "description", "assessment_format",
     "submission_method", "weight_percent", "word_limit", "requirements",
     "policies", "links", "warnings",
 )
@@ -145,6 +152,8 @@ class InformationContractService:
             update = validate_information_update(raw_update)
             current = load_information(self.resources_dir / "information.json", self.repository)
             validate_material_coverage(self.resources_dir, current, update)
+            candidate = merge_information_update(current, update).store
+            quality_audit = audit_information(candidate)
         except (ValueError, ValidationError, InformationServiceError) as exc:
             raise ValueError(str(exc)) from exc
         return {
@@ -152,6 +161,8 @@ class InformationContractService:
             "course_count": len(update.courses),
             "item_count": len(update.items),
             "update": update.model_dump(mode="json"),
+            "quality_audit": quality_audit,
+            "ready_to_apply": not blocking_update_findings(quality_audit, {item.item_id for item in update.items}),
         }
 
     def apply(
@@ -173,12 +184,13 @@ class InformationContractService:
                 "An empty update cannot acknowledge review batches; use "
                 "acknowledge_changes after confirming no fact change."
             )
-        with mutation_lock:
+        with mutation_lock, canonical_information_lock(self.resources_dir):
             before = (
                 self.repository.load(self.resources_dir / "information.json")
                 if self.repository.exists(self.resources_dir / "information.json")
                 else InformationStore()
             )
+            quality_audit = audit_information(merge_information_update(before, update).store)
             result = apply_information_update(
                 self.resources_dir / "information.json",
                 update.model_dump(mode="json"),
@@ -212,6 +224,7 @@ class InformationContractService:
             "checkpoints": checkpoints,
             "recent_update": audit,
             "evidence_index": index_status,
+            "quality_audit": quality_audit,
         }
 
     def save_recent_update_summary(
@@ -232,7 +245,7 @@ class InformationContractService:
             raise ValueError("body must contain 1 to 600 characters.")
         if not isinstance(references, list) or len(references) > 6:
             raise ValueError("highlights must be a list of at most 6 report references.")
-        with mutation_lock:
+        with mutation_lock, canonical_information_lock(self.resources_dir):
             path = self.resources_dir / RECENT_UPDATE_PATH
             if not path.is_file():
                 raise ValueError("No recent information update is available to summarize.")

@@ -18,6 +18,7 @@ from hsas.infrastructure.storage.json_store import read_json, write_json, write_
 from ..course_info.client import (
     LOGIN_URL,
     SIS_HOST,
+    SisCourseInfoAuthenticationError,
     open_login_until_authenticated,
     save_sis_session,
     sis_context,
@@ -153,20 +154,11 @@ def _clean_course_title(raw_title: str | None, code: str) -> str:
 
 
 async def _student_center_text(
-    context,
+    page,
     *,
     timeout_seconds: int,
     cancel_requested: Callable[[], bool] | None = None,
 ) -> str:
-    page = context.pages[0] if context.pages else await context.new_page()
-    # Establish the PeopleSoft session endpoint first. A Moodle/Portal cookie
-    # alone is not always enough for Student Center: SIS may issue its own
-    # PS_TOKEN only after this sign-on URL is visited.
-    await page.goto(
-        LOGIN_URL,
-        wait_until="domcontentloaded",
-        timeout=timeout_seconds * 1000,
-    )
     await page.goto(
         STUDENT_CENTER_URL,
         wait_until="domcontentloaded",
@@ -213,27 +205,30 @@ class SisEnrollmentBrowserGateway:
     ) -> dict[str, Any]:
         async def capture(
             headless: bool,
-            target_url: str,
             *,
             capture_timeout_seconds: int,
         ) -> str:
+            if cancel_requested is not None and cancel_requested():
+                raise InterruptedError("Student Center synchronization was cancelled")
             async with sis_context(
                 self.profile_dir,
                 headless=headless,
                 session_state_path=self.session_state_path,
             ) as context:
-                if target_url == LOGIN_URL:
-                    login_kwargs = {
-                        "login_url": LOGIN_URL,
-                        "timeout_seconds": capture_timeout_seconds,
-                    }
-                    if cancel_requested is not None:
-                        login_kwargs["cancel_requested"] = cancel_requested
-                    await open_login_until_authenticated(context, **login_kwargs)
+                # Finish SIS SSO before navigating to Student Center. Opening
+                # its component while z_signon.jsp is still redirecting can
+                # interrupt the exchange that issues the PeopleSoft token.
+                login_kwargs = {
+                    "login_url": LOGIN_URL,
+                    "timeout_seconds": capture_timeout_seconds,
+                }
+                if cancel_requested is not None:
+                    login_kwargs["cancel_requested"] = cancel_requested
+                page = await open_login_until_authenticated(context, **login_kwargs)
                 text_kwargs = {"timeout_seconds": capture_timeout_seconds}
                 if cancel_requested is not None:
                     text_kwargs["cancel_requested"] = cancel_requested
-                text = await _student_center_text(context, **text_kwargs)
+                text = await _student_center_text(page, **text_kwargs)
                 await save_sis_session(context, self.session_state_path)
                 return text
 
@@ -241,22 +236,26 @@ class SisEnrollmentBrowserGateway:
             text = asyncio.run(
                 capture(
                     True,
-                    STUDENT_CENTER_URL,
                     capture_timeout_seconds=min(timeout_seconds, 5),
                 )
             )
-        except (SisEnrollmentAuthenticationError, PlaywrightTimeoutError):
+        except (
+            SisEnrollmentAuthenticationError,
+            SisCourseInfoAuthenticationError,
+            PlaywrightTimeoutError,
+        ) as exc:
+            if cancel_requested is not None and cancel_requested():
+                raise InterruptedError("Student Center synchronization was cancelled") from exc
             if not auto_login or not interactive_login:
                 self._write_status("expired")
                 raise SisEnrollmentAuthenticationError(
-                    "HKU SIS session is unavailable after the shared Moodle Portal login; "
-                    "no additional SIS browser was opened."
-                )
+                    "HKU SIS session requires sign-in. Interactive login is disabled; "
+                    "retry with interactive login enabled."
+                ) from exc
             self._write_status("login_required")
             text = asyncio.run(
                 capture(
                     False,
-                    LOGIN_URL,
                     capture_timeout_seconds=timeout_seconds,
                 )
             )

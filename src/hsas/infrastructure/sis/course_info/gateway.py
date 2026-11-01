@@ -187,6 +187,7 @@ class SisCourseInfoBrowserGateway:
         *,
         timeout_seconds: int = 90,
         selected_courses: list[dict[str, str]] | None = None,
+        preserve_other_courses: bool = False,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> SisCourseInfoSyncResult:
@@ -200,6 +201,7 @@ class SisCourseInfoBrowserGateway:
                     context,
                     timeout_seconds=timeout_seconds,
                     selected_courses=selected_courses,
+                    preserve_other_courses=preserve_other_courses,
                     progress_callback=progress_callback,
                     cancel_requested=cancel_requested,
                 )
@@ -216,6 +218,7 @@ class SisCourseInfoBrowserGateway:
         *,
         timeout_seconds: int = 90,
         selected_courses: list[dict[str, str]] | None = None,
+        preserve_other_courses: bool = False,
         progress_callback: Callable[[dict[str, object]], None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> SisCourseInfoSyncResult:
@@ -275,7 +278,8 @@ class SisCourseInfoBrowserGateway:
             await page.close()
         if records:
             await save_sis_session(context, self.session_state_path)
-        return self._finalize_sync(courses, skipped, records, failures)
+        return self._finalize_sync(courses, skipped, records, failures,
+                                   retain_unselected=preserve_other_courses)
 
     def _finalize_sync(
         self,
@@ -283,6 +287,7 @@ class SisCourseInfoBrowserGateway:
         skipped: list[str],
         records: list[dict[str, Any]],
         failures: list[dict[str, str]],
+        *, retain_unselected: bool = False,
     ) -> SisCourseInfoSyncResult:
         synced_at = datetime.now(timezone.utc).isoformat()
         previous = read_json(self.root / "latest.json") if (self.root / "latest.json").is_file() else {}
@@ -292,6 +297,8 @@ class SisCourseInfoBrowserGateway:
             if isinstance(value, dict)
         }
         discovered_codes = {course["course_code"] for course in courses}
+        if retain_unselected:
+            discovered_codes.update(previous_by_code)
         successful_codes = {record["course_code"] for record in records}
         records.extend(
             value

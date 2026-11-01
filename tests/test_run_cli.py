@@ -15,12 +15,15 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
     assert result.exit_code == 0
     assert command_names == {"list-status", "login", "query", "sync-courses", "ui"}
     assert group_names == {
+        "apple",
         "changes",
         "calendar",
         "class-planner",
+        "course-planning",
         "inbox",
         "information",
         "materials",
+        "notion",
         "ocr",
         "sis-course-info",
         "sis-enrollment",

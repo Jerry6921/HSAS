@@ -53,6 +53,20 @@ from hsas.domain.courses import iter_activities
 from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
 
 
+def _load_previous_archive(course_path: Path) -> CourseArchive | None:
+    """Load the previous course snapshot; a corrupt file is treated as absence.
+
+    The caller reads this only while holding the per-course snapshot lock, so the
+    baseline it merges into is the same tree that ``prepare()`` copies.
+    """
+    if not course_path.exists():
+        return None
+    try:
+        return CourseArchive.model_validate(read_json(course_path))
+    except Exception:
+        return None
+
+
 def _is_moodle_login_url(url: str, configured_login_url: str) -> bool:
     """Recognize the Moodle login page regardless of CAS query parameters."""
     candidate = urlparse(url)
@@ -133,13 +147,11 @@ async def _persist_course(
     live_storage_root = settings.output_dir
     live_course_root = live_storage_root / "courses" / course_id
     course_path = live_course_root / "course.json"
-    previous_archive: CourseArchive | None = None
-    if course_path.exists():
-        try:
-            previous_archive = CourseArchive.model_validate(read_json(course_path))
-        except Exception:
-            previous_archive = None
     with CourseSnapshotTransaction.prepare(live_storage_root, course_id) as transaction:
+        # Read the baseline only after the per-course lock is held: the live tree
+        # may otherwise change between the read and the copy inside prepare(),
+        # and the merge below would then run against a stale baseline.
+        previous_archive = _load_previous_archive(course_path)
         storage_root = transaction.staging_resources_dir
         course_root = transaction.staged_course_dir
         staged_course_path = course_root / "course.json"

@@ -115,6 +115,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         outputBuffer.append(data)
         guard let text = String(data: outputBuffer, encoding: .utf8) else { return }
         for line in text.split(separator: "\n") {
+            // A configured workspace is the product UI. The app becomes a
+            // launcher; the independently installed worker keeps syncing.
+            if line.hasPrefix("https://www.notion.so/"),
+               let notionURL = URL(string: String(line)) {
+                outputPipe?.fileHandleForReading.readabilityHandler = nil
+                NSWorkspace.shared.open(notionURL)
+                NSApp.terminate(nil)
+                return
+            }
             guard let range = line.range(of: "http://127.0.0.1:[0-9]+/", options: .regularExpression),
                   let url = URL(string: String(line[range])) else { continue }
             backendURL = url

@@ -26,3 +26,8 @@ class CoreServices:
     lifecycle: Any
     evidence_operations: Any
     sources: Any
+    notion: Any
+    apple: Any
+    notion_controls: Any
+    course_notes: Any
+    course_planning: Any

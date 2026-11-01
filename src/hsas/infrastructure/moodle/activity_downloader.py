@@ -357,6 +357,11 @@ async def _save_response(
             path = destination_dir / f"{path.stem}-{index}{path.suffix}"
     if claimed_paths is not None:
         claimed_paths.add(path)
+    # Validate containment before writing: a malicious Moodle payload must never
+    # cause a file outside the staged course tree, and a failed check must not
+    # leave bytes on disk that the caller then forgets about.
+    if not path.resolve().is_relative_to(storage_root.resolve()):
+        return None
     write_bytes(path, body)
     return StoredFile(
         filename=path.name,

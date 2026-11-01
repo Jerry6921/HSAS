@@ -147,10 +147,23 @@ class InstitutionalSourceService:
     def synchronize_sis_course_info(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("confirmed") is not True:
             raise HIQSPortError("请先确认同步 HKU SIS 课程信息。")
+        course_codes = payload.get("course_codes")
+        selected = None
+        if course_codes is not None:
+            import re
+
+            if not isinstance(course_codes, list) or not 1 <= len(course_codes) <= 200 or any(
+                not isinstance(code, str) or not re.fullmatch(r"[A-Z]{4}[0-9]{4}", code)
+                for code in course_codes
+            ):
+                raise HIQSPortError("course_codes must contain 1–200 exact uppercase catalogue codes.")
+            selected = [{"course_code": code, "subject_area": code[:4], "catalogue_number": code[4:]}
+                        for code in dict.fromkeys(course_codes)]
         had_snapshot = (self._resources_dir / "sis-course-info" / "latest.json").is_file()
         with self._mutation_lock:
             try:
-                result = self._sis_course_info_factory(self._resources_dir).sync()
+                gateway = self._sis_course_info_factory(self._resources_dir)
+                result = gateway.sync() if selected is None else gateway.sync(selected_courses=selected, preserve_other_courses=True)
             except Exception as exc:
                 detail = "上一份快照已保留" if had_snapshot else "尚未写入任何 SIS 课程信息"
                 raise HIQSPortError(
@@ -174,7 +187,7 @@ class InstitutionalSourceService:
             try:
                 result = self._sis_enrollment_factory(self._resources_dir).sync(
                     auto_login=True,
-                    interactive_login=False,
+                    interactive_login=True,
                 )
             except Exception as exc:
                 raise HIQSPortError(

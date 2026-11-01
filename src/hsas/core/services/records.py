@@ -29,6 +29,7 @@ from hsas.domain.information import (
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
     JsonInformationRepository,
+    canonical_information_lock,
 )
 from hsas.infrastructure.storage.json_store import write_json
 
@@ -62,7 +63,7 @@ class CourseRecordService:
         except ValidationError as exc:
             raise HIQSPortError(f"课程资料无法通过校验：{exc}") from exc
         path = self.resources_dir / "information.json"
-        with self.mutation_lock:
+        with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 store = self._load_optional_store(path)
                 if any(value.course_id == course.course_id for value in store.courses):
@@ -160,7 +161,7 @@ class CourseRecordService:
         except ValidationError as exc:
             raise HIQSPortError(f"事件资料无法通过校验：{exc}") from exc
         path = self.resources_dir / "information.json"
-        with self.mutation_lock:
+        with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 store = self._load_optional_store(path)
                 if not any(course.course_id == item.course_id for course in store.courses):
@@ -190,7 +191,7 @@ class CourseRecordService:
         if payload.get("confirmed") is not True or payload.get("confirmation") != item_id:
             raise HIQSPortError("事件删除确认与目标事件不一致。")
         path = self.resources_dir / "information.json"
-        with self.mutation_lock:
+        with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 store = self.information_repository.load(path)
                 item = next((value for value in store.items if value.item_id == item_id), None)
@@ -240,7 +241,7 @@ class CourseRecordService:
 
     def _delete_courses(self, course_ids: list[str]) -> dict[str, Any]:
         path = self.resources_dir / "information.json"
-        with self.mutation_lock:
+        with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 store = self._load_optional_store(path)
                 records = {value.course_id: value for value in store.courses}

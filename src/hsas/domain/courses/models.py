@@ -82,7 +82,11 @@ DownloadStatus = Literal[
 
 
 class CourseActivity(StrictModel):
-    module_id: str
+    # The id becomes a directory component of the downloaded course tree. Live
+    # Moodle course-module ids are integers and are validated as such by the
+    # mapper; legacy archives may carry synthetic tokens such as ``page-1``.
+    # Refuse path separators, dots and whitespace here as defence in depth.
+    module_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     name: str
     category: ActivityCategory
     module: str

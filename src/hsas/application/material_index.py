@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 import hashlib
 import json
 import os
@@ -269,18 +272,30 @@ def mark_index_stale(path: Path) -> None:
         return
 
 
+@contextmanager
 def _connect(
     path: Path,
     *,
     writable: bool = True,
     use_wal: bool = True,
-) -> sqlite3.Connection:
+) -> Iterator[sqlite3.Connection]:
+    """Open the index, commit on success, and always close it.
+
+    ``with sqlite3.connect(...)`` commits but never closes, so every caller used
+    to leak a connection until garbage collection. That held WAL sidecars and
+    file handles on a database the code rebuilds and invalidates, and produced
+    hundreds of ``ResourceWarning: unclosed database`` lines in the test output.
+    """
     connection = sqlite3.connect(path)
-    connection.execute("PRAGMA busy_timeout = 5000")
-    if writable and use_wal:
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA synchronous = NORMAL")
-    return connection
+    try:
+        connection.execute("PRAGMA busy_timeout = 5000")
+        if writable and use_wal:
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def _remove_sqlite_sidecars(path: Path) -> None:

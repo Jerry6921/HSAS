@@ -89,10 +89,15 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 
 ### 9. Definition of done
 
-Run `python scripts/check_all.py` first. It is the single local gate and mirrors what CI
-enforces (lint, both contract snapshots, generated UI/TypeScript contracts, the default
-test suite). Do not rediscover the individual commands from `.github/workflows/quality.yml`
-— if a gate exists in CI and not in `scripts/check_all.py`, the script is incomplete.
+Run `python scripts/check_all.py` first. It is the single local gate: lint, every
+committed contract snapshot (compared in memory, so it never rewrites files), and the
+default test suite at the coverage threshold CI enforces. `tests/test_gate_parity.py`
+compares the script against `.github/workflows/quality.yml`, so the two cannot drift.
+
+Three CI steps stay release-only and are not in the local gate: the dependency audit,
+building the wheel, and verifying the wheel installs. They change only when dependencies
+or packaging change, and they are slow and network-bound. A green `check_all` therefore
+means "CI's lint, contract and test steps will pass", not "the release will publish"
 
 A task is complete only when all of the following hold:
 

@@ -18,10 +18,16 @@ makes a single combined gate cheap enough to run on every task.
 
 ## Decision
 
-- `scripts/check_all.py` is the single local verification gate. It runs lint, both
-  committed JSON contract snapshots (compared in memory against the generator's own
-  render functions, so the check never rewrites files), and the default test suite.
-  `--fast` skips only the test suite.
+- `scripts/check_all.py` is the single local verification gate. It runs lint, every
+  committed JSON contract snapshot (compared in memory against the generator's own
+  render functions, so the check never rewrites files), and the default test suite at
+  CI's coverage threshold. `--fast` skips only the test suite.
+- Coverage is part of the gate because CI enforced it and the local gate did not: an
+  agent could report a green run and still fail CI on `--cov-fail-under`. The threshold
+  lives in one constant, and `tests/test_gate_parity.py` asserts it matches the workflow.
+- Dependency audit, wheel build and wheel smoke test stay release-only. They are
+  network-bound or packaging-specific, and no task that leaves `pyproject.toml` and
+  `requirements.lock` alone can break them.
 - The Definition of Done in `docs/agents/engineering-management.md` names this script and
   nothing else. If a gate exists in CI and not in the script, the script is incomplete.
 - The script is the contract between "green locally" and "green in CI"; keep those two

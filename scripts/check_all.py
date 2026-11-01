@@ -23,6 +23,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 PY = sys.executable
 
+#: Must equal the threshold in .github/workflows/quality.yml; a test asserts it.
+COVERAGE_MIN = 75
+
 # ``python scripts/check_all.py`` puts ``scripts/`` on sys.path, not the repo root.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -97,8 +100,18 @@ def main() -> int:
     results.update({f"contract[{index}]": ok for index, ok in enumerate(_contract_checks())})
     if not args.fast:
         results["tests"] = _run(
-            "Tests",
-            [PY, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+            "Tests and coverage",
+            [
+                PY,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "--cov=hsas",
+                "--cov-report=term-missing:skip-covered",
+                f"--cov-fail-under={COVERAGE_MIN}",
+            ],
         )
 
     failed = [name for name, ok in results.items() if not ok]

@@ -287,6 +287,12 @@ class DashboardProjectionService:
         pending_total = int(counts["ai_review"]) + int(counts["ocr"]) + int(counts["google_authorization"])
         sync = self.sync_status_provider()
         retry_tasks = list((sync.get("result") or {}).get("retry_tasks") or [])
+        permanent_failures = [
+            task for task in retry_tasks if task.get("kind") == "permanent"
+        ]
+        transient_failures = [
+            task for task in retry_tasks if task.get("kind") != "permanent"
+        ]
         captured = any((self.resources_dir / name / "latest.json").is_file() for name in ("sis-enrollment", "sis-course-info", "class-planner")) or bool(self.change_repository.load_archives(self.resources_dir))
         stages = [
             {"id": "capture", "label": "来源采集", "state": "complete" if captured else "pending"},
@@ -306,6 +312,11 @@ class DashboardProjectionService:
             )
         if not course_lines:
             course_lines = ["- 当前 Moodle 队列没有待审阅课程"]
+        permanent_lines = [
+            f"- 永久性来源失败（重试不会改变，需先核对官方来源）：{task.get('source')} "
+            f"{task.get('course_code') or ''} · {task.get('error')}"
+            for task in permanent_failures
+        ]
         prompt = "\n".join(
             [
                 "请处理本机 HIQS 的新增课程资料并完成信息闭环。",
@@ -319,6 +330,7 @@ class DashboardProjectionService:
                 "待处理课程：",
                 *course_lines,
                 f"另有 SIS/注册来源待整理 {max(0, int(counts['ai_review']) - pending.pending_change_count)} 项，OCR {counts['ocr']} 项，Google 授权 {counts['google_authorization']} 项。",
+                *permanent_lines,
                 "完成写入后检查 apply_information_update 返回的 recent_update，再调用 get_status 与 get_information，确认正式数据、变更摘要和待处理数量均已更新。",
             ]
         )
@@ -326,8 +338,13 @@ class DashboardProjectionService:
             "stages": stages,
             "pending_total": pending_total,
             "retry_tasks": retry_tasks,
+            "permanent_failures": permanent_failures,
+            "transient_failures": transient_failures,
             "agent_prompt": prompt,
-            "complete": all(stage["state"] == "complete" for stage in stages) and not retry_tasks,
+            # Permanent source failures are recorded and shown, but they are not
+            # something a retry can close, so they must not keep closure open.
+            "complete": all(stage["state"] == "complete" for stage in stages)
+            and not transient_failures,
         }
 
     def _sis_enrollment_status(self) -> dict[str, Any]:

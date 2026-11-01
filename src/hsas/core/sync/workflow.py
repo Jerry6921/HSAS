@@ -35,6 +35,35 @@ def courses_matching_scope(
     ]
 
 
+# Source failures that will not change just by retrying: the official catalogue
+# does not know the course, or the enrolment snapshot has no matching entry.
+_PERMANENT_FAILURE_MARKERS = (
+    "has no matching entry",
+    "SisCourseInfoLookupError",
+    "未找到与当前 enrolment 对应的课程",
+    "No Moodle course titles contain a Subject Area and Catalogue Number",
+)
+
+
+def classify_retry_task(task: dict[str, Any]) -> str:
+    """Return ``permanent`` for failures a retry cannot fix, else ``transient``."""
+    error = str(task.get("error") or "")
+    if any(marker in error for marker in _PERMANENT_FAILURE_MARKERS):
+        return "permanent"
+    return "transient"
+
+
+def annotate_retry_tasks(
+    tasks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Tag every retry task with its kind so status can separate them."""
+    annotated: list[dict[str, Any]] = []
+    for task in tasks:
+        kind = classify_retry_task(task)
+        annotated.append({**task, "kind": kind, "retry_recommended": kind == "transient"})
+    return annotated
+
+
 def _workflow_stage_label(stage: str) -> str:
     return {
         "enrollment": "课程列表获取",
@@ -80,9 +109,20 @@ class CourseSyncWorkflow:
         retry_tasks = list((result or {}).get("retry_tasks") or [])
         if not retry_tasks:
             raise DashboardError("最近一次同步没有可重试的失败项目。")
+        include_permanent = payload.get("include_permanent") is True
+        runnable = [
+            task
+            for task in retry_tasks
+            if include_permanent or classify_retry_task(task) != "permanent"
+        ]
+        if not runnable:
+            raise DashboardError(
+                "最近一次同步只剩永久性来源失败（例如官方目录中不存在该课程），"
+                "重试不会改变结果；请先核对来源，或显式请求 include_permanent。"
+            )
         return self.controller.start(
             self.run,
-            retry_tasks=retry_tasks,
+            retry_tasks=runnable,
         )
 
     def course_sync_status(self) -> dict[str, Any]:
@@ -499,6 +539,7 @@ class CourseSyncWorkflow:
                 failed_course_count += sum(
                     1 for value in retry_remaining if value.get("course_code")
                 ) - len(moodle_failures) - len(sis_failures)
+                retry_remaining = annotate_retry_tasks(retry_remaining)
             payload = {
                 "discovered_course_count": len(courses),
                 "succeeded_course_count": moodle_completed,

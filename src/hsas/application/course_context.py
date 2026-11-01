@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-import re
 from typing import Literal
 
 from pydantic import Field
@@ -14,11 +13,9 @@ from hsas.application.material_search import (
     search_evidence,
     search_materials,
 )
+from hsas.application.text_tokens import tokenize
 from hsas.domain.courses import StrictModel
 from hsas.domain.information import CourseRecord, InformationItem, InformationStore
-
-
-WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
 
 
 class CourseFactHit(StrictModel):
@@ -61,7 +58,7 @@ def build_course_question_context(
 ) -> CourseQuestionContext:
     """Retrieve structured facts and source excerpts without calling an LLM."""
     normalized_question = question.strip()
-    tokens = _tokenize(normalized_question)
+    tokens = tokenize(normalized_question, unique=True)
     if not tokens:
         raise ValueError("course question must contain searchable text")
     if item_limit < 1 or item_limit > 100:
@@ -207,14 +204,3 @@ def _item_date_key(item: InformationItem) -> str:
     return min((value.isoformat() for value in candidates if value is not None), default="9999")
 
 
-def _tokenize(text: str) -> list[str]:
-    tokens: list[str] = []
-    for match in WORD.findall(text.casefold()):
-        if re.fullmatch(r"[\u3400-\u9fff]+", match):
-            tokens.extend(
-                match[index : index + 2]
-                for index in range(max(len(match) - 1, 1))
-            )
-        elif len(match) > 1 or match.isdigit():
-            tokens.append(match)
-    return list(dict.fromkeys(tokens))

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from hashlib import sha256
+from typing import TypeAlias
 from zoneinfo import ZoneInfo
 
 from hsas.domain.information import InformationItem, InformationStore, WeeklyRecurrence
 
 
 WEEKDAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+Occurrence: TypeAlias = tuple[datetime, datetime | None]
 
 
 def calendar_milestones(item: InformationItem) -> list[tuple[str, date | datetime, datetime | None]]:
@@ -29,6 +31,71 @@ def calendar_milestones(item: InformationItem) -> list[tuple[str, date | datetim
         if value is not None and value != primary:
             result.append((role, value, None))
     return result
+
+
+def expand_occurrences(
+    item_or_recurrence: InformationItem | WeeklyRecurrence,
+    timezone: str,
+    *,
+    window_end: date | datetime | None = None,
+) -> list[Occurrence]:
+    """Expand one weekly rule into timezone-aware ``(start, end)`` pairs.
+
+    The recurrence model is the source of truth for regular weekdays,
+    additions, exclusions and changed/cancelled exceptions.  Explicit dates
+    outside the regular validity range remain supported for make-up classes;
+    ``window_end`` bounds both regular and explicit occurrences when a caller
+    needs a smaller projection window.
+    """
+    if isinstance(item_or_recurrence, InformationItem):
+        recurrence = item_or_recurrence.recurrence
+    else:
+        recurrence = item_or_recurrence
+    if recurrence is None:
+        return []
+    if (recurrence.valid_until - recurrence.valid_from).days > 366 * 5:
+        raise ValueError("calendar rule exceeds the five-year expansion limit")
+
+    bound = window_end.date() if isinstance(window_end, datetime) else window_end
+    regular_end = (
+        min(recurrence.valid_until, bound)
+        if bound is not None
+        else recurrence.valid_until
+    )
+    dates: set[date] = set()
+    if regular_end >= recurrence.valid_from:
+        dates.update(_weekly_dates(recurrence, end=regular_end))
+    dates.update(
+        value for value in recurrence.additional_dates
+        if bound is None or value <= bound
+    )
+    exceptions = {exception.date: exception for exception in recurrence.exceptions}
+    dates.update(
+        exception.date
+        for exception in recurrence.exceptions
+        if exception.status == "changed"
+        and (bound is None or exception.date <= bound)
+    )
+
+    zone = ZoneInfo(timezone)
+    expanded: list[Occurrence] = []
+    for day in sorted(dates):
+        exception = exceptions.get(day)
+        if exception and exception.status == "cancelled":
+            continue
+        # A changed exception deliberately re-opens an excluded regular date;
+        # this preserves the established "override wins" behavior.
+        if day in recurrence.excluded_dates and not (
+            exception and exception.status == "changed"
+        ):
+            continue
+        start = exception.start_time if exception and exception.start_time else recurrence.start_time
+        end = exception.end_time if exception and exception.end_time else recurrence.end_time
+        expanded.append((
+            datetime.combine(day, start, zone),
+            datetime.combine(day, end, zone) if end is not None else None,
+        ))
+    return expanded
 
 
 def build_ics(store: InformationStore) -> str:
@@ -107,28 +174,23 @@ def _recurring_events(
 ) -> list[str]:
     recurrence = item.recurrence
     assert recurrence is not None
-    first_date = _first_occurrence(recurrence)
-    if first_date > recurrence.valid_until:
+    occurrences = expand_occurrences(item, timezone)
+    weekly_dates = _weekly_dates(recurrence)
+    if not weekly_dates:
         # A short rule may contain no matching weekday. Preserve only explicit
         # additions/overrides instead of exporting a phantom DTSTART after UNTIL.
         exceptions = {exception.date: exception for exception in recurrence.exceptions}
-        dates = set(recurrence.additional_dates) - set(recurrence.excluded_dates)
-        dates.update(exception.date for exception in recurrence.exceptions if exception.status == "changed")
         result = []
-        for day in sorted(dates):
+        for start, end in occurrences:
+            day = start.astimezone(ZoneInfo(timezone)).date()
             exception = exceptions.get(day)
-            if exception and exception.status == "cancelled":
-                continue
-            start = exception.start_time if exception and exception.start_time else recurrence.start_time
-            end = exception.end_time if exception and exception.end_time else recurrence.end_time
             event_item = item.model_copy(update={
                 "location": (exception.location if exception and exception.location else item.location)})
             result.extend(_milestone_event(event_item,
                 exception.title if exception and exception.title else summary,
-                timezone, stamp, day.isoformat(),
-                datetime.combine(day, start, ZoneInfo(timezone)),
-                datetime.combine(day, end, ZoneInfo(timezone))))
+                timezone, stamp, day.isoformat(), start, end))
         return result
+    first_date = weekly_dates[0]
     lines = _event_head(item, summary, stamp)
     lines.extend(
         [
@@ -139,23 +201,30 @@ def _recurring_events(
             f"UNTIL={_until_value(recurrence.valid_until, timezone)}",
         ]
     )
-    cancelled = set(recurrence.excluded_dates)
-    cancelled.update(
+    cancelled_dates = set(recurrence.excluded_dates)
+    cancelled_dates.update(
         exception.date for exception in recurrence.exceptions if exception.status == "cancelled"
     )
     changed_dates = {
         exception.date for exception in recurrence.exceptions if exception.status == "changed"
     }
-    cancelled.update(changed_dates)
+    cancelled = (cancelled_dates | changed_dates) & set(weekly_dates)
     if cancelled:
         values = ",".join(
             _local_value(value, recurrence.start_time) for value in sorted(cancelled)
         )
         lines.append(f"EXDATE;TZID={timezone}:{values}")
-    if recurrence.additional_dates:
+    changed_or_cancelled = cancelled_dates | changed_dates
+    additions = sorted(
+        value for value in recurrence.additional_dates
+        if value not in set(weekly_dates)
+        and value not in recurrence.excluded_dates
+        and value not in changed_or_cancelled
+    )
+    if additions:
         values = ",".join(
             _local_value(value, recurrence.start_time)
-            for value in sorted(recurrence.additional_dates)
+            for value in additions
         )
         lines.append(f"RDATE;TZID={timezone}:{values}")
     lines.append("END:VEVENT")
@@ -191,10 +260,25 @@ def _recurring_events(
 
 
 def _first_occurrence(recurrence: WeeklyRecurrence) -> date:
-    cursor = recurrence.valid_from
-    while cursor.weekday() not in recurrence.weekdays:
-        cursor = date.fromordinal(cursor.toordinal() + 1)
-    return cursor
+    return _weekly_dates(recurrence)[0]
+
+
+def _weekly_dates(
+    recurrence: WeeklyRecurrence,
+    *,
+    end: date | None = None,
+) -> list[date]:
+    """Return regular weekday dates in the recurrence's bounded window."""
+    last = recurrence.valid_until if end is None else min(recurrence.valid_until, end)
+    if last < recurrence.valid_from:
+        return []
+    days = (last - recurrence.valid_from).days + 1
+    return [
+        recurrence.valid_from + timedelta(days=offset)
+        for offset in range(days)
+        if (recurrence.valid_from + timedelta(days=offset)).weekday()
+        in recurrence.weekdays
+    ]
 
 
 def _description(item: InformationItem) -> str:

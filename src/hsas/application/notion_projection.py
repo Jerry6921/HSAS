@@ -7,14 +7,12 @@ to Apple apps; historical execution rows require an explicit compatibility flag.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from hsas.domain.information import InformationStore
-from hsas.domain.information.calendar import calendar_milestones
+from hsas.domain.information.calendar import calendar_milestones, expand_occurrences
 from hsas.domain.information.models import InformationItem
 from hsas.domain.information.models import moodle_source_course_ids
 
@@ -282,27 +280,12 @@ def expand_calendar(item: dict[str, Any], timezone: str) -> list[dict[str, Any]]
     recurrence = item.get("recurrence")
     if not recurrence:
         return rows
-    first = datetime.fromisoformat(recurrence["valid_from"]).date()
-    last = datetime.fromisoformat(recurrence["valid_until"]).date()
-    if (last - first).days > 366 * 5:
-        raise ValueError("Notion calendar rule exceeds the five-year expansion limit")
-    dates = {first + timedelta(days=n) for n in range((last - first).days + 1)
-        if (first + timedelta(days=n)).weekday() in recurrence["weekdays"]}
-    dates.update(datetime.fromisoformat(d).date() for d in recurrence["additional_dates"])
-    dates.difference_update(datetime.fromisoformat(d).date() for d in recurrence["excluded_dates"])
-    exceptions = {v["date"]: v for v in recurrence["exceptions"]}
-    dates.update(datetime.fromisoformat(d).date() for d, v in exceptions.items()
-        if v["status"] == "changed")
-    for day in sorted(dates):
-        exception = exceptions.get(day.isoformat(), {})
-        if exception.get("status") == "cancelled":
-            continue
-        start = exception.get("start_time") or recurrence["start_time"]
-        end = exception.get("end_time") or recurrence["end_time"]
-        zone = ZoneInfo(timezone)
+    exceptions = {value.date: value for value in model.recurrence.exceptions}
+    for start, end in expand_occurrences(model, timezone):
+        day = start.date()
+        exception = exceptions.get(day)
         rows.append({"identity": f"{item['item_id']}:{day.isoformat()}",
-            "title": exception.get("title") or item["title"],
-            "start": datetime.fromisoformat(f"{day}T{start}").replace(tzinfo=zone).isoformat(),
-            "end": datetime.fromisoformat(f"{day}T{end}").replace(tzinfo=zone).isoformat(),
-            "location": exception.get("location") or item.get("location")})
+            "title": exception.title if exception and exception.title else item["title"],
+            "start": start.isoformat(), "end": end.isoformat() if end else None,
+            "location": exception.location if exception and exception.location else item.get("location")})
     return rows

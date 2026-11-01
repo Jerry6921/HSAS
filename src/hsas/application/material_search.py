@@ -33,13 +33,13 @@ from hsas.application.material_index import (
     search_index,
     update_index_courses,
 )
+from hsas.application.text_tokens import tokenize
 
 
 UNIT_MARKER = re.compile(
     r"^--- (Page|Slide|Speaker notes|Document part) (\d+) ---\s*$",
     re.MULTILINE,
 )
-WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
 MARKDOWN_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 EvidenceSourceKind = Literal[
     "file", "moodle_activity", "information_course", "information_item"
@@ -316,7 +316,7 @@ def search_evidence(
 ) -> MaterialSearchResult:
     """Search the unified local evidence index, including canonical facts."""
     normalized_query = query.strip()
-    query_tokens = _tokenize(normalized_query)
+    query_tokens = tokenize(normalized_query)
     if not query_tokens:
         raise ValueError("material query must contain searchable text")
     if limit < 1 or limit > 20:
@@ -706,7 +706,7 @@ def _chunk_document(
                 if not selected:
                     continue
                 content = " ".join(selected).strip()
-                tokens = tuple(_tokenize(" ".join(
+                tokens = tuple(tokenize(" ".join(
                     [course_title, activity_name, filename, heading or "", content]
                 )))
                 if not tokens:
@@ -755,7 +755,7 @@ def _chunk_document(
                 relative_text_path=relative_text_path, page_start=None, page_end=None,
                 source_unit_label="Table row", source_unit_start=row_number,
                 source_unit_end=row_number, chunk_index=chunk_index, text=content,
-                tokens=tuple(_tokenize(" ".join([course_title, activity_name, content]))),
+                tokens=tuple(tokenize(" ".join([course_title, activity_name, content]))),
                 content_tables=[table],
             ))
             chunk_index += 1
@@ -902,19 +902,6 @@ def _information_item_text(item: Any) -> str:
         if field not in {"item_id", "course_id", "title"}:
             lines.extend(_labeled_lines(value, field))
     return "\n".join(lines)
-
-
-def _tokenize(text: str) -> list[str]:
-    tokens: list[str] = []
-    for match in WORD.findall(text.casefold()):
-        if re.fullmatch(r"[\u3400-\u9fff]+", match):
-            tokens.extend(
-                match[index : index + 2]
-                for index in range(max(len(match) - 1, 1))
-            )
-        elif len(match) > 1 or match.isdigit():
-            tokens.append(match)
-    return tokens
 
 
 def _rank(

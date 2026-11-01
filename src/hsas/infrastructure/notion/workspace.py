@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hsas.application.notion_projection import rich_text, select
+from hsas.domain.information.notion_properties import rich_text, select
 from hsas.infrastructure.notion.client import NotionAPIError, NotionClient
 from hsas.infrastructure.notion.export import plain_property
 from hsas.infrastructure.storage.json_store import read_json, write_json

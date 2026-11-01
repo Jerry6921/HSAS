@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 import json
 
-from hsas.application.notion_projection import date_property, rich_text, select
+from hsas.domain.information.notion_properties import date_property, rich_text, select
 from hsas.infrastructure.notion.client import NotionClient
 from hsas.infrastructure.notion.config import load_config
 from hsas.infrastructure.notion.export import plain_property

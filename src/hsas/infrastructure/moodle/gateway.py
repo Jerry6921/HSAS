@@ -16,11 +16,6 @@ from hsas.application.ports.gateways import (
     SyncBatchResult,
     SyncCourseResult,
 )
-from hsas.application.material_search import (
-    invalidate_material_index,
-    refresh_material_index,
-)
-
 from hsas.infrastructure.moodle.activity_downloader import download_course_files
 from hsas.infrastructure.moodle.client import (
     discover_all_course_states,
@@ -257,10 +252,6 @@ async def _persist_course(
             raise_if_cancelled(cancel_requested)
             write_model(staged_course_path, archive)
             output_path = transaction.commit()
-        try:
-            refresh_material_index(live_storage_root, {course_id})
-        except (OSError, ValueError):
-            invalidate_material_index(live_storage_root)
     return archive, changes, output_path
 
 

@@ -37,7 +37,6 @@ from hsas.core.services.records import (
 )
 from hsas.core.services.personal_inbox import PersonalInboxService
 from hsas.core.services.information import InformationContractService
-from hsas.core.container import CoreServices
 from hsas.core.services.status import OperationalStatusService
 from hsas.core.services.reviews import SourceReviewService
 from hsas.core.sync.controller import CourseSyncController
@@ -96,7 +95,6 @@ class HIQSCore:
     sync_workflow: CourseSyncWorkflow = field(init=False, repr=False)
     attention_service: AttentionService = field(init=False, repr=False)
     information_contract_service: InformationContractService = field(init=False, repr=False)
-    services: CoreServices = field(init=False, repr=False)
     status_service: OperationalStatusService = field(init=False, repr=False)
     lifecycle_service: ApplicationLifecycleService = field(init=False, repr=False)
     evidence_operation_service: LocalEvidenceOperationService = field(init=False, repr=False)
@@ -168,25 +166,6 @@ class HIQSCore:
         self.notion_controls_service = NotionControlsService(
             self.resources_dir, self.course_sync_status, self.information_snapshot,
             self.start_course_sync, self.retry_failed_course_sync, self.cancel_course_sync)
-        self.services = CoreServices(
-            records=self.record_service,
-            reviews=self.review_service,
-            inbox=self.personal_inbox_service,
-            materials=self.material_query_service,
-            dashboard=self.dashboard_projection_service,
-            sync=self.sync_workflow,
-            attention=self.attention_service,
-            information=self.information_contract_service,
-            status=self.status_service,
-            lifecycle=self.lifecycle_service,
-            evidence_operations=self.evidence_operation_service,
-            sources=self.source_service,
-            notion=self.notion_service,
-            apple=self.apple_service,
-            notion_controls=self.notion_controls_service,
-            course_notes=self.course_notes_service,
-            course_planning=self.course_planning_service,
-        )
 
     @property
     def sync_job_lock(self) -> Lock:

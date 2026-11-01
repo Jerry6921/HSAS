@@ -15,26 +15,12 @@ from hsas.domain.information import InformationStore
 from hsas.domain.information.calendar import calendar_milestones, expand_occurrences
 from hsas.domain.information.models import InformationItem
 from hsas.domain.information.models import moodle_source_course_ids
-
-
-def rich_text(value: str | None) -> dict[str, Any]:
-    text = value or ""
-    return {"rich_text": [
-        {"type": "text", "text": {"content": text[i:i + 2000]}}
-        for i in range(0, len(text), 2000)
-    ]}
-
-
-def title(value: str) -> dict[str, Any]:
-    return {"title": [{"text": {"content": value[:2000]}}]}
-
-
-def date_property(start: str | None, end: str | None = None) -> dict[str, Any]:
-    return {"date": {"start": start, "end": end} if start else None}
-
-
-def select(value: str) -> dict[str, Any]:
-    return {"select": {"name": value}}
+from hsas.domain.information.notion_properties import (
+    date_property,
+    rich_text,
+    select,
+    title,
+)
 
 
 def _join(values: list[Any]) -> str:

@@ -41,6 +41,7 @@ def test_sync_command_dispatches_single_or_all(tmp_path: Path, monkeypatch) -> N
         discovered_course_count = 1
         failures = ()
         report_path = tmp_path / "sync-report.json"
+        course_id = "138907"
 
     class Service:
         def sync_all(self):

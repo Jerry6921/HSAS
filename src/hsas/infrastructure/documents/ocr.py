@@ -16,10 +16,6 @@ from tempfile import TemporaryDirectory
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-from hsas.application.material_search import (
-    invalidate_material_index,
-    refresh_material_index,
-)
 from hsas.domain.courses import ArchiveIndex, iter_files
 from hsas.domain.courses.statistics import refresh_archive_stats
 from hsas.domain.courses.models import StoredFile
@@ -150,16 +146,12 @@ def run_ocr_queue(
             refresh_archive_stats(index.archive)
             archive_path = index.source_path or resources / "courses" / course_id / "course.json"
             write_model(archive_path, index.archive)
-    if changed_courses:
-        try:
-            refresh_material_index(resources, changed_courses)
-        except (OSError, ValueError):
-            invalidate_material_index(resources)
     return {
         "processed_count": len(processed),
         "failed_count": len(failures),
         "processed": processed,
         "failures": failures,
+        "changed_course_ids": sorted(changed_courses),
     }
 
 

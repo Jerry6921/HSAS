@@ -9,6 +9,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from hsas.application.material_search import (
+    invalidate_material_index,
+    refresh_material_index,
+)
 from hsas.core.ports import HIQSPortError
 from hsas.core.services.dashboard import pending_summary
 from hsas.core.services.reviews import SourceReviewService
@@ -150,6 +154,10 @@ class CourseSyncWorkflow:
             raise DashboardError("course_id must be a bounded non-empty string.")
         with self.mutation_lock:
             result = self.course_service_factory(self.resources_dir).sync_course(course_id.strip())
+        try:
+            refresh_material_index(self.resources_dir, {course_id.strip()})
+        except (OSError, ValueError):
+            invalidate_material_index(self.resources_dir)
         return {
             "status": "hydrated",
             "course_id": result.course_id,
@@ -540,6 +548,11 @@ class CourseSyncWorkflow:
                     1 for value in retry_remaining if value.get("course_code")
                 ) - len(moodle_failures) - len(sis_failures)
                 retry_remaining = annotate_retry_tasks(retry_remaining)
+                # Derived-index maintenance belongs to CORE, not the collector.
+                try:
+                    refresh_material_index(self.resources_dir)
+                except (OSError, ValueError):
+                    invalidate_material_index(self.resources_dir)
             payload = {
                 "discovered_course_count": len(courses),
                 "succeeded_course_count": moodle_completed,

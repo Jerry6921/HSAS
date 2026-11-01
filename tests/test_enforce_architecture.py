@@ -154,6 +154,31 @@ def test_mcp_and_web_depend_on_core_port_not_internal_layers() -> None:
     assert violations == []
 
 
+def test_infrastructure_imports_application_only_through_ports() -> None:
+    """Adapters may depend on application ports, never on application internals."""
+    violations: list[str] = []
+    for path in sorted((SOURCE_ROOT / "infrastructure").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            for module in modules:
+                if not module.startswith("hsas.application"):
+                    continue
+                if module == "hsas.application.ports" or module.startswith(
+                    "hsas.application.ports."
+                ):
+                    continue
+                violations.append(
+                    f"{path.relative_to(ROOT).as_posix()}:{node.lineno} -> {module}"
+                )
+
+    assert violations == []
+
+
 def _import_violations(
     root: Path,
     *,

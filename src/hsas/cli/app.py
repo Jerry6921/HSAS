@@ -181,14 +181,27 @@ def sync_courses(
         profile_dir=hku_portal_profile_dir(resources),
     )
     service = _course_service(settings)
+    from hsas.application.material_search import (
+        invalidate_material_index,
+        refresh_material_index,
+    )
+
     if course is None:
         result = service.sync_all()
+        try:
+            refresh_material_index(resources)
+        except (OSError, ValueError):
+            invalidate_material_index(resources)
         typer.echo(
             f"Synced {len(result.succeeded_course_ids)}/{result.discovered_course_count} "
             f"courses; {len(result.failures)} failed -> {result.report_path}"
         )
         return
     result = service.sync_course(course)
+    try:
+        refresh_material_index(resources, {result.course_id})
+    except (OSError, ValueError):
+        invalidate_material_index(resources)
     typer.echo(
         f"Synced {result.course_title}: {result.change_count} change(s) -> "
         f"{result.output_path}"

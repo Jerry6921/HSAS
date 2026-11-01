@@ -7,6 +7,10 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
+from hsas.application.material_search import (
+    invalidate_material_index,
+    refresh_material_index,
+)
 from hsas.core.ports import HIQSPortError
 from hsas.infrastructure.documents.ocr import run_ocr_queue
 from hsas.infrastructure.moodle.page_preview import MoodlePreviewError, preview_moodle_page
@@ -84,11 +88,21 @@ class LocalEvidenceOperationService:
             raise HIQSPortError("请先确认开始本地批量 OCR。")
         with self._mutation_lock:
             try:
-                return run_ocr_queue(self._resources_dir)
+                result = run_ocr_queue(self._resources_dir)
             except (OSError, ValueError) as exc:
                 raise HIQSPortError(
                     f"OCR 处理失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
+        changed = set(result.get("changed_course_ids") or [])
+        if changed:
+            # The collector reports what changed; CORE keeps the derived index
+            # consistent so collectors never import application internals.
+            try:
+                refresh_material_index(self._resources_dir, changed)
+            except (OSError, ValueError):
+                invalidate_material_index(self._resources_dir)
+                result["index_status"] = "stale"
+        return result
 
     def moodle_page_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         url = str(payload.get("url", "")).strip()

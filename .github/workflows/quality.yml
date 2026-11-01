@@ -48,7 +48,7 @@ jobs:
         if: matrix.python-version == '3.13'
         run: |
           python -m pip install pip-audit
-          python -m pip-audit -r requirements.lock --ignore-vuln PYSEC-2026-1845
+          python -m pip_audit -r requirements.lock --ignore-vuln PYSEC-2026-1845
       - name: Verify SQLite FTS5
         run: python -c "import sqlite3; connection = sqlite3.connect(':memory:'); connection.execute('CREATE VIRTUAL TABLE probe USING fts5(content)')"
       - name: Lint

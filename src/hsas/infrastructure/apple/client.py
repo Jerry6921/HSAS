@@ -1,4 +1,9 @@
-"""Build and launch a named EventKit helper with private file-based IPC."""
+"""Build and launch a named EventKit helper with private file-based IPC.
+
+The helper holds macOS TCC Calendar/Reminders access, so its integrity stamp must
+cover the compiled executable as well as the Swift source: a stamp over source
+alone would let a replaced binary keep passing the check.
+"""
 
 from hashlib import sha256
 from pathlib import Path
@@ -12,6 +17,35 @@ from typing import Any
 from hsas.infrastructure.storage.json_store import read_json, write_json
 
 
+BRIDGE_STAMP_SCHEMA = "2.0"
+
+
+def _digest(value: bytes) -> str:
+    return sha256(value).hexdigest()
+
+
+def _file_digest(path: Path) -> str:
+    return _digest(path.read_bytes())
+
+
+def _read_bridge_stamp(path: Path) -> dict[str, Any] | None:
+    """Read the helper stamp; legacy plain-text stamps are treated as invalid."""
+    if not path.is_file():
+        return None
+    try:
+        value = read_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("schema_version") != BRIDGE_STAMP_SCHEMA:
+        return None
+    return value
+
+
+def _write_bridge_stamp(path: Path, value: dict[str, Any]) -> None:
+    write_json(path, value)
+    path.chmod(0o600)
+
+
 class NativeAppleGateway:
     def __init__(self, resources: Path):
         self.root = resources / "apple"
@@ -23,10 +57,17 @@ class NativeAppleGateway:
         bundle = self.root / "HIQS Apple Sync.app"
         contents = bundle / "Contents"
         executable = contents / "MacOS" / "HIQSAppleSync"
+        stamp_path = self.root / "bridge.sha256"
         target = f"{platform.machine()}-apple-macosx14.0"
-        fingerprint = sha256(source.read_bytes() + target.encode()).hexdigest()
-        stamp = self.root / "bridge.sha256"
-        if executable.is_file() and stamp.is_file() and stamp.read_text() == fingerprint:
+        source_digest = _digest(source.read_bytes() + target.encode())
+        stamp = _read_bridge_stamp(stamp_path)
+        if (
+            stamp is not None
+            and executable.is_file()
+            and stamp.get("source_sha256") == source_digest
+            and stamp.get("target") == target
+            and stamp.get("binary_sha256") == _file_digest(executable)
+        ):
             return bundle
         executable.parent.mkdir(parents=True, exist_ok=True)
         info = {"CFBundleIdentifier": "io.github.hiqs.apple-sync", "CFBundleName": "HIQS Apple Sync",
@@ -45,7 +86,14 @@ class NativeAppleGateway:
             raise ValueError("EventKit helper compilation failed: " + result.stderr[-3000:])
         subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(bundle)],
                        check=True, capture_output=True, timeout=30)
-        stamp.write_text(fingerprint)
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(bundle)],
+                       check=True, capture_output=True, timeout=30)
+        _write_bridge_stamp(stamp_path, {
+            "schema_version": BRIDGE_STAMP_SCHEMA,
+            "source_sha256": source_digest,
+            "target": target,
+            "binary_sha256": _file_digest(executable),
+        })
         return bundle
 
     def execute(self, payload: dict[str, Any]) -> dict[str, Any]:

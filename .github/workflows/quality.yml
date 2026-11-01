@@ -54,7 +54,13 @@ jobs:
         run: python -m ruff check src tests scripts
       - name: Verify Agent contract snapshots
         run: python scripts/generate_agent_contracts.py && git diff --exit-code -- contracts
+      # Coverage varies slightly between interpreter versions, so the threshold is
+      # enforced on exactly one leg. Every supported version still runs the suite.
       - name: Test
+        if: matrix.python-version != '3.13'
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
+      - name: Test with coverage gate
+        if: matrix.python-version == '3.13'
         run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider --cov=hsas --cov-report=term-missing --cov-fail-under=75
       - name: Build wheel
         run: python -m pip wheel . --no-deps --wheel-dir dist-wheel

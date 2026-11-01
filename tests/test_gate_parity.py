@@ -35,6 +35,32 @@ def test_local_gate_runs_the_lint_and_test_steps_ci_runs() -> None:
     assert "no:cacheprovider" in GATE and "no:cacheprovider" in WORKFLOW
 
 
+def _step_blocks() -> list[list[str]]:
+    blocks: list[list[str]] = []
+    for line in WORKFLOW.splitlines():
+        if line.strip().startswith("- name:"):
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+    return blocks
+
+
+def test_coverage_is_enforced_on_exactly_one_interpreter_leg() -> None:
+    """A version-dependent threshold enforced on every leg is a flaky gate."""
+    steps = [block for block in _step_blocks() if any("cov-fail-under" in line for line in block)]
+    assert len(steps) == 1, "coverage is enforced in more than one CI step"
+    guards = [line.strip() for line in steps[0] if "python-version" in line and "if:" in line]
+    assert guards == ["if: matrix.python-version == '3.13'"], guards
+
+
+def test_every_interpreter_still_runs_the_suite() -> None:
+    plain = [block for block in _step_blocks() if any(
+        "pytest" in line and "cov" not in line for line in block
+    )]
+    assert plain, "no CI step runs the suite without coverage"
+    assert any("python-version != '3.13'" in line for block in plain for line in block)
+
+
 def test_every_committed_contract_is_checked_locally() -> None:
     for contract in sorted((ROOT / "contracts").glob("*.json")):
         assert contract.name in GATE, (

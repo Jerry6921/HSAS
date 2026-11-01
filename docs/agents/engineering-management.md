@@ -91,7 +91,8 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 
 Run `python scripts/check_all.py` first. It is the single local gate: lint, every
 committed contract snapshot (compared in memory, so it never rewrites files), and the
-default test suite at the coverage threshold CI enforces. `tests/test_gate_parity.py`
+default test suite at the coverage threshold CI enforces (CI measures it on one
+interpreter leg; every leg still runs the suite). `tests/test_gate_parity.py`
 compares the script against `.github/workflows/quality.yml`, so the two cannot drift.
 
 Three CI steps stay release-only and are not in the local gate: the dependency audit,

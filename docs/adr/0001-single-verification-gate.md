@@ -25,6 +25,9 @@ makes a single combined gate cheap enough to run on every task.
 - Coverage is part of the gate because CI enforced it and the local gate did not: an
   agent could report a green run and still fail CI on `--cov-fail-under`. The threshold
   lives in one constant, and `tests/test_gate_parity.py` asserts it matches the workflow.
+- CI enforces the threshold on one interpreter leg, not on all four. Line coverage moves
+  slightly between versions, so a floor that fails on an unrelated version teaches people
+  to ignore the gate. Every supported version still runs the suite; only one measures it.
 - Dependency audit, wheel build and wheel smoke test stay release-only. They are
   network-bound or packaging-specific, and no task that leaves `pyproject.toml` and
   `requirements.lock` alone can break them.

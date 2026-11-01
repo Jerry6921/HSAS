@@ -30,6 +30,13 @@ secrets. Write course facts through the validated `HIQSPort` apply workflow:
 MCP `apply_information_update`, or `hsas information apply` for recovery.
 Never edit the canonical `information.json` directly.
 
+Operator tools are not agent tools. `login_*` and `configure_apple_sync*` open a browser
+or request native permissions, so they need the user present. `cancel_course_sync`,
+`cancel_course_plan`, `export_notion`, `sync_apple` and `sync_notion` halt work or write
+outside the local store, so they need explicit confirmation in the same turn. Never call
+any of them because a task merely seemed to need it; a refused call is cheap, an
+unattended login prompt or a cancelled sync is not.
+
 ## Repository conventions
 
 ### Engineering management

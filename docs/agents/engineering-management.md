@@ -6,7 +6,8 @@ contracts and their failure modes, not by line count. Every rule below exists to
 that boundary visible and cheap to verify.
 
 Snapshot used to set these rules (measured 2026-11-02): ~23k lines in `src/hsas/`,
-365 tests running offline in ~30s (78% statement coverage), `contracts/` gated by CI,
+400 tests running offline in ~7s (78% statement coverage; the native Swift
+test is marked slow and opt-in), `contracts/` gated by CI,
 four product Skills, a 57-tool MCP surface, and six external systems. Most complexity
 sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 

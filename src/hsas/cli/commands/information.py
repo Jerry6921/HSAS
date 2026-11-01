@@ -8,24 +8,10 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.information import (
-    InformationServiceError,
-    build_information_template,
-    load_information,
-)
-from hsas.core import HIQSPortError, build_port
-from hsas.domain.information import InformationUpdate
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage import JsonInformationRepository
-from hsas.infrastructure.storage.json_store import read_json, write_json
-from hsas.codegen.typescript import schema_to_typescript
-
-
 information_app = typer.Typer(
     no_args_is_help=True,
     help="Validate and write AI-authored course information",
 )
-INFORMATION_REPOSITORY = JsonInformationRepository()
 
 
 @information_app.command("show")
@@ -37,9 +23,12 @@ def information_show(
     ] = None,
 ) -> None:
     """Print the validated information database."""
+    from hsas.application.information import InformationServiceError, load_information
+    from hsas.infrastructure.storage import JsonInformationRepository
+
     path = information_path or _resources(ctx) / "information.json"
     try:
-        store = load_information(path, INFORMATION_REPOSITORY)
+        store = load_information(path, JsonInformationRepository())
     except InformationServiceError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(store.model_dump_json(indent=2))
@@ -54,6 +43,10 @@ def information_validate(
     ],
 ) -> None:
     """Validate an update without changing the local database."""
+    from hsas.application.information import InformationServiceError
+    from hsas.core import HIQSPortError, build_port
+    from hsas.infrastructure.storage.json_store import read_json
+
     try:
         result = build_port(_resources(ctx)).validate_information_update(
             {"update": read_json(update_path)}
@@ -114,6 +107,10 @@ def information_apply(
     ] = None,
 ) -> None:
     """Atomically upsert reviewed course facts into information.json."""
+    from hsas.application.information import InformationServiceError
+    from hsas.core import HIQSPortError, build_port
+    from hsas.infrastructure.storage.json_store import read_json
+
     resources = _resources(ctx)
     path = information_path or resources / "information.json"
     if path != resources / "information.json":
@@ -191,6 +188,9 @@ def information_template(
     ] = False,
 ) -> None:
     """Create a ready-to-edit JSON update template for an AI agent."""
+    from hsas.application.information import build_information_template
+    from hsas.infrastructure.storage.json_store import write_json
+
     if output_path.exists() and not force:
         raise typer.BadParameter("Output already exists; use --force to replace it.")
     write_json(output_path, build_information_template().model_dump(mode="json"))
@@ -205,6 +205,9 @@ def information_schema(
     ] = None,
 ) -> None:
     """Print or save the exact JSON Schema accepted by the update command."""
+    from hsas.domain.information import InformationUpdate
+    from hsas.infrastructure.storage.json_store import write_json
+
     schema = InformationUpdate.model_json_schema()
     if output_path is None:
         typer.echo(json.dumps(schema, ensure_ascii=False, indent=2))
@@ -225,6 +228,9 @@ def information_types(
     force: Annotated[bool, typer.Option(help="Replace an existing generated file")] = False,
 ) -> None:
     """Generate deterministic TypeScript types from the canonical Pydantic schema."""
+    from hsas.codegen.typescript import schema_to_typescript
+    from hsas.domain.information import InformationUpdate
+
     if output_path.exists() and not force:
         raise typer.BadParameter("Output already exists; use --force to replace it.")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,6 +240,8 @@ def information_types(
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

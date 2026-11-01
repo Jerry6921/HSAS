@@ -7,22 +7,6 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.course_information_sync import (
-    SisCourseInfoSynchronizationService,
-)
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.sis.course_info import (
-    SisCourseInfoBrowserGateway,
-    sis_course_info_status,
-)
-from hsas.infrastructure.sis.course_info.review import (
-    SisCourseInfoReviewError,
-    acknowledge_sis_course_info_changes,
-    collect_sis_course_info_changes,
-)
-from hsas.infrastructure.storage.json_store import read_json, write_json
-
-
 sis_course_info_app = typer.Typer(
     no_args_is_help=True,
     help="Official HKU SIS course pages collected from Moodle course codes",
@@ -59,6 +43,9 @@ def sync(
 @sis_course_info_app.command("status")
 def status(ctx: typer.Context) -> None:
     """Show the local official-course-information source status."""
+    from hsas.infrastructure.sis.course_info import sis_course_info_status
+    from hsas.infrastructure.sis.course_info.review import collect_sis_course_info_changes
+
     value = sis_course_info_status(_resources(ctx))
     if not value["available"]:
         typer.echo("HKU SIS course information: no local snapshot")
@@ -77,6 +64,9 @@ def changes(
     output_path: Annotated[Path | None, typer.Option("--output")] = None,
 ) -> None:
     """Export official course pages awaiting AI review."""
+    from hsas.infrastructure.sis.course_info.review import collect_sis_course_info_changes
+    from hsas.infrastructure.storage.json_store import write_json
+
     batch = collect_sis_course_info_changes(_resources(ctx))
     if output_path is not None:
         write_json(output_path, batch)
@@ -94,6 +84,12 @@ def acknowledge(
     confirmed: Annotated[bool, typer.Option("--confirmed")] = False,
 ) -> None:
     """Advance the checkpoint after AI reviewed a batch with no fact changes."""
+    from hsas.infrastructure.sis.course_info.review import (
+        SisCourseInfoReviewError,
+        acknowledge_sis_course_info_changes,
+    )
+    from hsas.infrastructure.storage.json_store import read_json
+
     try:
         batch = read_json(batch_path)
         if not isinstance(batch, dict):
@@ -106,11 +102,16 @@ def acknowledge(
     typer.echo(f"HKU SIS checkpoint -> {checkpoint['acknowledged_through']}")
 
 
-def _service(resources_dir: Path) -> SisCourseInfoSynchronizationService:
+def _service(resources_dir: Path):
+    from hsas.application.course_information_sync import SisCourseInfoSynchronizationService
+    from hsas.infrastructure.sis.course_info import SisCourseInfoBrowserGateway
+
     return SisCourseInfoSynchronizationService(SisCourseInfoBrowserGateway(resources_dir))
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

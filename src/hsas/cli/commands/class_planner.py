@@ -7,22 +7,6 @@ from typing import Annotated
 
 import typer
 
-from hsas.infrastructure.class_planner.review import (
-    ClassPlannerReviewError,
-    acknowledge_class_planner_changes,
-    collect_class_planner_changes,
-)
-from hsas.application.class_planner_sync import (
-    ClassPlannerSynchronizationService,
-)
-from hsas.infrastructure.class_planner import (
-    ClassPlannerBrowserGateway,
-    class_planner_status,
-)
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage.json_store import read_json, write_json
-
-
 class_planner_app = typer.Typer(
     no_args_is_help=True,
     help="HKU Portal authenticated Class Planner timetable snapshots",
@@ -67,6 +51,8 @@ def sync(
 @class_planner_app.command("status")
 def status(ctx: typer.Context) -> None:
     """Show the latest local Class Planner snapshot summary."""
+    from hsas.infrastructure.class_planner import class_planner_status
+
     value = class_planner_status(_resources(ctx))
     if not value["available"]:
         typer.echo("Class Planner: no local snapshot")
@@ -89,6 +75,9 @@ def changes(
     ] = None,
 ) -> None:
     """Show Class Planner changes after the independent review checkpoint."""
+    from hsas.infrastructure.class_planner.review import collect_class_planner_changes
+    from hsas.infrastructure.storage.json_store import write_json
+
     batch = collect_class_planner_changes(_resources(ctx))
     if output_path is not None:
         write_json(output_path, batch)
@@ -106,6 +95,12 @@ def acknowledge(
     confirmed: Annotated[bool, typer.Option("--confirmed")] = False,
 ) -> None:
     """Advance the Class Planner checkpoint after a reviewed import."""
+    from hsas.infrastructure.class_planner.review import (
+        ClassPlannerReviewError,
+        acknowledge_class_planner_changes,
+    )
+    from hsas.infrastructure.storage.json_store import read_json
+
     try:
         checkpoint = acknowledge_class_planner_changes(
             _resources(ctx), read_json(batch_path), confirmed=confirmed
@@ -115,13 +110,18 @@ def acknowledge(
     typer.echo(f"Class Planner checkpoint -> {checkpoint['acknowledged_through']}")
 
 
-def _service(resources_dir: Path) -> ClassPlannerSynchronizationService:
+def _service(resources_dir: Path):
+    from hsas.application.class_planner_sync import ClassPlannerSynchronizationService
+    from hsas.infrastructure.class_planner import ClassPlannerBrowserGateway
+
     return ClassPlannerSynchronizationService(
         ClassPlannerBrowserGateway(resources_dir)
     )
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

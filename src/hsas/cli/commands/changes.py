@@ -8,23 +8,10 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.change_tracking import (
-    ChangeQueueError,
-    acknowledge_change_batch,
-    collect_pending_changes,
-)
-from hsas.domain.courses.change_queue import PendingChangeBatch
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage import JsonChangeQueueRepository, JsonInformationRepository
-from hsas.infrastructure.storage.json_store import read_json, write_json
-
-
 changes_app = typer.Typer(
     no_args_is_help=True,
     help="Inspect and acknowledge Moodle changes awaiting AI review",
 )
-CHANGE_REPOSITORY = JsonChangeQueueRepository()
-INFORMATION_REPOSITORY = JsonInformationRepository()
 
 
 @changes_app.command("list")
@@ -70,6 +57,8 @@ def changes_show(
     ] = None,
 ) -> None:
     """Show pending changes with the precise local files the AI should read."""
+    from hsas.infrastructure.storage.json_store import write_json
+
     batch = _pending_batch(_resources(ctx), course_ids=set(course_ids or []))
     payload = batch.model_dump(mode="json")
     if output_path is None:
@@ -105,11 +94,16 @@ def changes_acknowledge(
             "pass --reviewed-no-information-change."
         )
     try:
+        from hsas.application.change_tracking import ChangeQueueError, acknowledge_change_batch
+        from hsas.domain.courses.change_queue import PendingChangeBatch
+        from hsas.infrastructure.storage import JsonChangeQueueRepository
+        from hsas.infrastructure.storage.json_store import read_json
+
         batch = PendingChangeBatch.model_validate(read_json(batch_path))
         checkpoint = acknowledge_change_batch(
             _resources(ctx),
             batch,
-            CHANGE_REPOSITORY,
+            JsonChangeQueueRepository(),
             confirmed=confirmed,
         )
     except (OSError, ValueError, ChangeQueueError) as exc:
@@ -124,20 +118,27 @@ def _pending_batch(
     resources: Path,
     *,
     course_ids: set[str] | None = None,
-) -> PendingChangeBatch:
+) -> object:
+    from hsas.application.change_tracking import collect_pending_changes
+    from hsas.infrastructure.storage import JsonChangeQueueRepository, JsonInformationRepository
+
+    change_repository = JsonChangeQueueRepository()
+    information_repository = JsonInformationRepository()
     information = None
     information_path = resources / "information.json"
-    if INFORMATION_REPOSITORY.exists(information_path):
-        information = INFORMATION_REPOSITORY.load(information_path)
+    if information_repository.exists(information_path):
+        information = information_repository.load(information_path)
     return collect_pending_changes(
         resources,
-        CHANGE_REPOSITORY,
+        change_repository,
         information=information,
         course_ids=course_ids,
     )
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     root = ctx.find_root()
     if isinstance(root.obj, dict) and isinstance(root.obj.get("resources"), Path):
         return root.obj["resources"]

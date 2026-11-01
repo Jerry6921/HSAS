@@ -8,11 +8,6 @@ from typing import Annotated
 
 import typer
 
-from hsas.core import HIQSPortError, build_port
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage.json_store import read_json
-
-
 inbox_app = typer.Typer(
     no_args_is_help=True,
     help="Stage and review user-provided course information",
@@ -25,6 +20,9 @@ def inbox_add(
     note: Annotated[str | None, typer.Option("--note", help="Optional context from the user")] = None,
 ) -> None:
     """Add an AI-prepared personal update to the preview inbox."""
+    from hsas.core import HIQSPortError, build_port
+    from hsas.infrastructure.storage.json_store import read_json
+
     try:
         result = build_port(_resources(ctx)).add_personal_inbox(
             {"update": read_json(update_path), "title": title, "note": note}
@@ -37,6 +35,8 @@ def inbox_add(
 @inbox_app.command("list")
 def inbox_list(ctx: typer.Context) -> None:
     """Show pending drafts and their field-level preview."""
+    from hsas.core import HIQSPortError, build_port
+
     try:
         value = build_port(_resources(ctx)).personal_inbox_snapshot()
     except (OSError, ValueError, HIQSPortError) as exc:
@@ -50,6 +50,8 @@ def inbox_show(
     entry_id: Annotated[str, typer.Argument(help="Personal inbox entry ID")],
 ) -> None:
     """Print the complete validated update stored in one draft."""
+    from hsas.core import HIQSPortError, build_port
+
     try:
         value = build_port(_resources(ctx)).personal_inbox_entry(entry_id)
     except (OSError, ValueError, HIQSPortError) as exc:
@@ -67,6 +69,8 @@ def inbox_apply(
     ] = False,
 ) -> None:
     """Apply one reviewed draft to information.json and mark it complete."""
+    from hsas.core import HIQSPortError, build_port
+
     try:
         result = build_port(_resources(ctx)).apply_personal_inbox(
             {"entry_id": entry_id, "confirmed": confirmed}
@@ -81,6 +85,8 @@ def inbox_apply(
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

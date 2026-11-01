@@ -9,15 +9,6 @@ from typing import Annotated
 import typer
 import webbrowser
 
-from hsas.application.moodle_sync import CourseSynchronizationService
-from hsas.core import HIQSPortError, build_port
-from hsas.infrastructure.moodle.settings import Settings
-from hsas.infrastructure.moodle.gateway import MoodleCourseGateway
-from hsas.infrastructure.runtime import (
-    ensure_resources_layout,
-    get_runtime_paths,
-    hku_portal_profile_dir,
-)
 from .commands.information import information_app
 from .commands.class_planner import class_planner_app
 from .commands.calendar import calendar_app
@@ -30,7 +21,6 @@ from .commands.materials import materials_app
 from .commands.notion import notion_app
 from .commands.apple import apple_app
 from .commands.course_planning import course_planning_app
-from hsas.web.server import serve_dashboard
 
 
 app = typer.Typer(no_args_is_help=True, help="HKU Information Query System")
@@ -57,6 +47,8 @@ def main(
     ] = None,
 ) -> None:
     """Resolve and initialize the private runtime directory."""
+    from hsas.infrastructure.runtime import ensure_resources_layout, get_runtime_paths
+
     resources = (
         get_runtime_paths().create().resources_dir
         if resources_dir is None
@@ -68,6 +60,8 @@ def main(
 @app.command("list-status")
 def list_status(ctx: typer.Context) -> None:
     """Show information-database and downloaded-material status."""
+    from hsas.core import build_port
+
     resources = _resources(ctx)
     typer.echo(f"Resources: {resources}")
     status = build_port(resources).status_snapshot()
@@ -137,6 +131,8 @@ def query(
     ] = 20,
 ) -> None:
     """Return a cited local RAG packet for an AI to answer from."""
+    from hsas.core import HIQSPortError, build_port
+
     resources = _resources(ctx)
     try:
         context = build_port(resources).query_course(
@@ -155,6 +151,9 @@ def query(
 @app.command("login")
 def login(ctx: typer.Context) -> None:
     """Open Moodle and persist the user-completed SSO/MFA session."""
+    from hsas.infrastructure.moodle.settings import Settings
+    from hsas.infrastructure.runtime import hku_portal_profile_dir
+
     resources = _resources(ctx)
     _course_service(
         Settings.load(
@@ -173,6 +172,9 @@ def sync_courses(
     ] = None,
 ) -> None:
     """Download all accessible course files and create local text sidecars."""
+    from hsas.infrastructure.moodle.settings import Settings
+    from hsas.infrastructure.runtime import hku_portal_profile_dir
+
     resources = _resources(ctx)
     settings = Settings.load(
         output_dir=resources,
@@ -206,6 +208,9 @@ def ui(
     ] = True,
 ) -> None:
     """Open Notion after migration; retain local recovery until configured."""
+    from hsas.core import build_port
+    from hsas.web.server import serve_dashboard
+
     workspace = build_port(_resources(ctx)).notion_status().get("workspace_url")
     if workspace:
         typer.echo(workspace)
@@ -215,13 +220,18 @@ def ui(
     serve_dashboard(_resources(ctx), port=port, open_browser=open_browser)
 
 
-def _course_service(settings: Settings | None = None) -> CourseSynchronizationService:
+def _course_service(settings=None):
+    from hsas.application.moodle_sync import CourseSynchronizationService
+    from hsas.infrastructure.moodle.gateway import MoodleCourseGateway
+
     return CourseSynchronizationService(
         MoodleCourseGateway(settings, notify=typer.echo, wait_for_user=input)
     )
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

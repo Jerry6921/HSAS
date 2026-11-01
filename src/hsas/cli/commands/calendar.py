@@ -7,14 +7,7 @@ from typing import Annotated
 
 import typer
 
-from hsas.domain.information.calendar import build_ics
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage import JsonInformationRepository
-from hsas.infrastructure.storage.json_store import write_text
-
-
 calendar_app = typer.Typer(no_args_is_help=True, help="Export the HIQS calendar")
-INFORMATION_REPOSITORY = JsonInformationRepository()
 
 
 @calendar_app.command("export")
@@ -26,16 +19,23 @@ def export_calendar(
     ] = Path("HIQS-calendar.ics"),
 ) -> None:
     """Export all dated course information to an iCalendar file."""
+    from hsas.domain.information.calendar import build_ics
+    from hsas.infrastructure.storage import JsonInformationRepository
+    from hsas.infrastructure.storage.json_store import write_text
+
     resources = _resources(ctx)
     information_path = resources / "information.json"
-    if not INFORMATION_REPOSITORY.exists(information_path):
+    repository = JsonInformationRepository()
+    if not repository.exists(information_path):
         raise typer.BadParameter("information.json is unavailable")
-    store = INFORMATION_REPOSITORY.load(information_path)
+    store = repository.load(information_path)
     write_text(output_path, build_ics(store))
     typer.echo(f"Calendar exported: {output_path}")
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

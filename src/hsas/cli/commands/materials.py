@@ -8,10 +8,6 @@ from typing import Annotated
 
 import typer
 
-from hsas.application.material_search import list_materials, search_materials
-from hsas.infrastructure.runtime import get_runtime_paths
-
-
 materials_app = typer.Typer(
     no_args_is_help=True,
     help="List and search locally downloaded course materials",
@@ -27,6 +23,8 @@ def materials_list(
     ] = None,
 ) -> None:
     """Print a machine-readable manifest of every locally downloaded file."""
+    from hsas.application.material_search import list_materials
+
     resources = _resources(ctx)
     try:
         payload = list_materials(
@@ -58,6 +56,8 @@ def materials_search(
     ] = 6,
 ) -> None:
     """Search extracted course text and return page-aware JSON evidence."""
+    from hsas.application.material_search import search_materials
+
     try:
         result = search_materials(
             _resources(ctx),
@@ -71,6 +71,8 @@ def materials_search(
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     root = ctx.find_root()
     if isinstance(root.obj, dict) and isinstance(root.obj.get("resources"), Path):
         return root.obj["resources"]

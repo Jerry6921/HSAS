@@ -12,24 +12,25 @@ import webbrowser
 
 import typer
 
-from hsas.core import HIQSPortError, build_port
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.notion.worker import worker_lock
-
-
 notion_app = typer.Typer(no_args_is_help=True, help="Notion workspace, sync and import adapter")
 
 
 def _resources(ctx):
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     resources = ctx.obj.get("resources") if isinstance(ctx.obj, dict) else None
     return Path(resources or get_runtime_paths().resources_dir)
 
 
 def _port(ctx):
+    from hsas.core import build_port
+
     return build_port(_resources(ctx))
 
 
 def _output(operation):
+    from hsas.core import HIQSPortError
+
     try:
         typer.echo(json.dumps(operation(), ensure_ascii=False, indent=2))
     except (HIQSPortError, ValueError, OSError) as exc:
@@ -100,6 +101,8 @@ def watch(ctx: typer.Context,
     Source collection and AI fact review remain separate trusted use cases.
     Each cycle reconciles remote edits and retries unfinished file uploads.
     """
+    from hsas.core import HIQSPortError
+
     port = _port(ctx)
     _output(port.notion_check)
     try:
@@ -132,6 +135,8 @@ def controls(ctx: typer.Context):
 def work(ctx: typer.Context,
          interval: Annotated[int, typer.Option(min=60, max=86400)] = 300):
     """Consume native Notion button requests and publish live progress."""
+    from hsas.infrastructure.notion.worker import worker_lock
+
     port = _port(ctx)
     _output(port.notion_check)
     try:
@@ -142,6 +147,8 @@ def work(ctx: typer.Context,
 
 
 def _work_loop(port, interval):
+    from hsas.core import HIQSPortError
+
     delivery, next_delivery = None, 0.0
     def publish():
         try:

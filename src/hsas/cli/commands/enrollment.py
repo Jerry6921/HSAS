@@ -7,16 +7,6 @@ from typing import Annotated
 
 import typer
 
-from hsas.infrastructure.sis.enrollment.client import SisEnrollmentBrowserGateway
-from hsas.infrastructure.sis.enrollment.review import (
-    SisEnrollmentReviewError,
-    acknowledge_sis_enrollment_changes,
-    collect_sis_enrollment_changes,
-)
-from hsas.infrastructure.runtime import get_runtime_paths
-from hsas.infrastructure.storage.json_store import read_json, write_json
-
-
 sis_enrollment_app = typer.Typer(
     no_args_is_help=True,
     help="HKU SIS Student Center enrolment snapshots and AI review queue",
@@ -26,6 +16,8 @@ sis_enrollment_app = typer.Typer(
 @sis_enrollment_app.command("sync")
 def sync(ctx: typer.Context) -> None:
     """Capture the current-semester course list, opening sign-in when required."""
+    from hsas.infrastructure.sis.enrollment.client import SisEnrollmentBrowserGateway
+
     result = SisEnrollmentBrowserGateway(_resources(ctx)).sync(auto_login=True)
     typer.echo(
         f"Student Center: {len(result['courses'])} course(s); "
@@ -36,6 +28,9 @@ def sync(ctx: typer.Context) -> None:
 @sis_enrollment_app.command("status")
 def status(ctx: typer.Context) -> None:
     """Show the local enrolment snapshot and pending review count."""
+    from hsas.infrastructure.sis.enrollment.client import SisEnrollmentBrowserGateway
+    from hsas.infrastructure.sis.enrollment.review import collect_sis_enrollment_changes
+
     resources = _resources(ctx)
     value = SisEnrollmentBrowserGateway(resources).status()
     review = collect_sis_enrollment_changes(resources)
@@ -52,6 +47,9 @@ def changes(
     output_path: Annotated[Path | None, typer.Option("--output")] = None,
 ) -> None:
     """Export the current enrolment batch for AI review."""
+    from hsas.infrastructure.sis.enrollment.review import collect_sis_enrollment_changes
+    from hsas.infrastructure.storage.json_store import write_json
+
     batch = collect_sis_enrollment_changes(_resources(ctx))
     if output_path is not None:
         write_json(output_path, batch)
@@ -66,6 +64,12 @@ def acknowledge(
     confirmed: Annotated[bool, typer.Option("--confirmed")] = False,
 ) -> None:
     """Advance the enrolment checkpoint after a completed review."""
+    from hsas.infrastructure.sis.enrollment.review import (
+        SisEnrollmentReviewError,
+        acknowledge_sis_enrollment_changes,
+    )
+    from hsas.infrastructure.storage.json_store import read_json
+
     try:
         batch = read_json(batch_path)
         if not isinstance(batch, dict):
@@ -79,6 +83,8 @@ def acknowledge(
 
 
 def _resources(ctx: typer.Context) -> Path:
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     if isinstance(ctx.obj, dict) and isinstance(ctx.obj.get("resources"), Path):
         return ctx.obj["resources"]
     return get_runtime_paths().resources_dir

@@ -5,19 +5,20 @@ from typing import Annotated
 
 import typer
 
-from hsas.core import HIQSPortError, build_port
-from hsas.infrastructure.runtime import get_runtime_paths
-
-
 apple_app = typer.Typer(no_args_is_help=True, help="Apple Calendar / Reminders automatic synchronization")
 
 
 def _port(ctx):
+    from hsas.core import build_port
+    from hsas.infrastructure.runtime import get_runtime_paths
+
     resources = ctx.obj.get("resources") if isinstance(ctx.obj, dict) else None
     return build_port(resources or get_runtime_paths().resources_dir)
 
 
 def _output(operation):
+    from hsas.core import HIQSPortError
+
     try:
         result = operation()
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))

@@ -8,15 +8,14 @@ from typing import Annotated
 
 import typer
 
-from hsas.core import HIQSPortError, build_port
-
-
 course_planning_app = typer.Typer(
     no_args_is_help=True, help="Course planning and enrolment checkpoints"
 )
 
 
 def _call(ctx, method, *args):
+    from hsas.core import HIQSPortError, build_port
+
     try:
         result = getattr(build_port(ctx.obj["resources"]), method)(*args)
         typer.echo(json.dumps(result, ensure_ascii=False, indent=2))

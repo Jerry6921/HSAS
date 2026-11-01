@@ -12,6 +12,25 @@ from hsas.domain.information import InformationItem, InformationStore, WeeklyRec
 WEEKDAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 
 
+def calendar_milestones(item: InformationItem) -> list[tuple[str, date | datetime, datetime | None]]:
+    """Keep distinct meeting, submission and opening times without inventing times.
+
+    The empty role retains the legacy primary-event identity. Recurring meetings
+    are expanded separately; their deadlines and openings are still projected.
+    """
+    result: list[tuple[str, date | datetime, datetime | None]] = []
+    primary = None
+    due = item.due_at or item.due_on
+    if item.recurrence is None:
+        primary = item.starts_at or item.scheduled_on or due or item.opens_at
+        if primary is not None:
+            result.append(("", primary, item.ends_at if item.starts_at else None))
+    for role, value in (("due", due), ("opens", item.opens_at)):
+        if value is not None and value != primary:
+            result.append((role, value, None))
+    return result
+
+
 def build_ics(store: InformationStore) -> str:
     """Return a deterministic iCalendar projection of all dated information items."""
     courses = {course.course_id: course for course in store.courses}
@@ -30,10 +49,8 @@ def build_ics(store: InformationStore) -> str:
         summary = f"{course.code} · {item.title}" if course else item.title
         if item.recurrence is not None:
             lines.extend(_recurring_events(item, summary, store.timezone, stamp))
-        else:
-            event = _single_event(item, summary, store.timezone, stamp)
-            if event:
-                lines.extend(event)
+        for role, start, end in calendar_milestones(item):
+            lines.extend(_milestone_event(item, summary, store.timezone, stamp, role, start, end))
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(line) for line in lines) + "\r\n"
 
@@ -46,7 +63,10 @@ def _event_head(item: InformationItem, summary: str, stamp: str, suffix: str = "
         f"DTSTAMP:{stamp}",
         f"SUMMARY:{_escape(summary)}",
         f"CATEGORIES:{_escape(item.category)}",
+        f"X-HIQS-DATE-STATUS:{item.date_status}",
     ]
+    if item.date_status == "tentative":
+        lines.append("STATUS:TENTATIVE")
     if item.location:
         lines.append(f"LOCATION:{_escape(item.location)}")
     description = _description(item)
@@ -57,24 +77,24 @@ def _event_head(item: InformationItem, summary: str, stamp: str, suffix: str = "
     return lines
 
 
-def _single_event(
+def _milestone_event(
     item: InformationItem,
     summary: str,
     timezone: str,
     stamp: str,
-) -> list[str] | None:
-    lines = _event_head(item, summary, stamp)
-    if item.starts_at:
-        lines.append(_datetime_line("DTSTART", item.starts_at, timezone))
-        if item.ends_at:
-            lines.append(_datetime_line("DTEND", item.ends_at, timezone))
-    elif item.due_at:
-        lines.append(_datetime_line("DTSTART", item.due_at, timezone))
+    role: str,
+    start: date | datetime,
+    end: datetime | None,
+) -> list[str]:
+    label = {"due": "Deadline", "opens": "Opens"}.get(role)
+    lines = _event_head(item, f"{summary} · {label}" if label else summary,
+                        stamp, suffix=f"-{role}" if role else "")
+    if isinstance(start, datetime):
+        lines.append(_datetime_line("DTSTART", start, timezone))
+        if end is not None:
+            lines.append(_datetime_line("DTEND", end, timezone))
     else:
-        day = item.due_on or item.scheduled_on
-        if day is None:
-            return None
-        lines.append(f"DTSTART;VALUE=DATE:{_date_value(day)}")
+        lines.append(f"DTSTART;VALUE=DATE:{_date_value(start)}")
     lines.append("END:VEVENT")
     return lines
 
@@ -88,6 +108,27 @@ def _recurring_events(
     recurrence = item.recurrence
     assert recurrence is not None
     first_date = _first_occurrence(recurrence)
+    if first_date > recurrence.valid_until:
+        # A short rule may contain no matching weekday. Preserve only explicit
+        # additions/overrides instead of exporting a phantom DTSTART after UNTIL.
+        exceptions = {exception.date: exception for exception in recurrence.exceptions}
+        dates = set(recurrence.additional_dates) - set(recurrence.excluded_dates)
+        dates.update(exception.date for exception in recurrence.exceptions if exception.status == "changed")
+        result = []
+        for day in sorted(dates):
+            exception = exceptions.get(day)
+            if exception and exception.status == "cancelled":
+                continue
+            start = exception.start_time if exception and exception.start_time else recurrence.start_time
+            end = exception.end_time if exception and exception.end_time else recurrence.end_time
+            event_item = item.model_copy(update={
+                "location": (exception.location if exception and exception.location else item.location)})
+            result.extend(_milestone_event(event_item,
+                exception.title if exception and exception.title else summary,
+                timezone, stamp, day.isoformat(),
+                datetime.combine(day, start, ZoneInfo(timezone)),
+                datetime.combine(day, end, ZoneInfo(timezone))))
+        return result
     lines = _event_head(item, summary, stamp)
     lines.extend(
         [

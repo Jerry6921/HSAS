@@ -285,6 +285,7 @@ class InformationItem(StrictModel):
     course_id: str = Field(min_length=1, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
     title: str = Field(min_length=1)
     category: ItemCategory
+    task_role: Literal["auto", "action", "reference"] = "auto"
     date_status: DateStatus = "unknown"
     opens_at: datetime | None = None
     starts_at: datetime | None = None
@@ -310,6 +311,18 @@ class InformationItem(StrictModel):
     sources: list[SourceReference] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     last_verified_at: datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_task_role(cls, value):
+        # Old projections excluded these summary records by ID. Preserve that
+        # behavior on load; new records express intent through task_role.
+        if isinstance(value, dict) and "task_role" not in value and value.get("item_id") in {
+            "ENGG1000-assignments-overall", "BMED2206-gcp-supervisor-assignments",
+            "CCHU9051-collaborative-class-notes",
+        }:
+            return {**value, "task_role": "reference"}
+        return value
 
     @field_validator(
         "opens_at",

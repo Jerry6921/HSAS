@@ -48,6 +48,14 @@ DOCUMENT_CONTENT_TYPES = {
     "text/csv",
     "text/plain",
 }
+SAFE_SUFFIX_RE = re.compile(
+    r"^\.(?:7z|aac|avi|bz2|csv|doc|docx|gif|gz|html|ics|jpeg|jpg|json|m4a|md|mov|mp3|mp4|odp|ods|odt|pdf|png|ppt|pptx|rar|svg|tar|txt|wav|webm|webp|xls|xlsx|xml|xz|zip)$",
+    flags=re.IGNORECASE,
+)
+EXECUTABLE_SUFFIXES = {
+    ".app", ".bat", ".command", ".dmg", ".exe", ".jar", ".js", ".mpkg",
+    ".pkg", ".ps1", ".scr", ".sh", ".vbs",
+}
 SENSITIVE_QUERY_KEYS = {"sesskey", "token", "wstoken"}
 
 
@@ -108,14 +116,21 @@ def _choose_filename(response: APIResponse, activity: CourseActivity, index: int
         candidate = f"{activity.module_id}-{safe_filename(activity.name)}-{index}"
     path = Path(candidate)
     stem = safe_filename(path.stem)
-    suffix = path.suffix.lower() or _fallback_extension(_content_type(response))
+    suffix = path.suffix.lower()
+    if not SAFE_SUFFIX_RE.fullmatch(suffix):
+        suffix = _fallback_extension(_content_type(response))
     return f"{stem}{suffix}"
 
 
 def _is_storable(response: APIResponse, body_prefix: bytes = b"") -> bool:
     content_type = _content_type(response)
-    suffix = PurePosixPath(urlsplit(response.url).path).suffix.casefold()
-    disposition = response.headers.get("content-disposition", "").casefold()
+    url_suffix = PurePosixPath(urlsplit(response.url).path).suffix.casefold()
+    disposition_value = response.headers.get("content-disposition", "")
+    disposition = disposition_value.casefold()
+    disposition_name = _filename_from_disposition(disposition_value) or ""
+    disposition_suffix = PurePosixPath(disposition_name).suffix.casefold()
+    if url_suffix in EXECUTABLE_SUFFIXES or disposition_suffix in EXECUTABLE_SUFFIXES:
+        return False
     return (
         body_prefix.startswith(b"%PDF-")
         or "attachment" in disposition
@@ -127,7 +142,7 @@ def _is_storable(response: APIResponse, body_prefix: bytes = b"") -> bool:
             bool(content_type)
             and content_type not in {"text/html", "application/xhtml+xml"}
         )
-        or suffix in DOCUMENT_EXTENSIONS
+        or url_suffix in DOCUMENT_EXTENSIONS
     )
 
 

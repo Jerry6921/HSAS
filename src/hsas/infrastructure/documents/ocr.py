@@ -34,6 +34,25 @@ from hsas.infrastructure.storage.json_store import write_model, write_text
 Recognizer = Callable[[Path, str], tuple[str, str]]
 VISION_SCRIPT = Path(__file__).with_name("vision_ocr.swift")
 LEGACY_MACOS_SDK = Path("/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk")
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_UNCOMPRESSED_ENTRY_BYTES = 50 * 1024 * 1024
+
+
+def _check_uncompressed_budget(archive: ZipFile) -> None:
+    total = 0
+    for info in archive.infolist():
+        entry_size = info.file_size
+        if entry_size > MAX_UNCOMPRESSED_ENTRY_BYTES:
+            raise ValueError(
+                "uncompressed entry budget exceeded: "
+                f"{info.filename!r} is {entry_size} bytes"
+            )
+        total += entry_size
+        if total > MAX_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "uncompressed archive budget exceeded: "
+                f"entries total {total} bytes"
+            )
 
 
 class OcrError(RuntimeError):
@@ -118,7 +137,7 @@ def run_ocr_queue(
                 processed.append(
                     {"course_id": course_id, "title": stored_file.filename, "engine": engine}
                 )
-            except (OcrError, OSError, subprocess.SubprocessError, BadZipFile) as exc:
+            except (OcrError, OSError, subprocess.SubprocessError, BadZipFile, ValueError) as exc:
                 failures.append(
                     {
                         "course_id": course_id,
@@ -279,6 +298,7 @@ def _run_command(
 def _extract_pptx_images(path: Path, destination: Path) -> list[Path]:
     extracted: list[Path] = []
     with ZipFile(path) as archive:
+        _check_uncompressed_budget(archive)
         slide_names = sorted(
             (name for name in archive.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)),
             key=_natural_path_key,

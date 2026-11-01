@@ -23,6 +23,27 @@ from hsas.infrastructure.documents.pdf import (
 from hsas.infrastructure.storage.json_store import safe_filename, write_text
 
 
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_UNCOMPRESSED_ENTRY_BYTES = 50 * 1024 * 1024
+
+
+def _check_uncompressed_budget(archive: ZipFile) -> None:
+    total = 0
+    for info in archive.infolist():
+        entry_size = info.file_size
+        if entry_size > MAX_UNCOMPRESSED_ENTRY_BYTES:
+            raise ValueError(
+                "uncompressed entry budget exceeded: "
+                f"{info.filename!r} is {entry_size} bytes"
+            )
+        total += entry_size
+        if total > MAX_UNCOMPRESSED_BYTES:
+            raise ValueError(
+                "uncompressed archive budget exceeded: "
+                f"entries total {total} bytes"
+            )
+
+
 def _natural_key(value: str) -> list[int | str]:
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", value)]
 
@@ -45,6 +66,7 @@ def _paragraph_text(xml: bytes) -> str:
 
 
 def _docx_units(archive: ZipFile) -> list[tuple[str, str]]:
+    _check_uncompressed_budget(archive)
     preferred = ["word/document.xml"]
     supporting = sorted(
         (
@@ -65,6 +87,7 @@ def _docx_units(archive: ZipFile) -> list[tuple[str, str]]:
 
 
 def _pptx_units(archive: ZipFile) -> list[tuple[str, str]]:
+    _check_uncompressed_budget(archive)
     slide_names = sorted(
         (
             name

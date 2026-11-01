@@ -3,6 +3,10 @@
 The AI reads authorized course sources. HIQS validates and stores the resulting
 facts. `information.json` is the canonical database consumed by the calendar.
 
+For source review and calendar/to-do generation, follow
+[complete-review-protocol.md](complete-review-protocol.md) for versioned reading
+coverage, task roles, preflight findings and delivery reconciliation.
+
 ## Required sequence
 
 1. Call MCP `get_pending_changes(source="sis_enrollment")`, then
@@ -23,6 +27,9 @@ facts. `information.json` is the canonical database consumed by the calendar.
    sources and use `unknown` only when no available evidence supplies the field.
 7. Attach a human-checkable `sources` entry to every important deadline, weight, requirement, policy, or timetable rule when evidence is available. Attach directly related courseware in the item's `materials` array.
 8. Call MCP `validate_information_update(update)` and fix every validation error.
+   Inspect `quality_audit` and require `ready_to_apply`; incoming contradictory
+   opening/deadline fields are rejected before writing. Schema validity alone
+   does not verify source reading or semantic accuracy.
 9. Review conflicts and tentative values. Apply only when authorized with MCP
    `apply_information_update(update, review_batches, confirmed=true)`.
 10. Read the returned `recent_update` and call MCP

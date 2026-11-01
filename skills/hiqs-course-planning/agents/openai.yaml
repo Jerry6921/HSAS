@@ -1,0 +1,4 @@
+interface:
+  display_name: "HIQS Course Planning"
+  short_description: "Plan approved course pools and resume enrolment with official readback"
+  default_prompt: "Use $hiqs-course-planning to plan my courses or resume my authorized enrolment task."

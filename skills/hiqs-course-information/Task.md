@@ -51,13 +51,18 @@ past item remains unresolved.
 
 ## 4. Source-to-database workflow
 
+For complete or incremental review, first read
+[references/complete-review-protocol.md](references/complete-review-protocol.md).
+It defines source coverage, obligation reconciliation and calendar/to-do checks.
+
 1. Call MCP `start_course_sync` when the user asks to collect or refresh Moodle.
 2. Export the exact review batch with MCP `get_pending_changes(source="moodle")`.
 3. For `full` mode inspect every listed file; for `incremental` mode inspect only listed changes and affected information items.
 4. Prefer text sidecars for navigation, but open the source document when exact layout, tables, or wording matters.
 5. Read PPTX slides and speaker notes, DOCX content, and relevant PDF pages.
 6. Build a minimal `InformationUpdate` with complete records and stable IDs.
-7. Call MCP `apply_information_update(update, review_batches, confirmed=true)`, then verify the
+7. Validate the merged candidate and inspect `quality_audit`/`ready_to_apply`,
+   then call MCP `apply_information_update(update, review_batches, confirmed=true)` and verify the
    pending count decreased and inspect the returned `recent_update`. Use MCP
    `save_recent_update_summary` to attach a concise Agent-written digest to that
    exact report before presenting the result to the user.

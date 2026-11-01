@@ -7,10 +7,11 @@ metadata:
 
 # HIQS Course Information
 
-HIQS has one narrow job: turn scattered, authorized course sources into a
-validated local information database and present that database as a searchable
-calendar. The AI performs the reading and fact extraction. The program owns the
-schema, validation, atomic upsert, queries, and visualization.
+This Skill orchestrates reading, source review, fact extraction and cited
+answers from authorized course sources. Reusable Python services own the schema,
+validation, atomic upsert, evidence retrieval and checkpoints. Notion presents
+courses, materials, archives and notes through `hiqs-notion-workspace`;
+`hiqs-course-notes` authors learning/revision artifacts outside course facts.
 
 HIQS owns the course-information database, retrieval, and calendar projection.
 Students own planning decisions and may use evidence-grounded AI conversation
@@ -19,9 +20,11 @@ conversation content, with calendar recording controlled by the student.
 
 ## Locate the project
 
-Find the nearest ancestor containing `pyproject.toml` with project name
-`hku-information-query-system`; call it `HIQS_ROOT`. Run commands from that
-directory. The installed CLI remains `hsas` for backward compatibility.
+With HIQS MCP connected, use its configured local services; installing this
+Skill does not require a checkout beside the Skill directory. When local code
+or CLI recovery is needed, locate the HIQS checkout containing `pyproject.toml`
+with project name `hku-information-query-system`; call it `HIQS_ROOT` and run
+project commands there. The installed CLI remains `hsas` for compatibility.
 
 Personal data lives in the private resources directory. MCP resolves it through
 its configured CORE instance. For recovery work, `hsas list-status` reports the
@@ -31,9 +34,14 @@ directory and respects `HSAS_DATA_DIR` plus the global `--resources` override.
 
 - For Moodle collection, file coverage, text sidecars, and material failures, read [Handbook.md](Handbook.md).
 - Before any write, read [references/information-write-protocol.md](references/information-write-protocol.md).
+- For source review or calendar/to-do generation, read
+  [references/complete-review-protocol.md](references/complete-review-protocol.md)
+  before reading batches; retain source coverage and reconcile every obligation.
 - For query wording, pending data, conflicts, or evidence display, read the relevant section of [Task.md](Task.md).
 - Before answering a free-form course question, read [references/course-query-protocol.md](references/course-query-protocol.md).
 - When changing this Skill, use [references/evals.md](references/evals.md) and test the affected behavior.
+- For Apple Calendar/Reminders delivery or automatic iCloud sync, read
+  [references/apple-sync-protocol.md](references/apple-sync-protocol.md).
 
 ## Default operating loop
 
@@ -57,7 +65,8 @@ to the same port and must not contain separate business logic.
 7. Inspect `get_information`, especially IDs named by `affected_information_item_ids`.
 8. Build a minimal update containing complete course/item records with stable IDs, source references, teaching periods, and directly related learning materials. For every reviewed course, reconcile the full current `list_materials(course_ids=[...])` manifest with `courses[].material_sections`: place every current material in exactly one freely named, evidence-derived section, preserve stable relative paths or URLs, and do not choose from a predefined taxonomy. On a full review, synthesize a concise `overview` and `objectives` from the official sources; on an incremental review, revise them only when relevant evidence changed.
 9. Do not wait for every collector or require multiple sources to repeat the same fact. Write a supported fact from any available appropriate source; an absent source is not contradictory evidence and should not erase or block facts supplied elsewhere. Preserve a field as `unknown` only when no available source supports it. When available sources conflict, write the value supported by current Moodle course materials or activity metadata and retain the conflicting evidence in `warnings` and `sources`.
-10. Call `validate_information_update(update)`.
+10. Call `validate_information_update(update)`; inspect the merged candidate's
+    `quality_audit` and `ready_to_apply` against the coverage and obligation map.
 11. When authorized, call `apply_information_update(update, review_batches,
     confirmed=true)`, supplying only the exact exported batches that were reviewed.
 12. When review confirms zero information changes for a source, call

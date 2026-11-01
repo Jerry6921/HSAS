@@ -1,0 +1,4 @@
+interface:
+  display_name: "HIQS Course Notes"
+  short_description: "English textbook-style notes in the matching Notion course"
+  default_prompt: "Use $hiqs-course-notes to generate a complete segmented set of English learning and revision notes from this course’s lectures and available past papers or quizzes, following english-course-notes requirements, and publish them under the corresponding Notion course with verified readback."

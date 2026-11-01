@@ -1,0 +1,6 @@
+interface:
+  display_name: "HIQS Notion Workspace"
+  short_description: "Display HIQS courses, materials and notes in Notion"
+  default_prompt: "Use $hiqs-notion-workspace to deliver my HIQS course materials and information to the corresponding Notion workspace. Keep tasks and calendars in Apple apps, preserve my course archives and notes, and verify the delivered result."
+policy:
+  allow_implicit_invocation: true

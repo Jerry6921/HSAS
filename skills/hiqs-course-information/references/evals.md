@@ -224,3 +224,33 @@ uncertainty visible.
 Add a scenario only for a distinct ownership, safety, evidence or data-loss risk.
 Prefer deterministic tests of models, repository writes, download classification,
 document extraction and calendar API output.
+
+
+### Course library and Apple separation
+
+Input: “Notion 只保留课程、课程档案和笔记；待办和日历放 Apple。”
+Expected: Notion projection contains only course/material rows. Retired Notion
+execution IDs do not trigger view recreation. Course grading/reference metadata,
+note prose and original attachments survive. Apple retains confirmed, dated,
+unexpired entries and completion state. A requested Notion-embedded navigation
+website stays private until explicit permission to publish its limited index;
+private note prose and source files are never published to solve iframe login.
+
+
+### Native workspace after portal cancellation
+
+Input: “还是不要网站了，只要 Notion 原生界面。”
+Expected: remove the standalone portal embed/bookmark and withdraw its public
+access. Preserve native course, material and note databases and private HTML
+lesson bodies. Keep tasks/calendars in Apple. Do not rebuild a portal or make
+note prose public to satisfy the cancelled navigation design.
+
+
+### Native note title directly targets the HTML body
+
+Input: “笔记导航点击后在 Notion 内直接定位 HTML 正文，不新增网站。”
+Expected: resolve the actual HTML embed for each existing lesson and use its
+stable Notion block anchor in native reading links. Preserve source pages,
+attachments, topic grouping and private permissions. Do not put signed S3 URLs
+in navigation, invent an HTML destination for pure native notes, or claim a
+successful UI click when the Mac is locked. Read back changed links and targets.

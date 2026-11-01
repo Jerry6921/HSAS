@@ -205,10 +205,15 @@ header flags and spans without preserving executable HTML. A changed rendered
 body or table enters the incremental review queue and points the agent back to
 the current `course.json`.
 
-For recursively discovered pages, inspect `activities[].metadata.linked_pages`
+For recursively discovered pages, inspect `activities[].linked_pages`
 for the sanitized source URL, crawl depth, title, and bounded page text. Files
 reached through those pages remain ordinary entries in the activity's `files`
 list with their source URL and local text sidecar when extraction is supported.
+
+`list_materials` also returns all `activities`, including empty/failed entries,
+and `coverage.gaps`. Each document includes original/text availability, OCR state,
+unit counts and hashes. Use these to plan reading and expose omissions; these
+fields describe acquisition/extraction, not completed Agent reading.
 
 Important download states:
 

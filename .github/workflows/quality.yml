@@ -8,9 +8,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   skills:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,10 +30,11 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,6 +43,12 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -c requirements.lock -e '.[dev]'
+      # pytest is dev-only; the only fix is pytest 9, tracked separately.
+      - name: Audit locked dependencies
+        if: matrix.python-version == '3.13'
+        run: |
+          python -m pip install pip-audit
+          python -m pip-audit -r requirements.lock --ignore-vuln PYSEC-2026-1845
       - name: Verify SQLite FTS5
         run: python -c "import sqlite3; connection = sqlite3.connect(':memory:'); connection.execute('CREATE VIRTUAL TABLE probe USING fts5(content)')"
       - name: Lint
@@ -46,12 +58,19 @@ jobs:
       - name: Verify generated UI and TypeScript contracts
         run: python scripts/check_generated.py
       - name: Test
-        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider --cov=hsas --cov-report=term-missing --cov-fail-under=75
       - name: Build wheel
         run: python -m pip wheel . --no-deps --wheel-dir dist-wheel
+      - name: Verify wheel installs and runs
+        if: matrix.python-version == '3.13'
+        run: |
+          python -m venv wheelcheck
+          wheelcheck/bin/pip install dist-wheel/*.whl
+          wheelcheck/bin/hsas --help
 
   macos:
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,6 +94,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

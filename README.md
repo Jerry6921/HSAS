@@ -30,6 +30,7 @@ HIQS/
 ├── skills/                     产品主体：可分发的 AI Skills 与随附资源
 │   ├── hiqs-course-information/
 │   ├── hiqs-course-notes/
+│   ├── hiqs-course-planning/
 │   └── hiqs-notion-workspace/
 ├── src/hsas/                   可复用 Python 服务及其适配器
 │   ├── core/                   HIQSPort、服务装配与用例服务
@@ -46,7 +47,9 @@ HIQS/
 ├── scripts/                    Skill 打包、合同生成与兼容应用构建
 ├── .agents/skills/             产品 Skill 链接与仓库工程 Skill
 ├── ui/                         兼容 React 客户端源码
-└── packaging/                  兼容 macOS 应用打包
+├── packaging/                  兼容 macOS 应用资源（Info.plist 模板）
+├── scripts/build_macos_app.sh  开发者 launcher（复用本机 .venv）
+└── scripts/build_macos_dmg.sh  分发包（PyInstaller，可脱离仓库运行）
 ```
 
 `skills/` 是产品 Skill 的唯一维护位置；`.agents/skills/` 使用相对链接指向同一份内容。

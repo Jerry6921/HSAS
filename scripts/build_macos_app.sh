@@ -10,6 +10,10 @@ CONTENTS_ROOT="$APP_ROOT/Contents"
 VERSION=$(
   "$PYTHON_BIN" -c 'from hsas import __version__; print(__version__)'
 )
+if [[ -z "$VERSION" || "$VERSION" == "0.0.0" ]]; then
+  print -u2 "Refusing to build a package with version '$VERSION'."
+  exit 1
+fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
   print -u2 "HIQS.app can only be built on macOS."

@@ -19,3 +19,8 @@ sync-runs/
 notion-sync/
 course-notes/
 sites/
+
+# Test coverage artifacts.
+.coverage
+.coverage.*
+htmlcov/

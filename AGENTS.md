@@ -32,6 +32,14 @@ Never edit the canonical `information.json` directly.
 
 ## Repository conventions
 
+### Engineering management
+
+Before starting a development task, read `docs/agents/engineering-management.md`. The
+load-bearing rules are: one piece of work in flight; contracts before code; private
+runtime data stays outside the checkout; the default test run stays offline and fast.
+Before relying on any external system, check `docs/integrations.md` — an unverified row is
+an assumption, not a fact.
+
 ### Complete development
 
 After each authorized HIQS development task, finish its checks, then run

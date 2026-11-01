@@ -169,8 +169,24 @@ def sync_courses(
         str | None,
         typer.Argument(help="Optional Moodle course ID or URL; omit to sync all courses"),
     ] = None,
+    cancel: Annotated[
+        bool,
+        typer.Option(
+            "--cancel",
+            help="Cancel the active background course sync instead of collecting",
+        ),
+    ] = False,
 ) -> None:
     """Download all accessible course files and create local text sidecars."""
+    if cancel:
+        from hsas.core import build_port
+
+        result = build_port(_resources(ctx)).cancel_course_sync({"confirmed": True})
+        typer.echo(
+            f"Background course sync: {result.get('state') or result.get('status') or 'cancelled'}"
+        )
+        return
+
     from hsas.infrastructure.moodle.settings import Settings
     from hsas.infrastructure.runtime import hku_portal_profile_dir
 

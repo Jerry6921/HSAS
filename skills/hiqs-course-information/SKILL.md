@@ -92,6 +92,22 @@ create/update actions and field-level differences. Apply one draft with
 `apply_personal_inbox_entry(entry_id, confirmed=true)` only after the user
 confirms that preview.
 
+## Retrieval entry points
+
+Three read-only tools answer "find the evidence", and picking the right one is the
+difference between one call and five:
+
+- `query_course(question, course_ids)` — the default. Returns structured items plus
+  material hits for a question about a course.
+- `search_materials(query, course_ids, limit)` — when you know the phrase or term to
+  locate and want ranked page-aware chunks without a question-shaped packet.
+- `get_evidence(evidence_id)` / `get_evidence_content(evidence_id, chunk_index)` /
+  `explain_evidence(evidence_id)` — when you have an ID from either call above and
+  need its provenance, its adjacent text, or the reason it was marked certain,
+  tentative or conflicting.
+
+Never reconstruct a fact from a filename. Every claim carries an evidence ID.
+
 ## RAG question workflow
 
 1. Resolve the course when possible and call `query_course(question, course_ids)`.

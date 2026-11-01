@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
+import shutil
 import json
 from pathlib import Path
 import platform
@@ -202,7 +203,11 @@ def test_invalid_canonical_snapshot_records_failure_without_native_writes(tmp_pa
     assert len(gateway.calls) == 1
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="native EventKit helper requires macOS")
+@pytest.mark.slow
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("xcrun") is None,
+    reason="native EventKit helper requires macOS with the Xcode command line tools",
+)
 def test_native_bridge_offline_date_boundaries_and_personal_notes(tmp_path):
     source = Path(__file__).parents[1] / "src/hsas/infrastructure/apple/EventKitBridge.swift"
     binary = tmp_path / "HIQSAppleSync"

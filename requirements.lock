@@ -1,5 +1,6 @@
 # Runtime and test environment resolved for Python 3.14 on 2026-09-01;
-# security bumps applied 2026-11-02 (certifi, opentelemetry-api, PyJWT, pypdf, setuptools).
+# security bumps applied 2026-11-02 (certifi, opentelemetry-api, PyJWT, pypdf, setuptools);
+# pytest 9 upgrade applied 2026-11-02 (also clears PYSEC-2026-1845).
 # Install with: python -m pip install -c requirements.lock -e '.[dev]'
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -47,7 +48,8 @@ pyinstaller-hooks-contrib==2026.7
 PyJWT==2.15.0
 Pygments==2.21.0
 pypdf==6.21.4
-pytest==8.4.2
+pytest-cov==7.1.0
+pytest==9.0.3
 python-dotenv==1.2.3
 python-dateutil==2.9.0.post0
 python-multipart==0.0.32

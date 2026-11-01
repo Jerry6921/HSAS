@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.3,<9",
+  "pytest>=9,<10",
   "pytest-cov>=5,<8",
   "ruff==0.16.5",
 ]
@@ -53,6 +53,8 @@ packages = ["src/hsas"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = ["slow: native toolchain or long-running checks, excluded from the default run"]
 
 [tool.ruff]
 target-version = "py311"

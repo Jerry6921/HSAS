@@ -118,10 +118,8 @@ Notion 工作区上传上限独立于 API multipart 流程。默认 5 MiB；超�
 默认课程库导出包含 courses/materials CSV、课程 Markdown、JSON 和原文件 ZIP，
 不生成待办 CSV、calendar CSV 或 ICS。导出包含私人资料，不应提交到公开仓库。
 
-## 独立 UI 迁移状态
+## 连接与后台运行
 
-连接验证并配置后，`hsas ui` 和 macOS 入口打开 Notion 工作台。
-后台同步使用 launchd，与界面进程分离。未配置连接时仍保留旧本地界面
-作为恢复入口；当前版本尚未物理删除 React/WebKit 资源。完全退役需要
-先验证独立连接的真实同步、后台运行与机构资料更新/审核的完整替代路径。
-这份实现不是已经发布的 HIQS 3.0。
+连接验证并配置后，唯一入口是 Notion 工作台；本地 React Dashboard、`hsas ui`
+和 macOS 应用已移除。后台同步使用 launchd，与交互进程分离，因此连接未配置时不会
+降级到本地页面，而是明确报告未配置。

@@ -40,7 +40,8 @@ from hsas.core.services.information import InformationContractService
 from hsas.core.services.status import OperationalStatusService
 from hsas.core.services.reviews import SourceReviewService
 from hsas.core.sync.controller import CourseSyncController
-from hsas.core.services.dashboard import DashboardProjectionService, pending_summary
+from hsas.core.services.information_snapshot import InformationSnapshotService
+from hsas.core.services.reviews import pending_summary
 from hsas.core.services.attention import AttentionService
 from hsas.core.services.materials import MaterialQueryService
 from hsas.core.services.course_planning import CoursePlanningService
@@ -88,7 +89,7 @@ class HIQSCore:
     review_service: SourceReviewService = field(init=False, repr=False)
     personal_inbox_service: PersonalInboxService = field(init=False, repr=False)
     material_query_service: MaterialQueryService = field(init=False, repr=False)
-    dashboard_projection_service: DashboardProjectionService = field(
+    information_snapshot_service: InformationSnapshotService = field(
         init=False,
         repr=False,
     )
@@ -120,7 +121,7 @@ class HIQSCore:
         self.course_notes_service = CourseNotesService(self.resources_dir, self.material_query_service)
         self.notion_service = NotionDeliveryService(self.resources_dir, self.material_query_service)
         self.apple_service = AppleDeliveryService(self.resources_dir, clock=self.clock)
-        self.dashboard_projection_service = DashboardProjectionService(
+        self.information_snapshot_service = InformationSnapshotService(
             self.resources_dir,
             self.review_service,
             self.personal_inbox_service,
@@ -218,7 +219,7 @@ class HIQSCore:
 
     def information_snapshot(self) -> dict[str, Any]:
         """Return the validated AI-authored database used by the calendar UI."""
-        return self.dashboard_projection_service.information_snapshot()
+        return self.information_snapshot_service.information_snapshot()
 
     def notion_projection(self) -> dict[str, Any]:
         return self.notion_service.projection()
@@ -343,7 +344,7 @@ class HIQSCore:
 
 
     def calendar_ics(self) -> bytes:
-        return self.dashboard_projection_service.calendar_ics()
+        return self.information_snapshot_service.calendar_ics()
 
     def add_course(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.record_service.add_course(payload)

@@ -12,14 +12,9 @@ The vendored source is stored at `src/hsas/web/static/ripple.js`. TypeScript
 annotations were mechanically removed so the component can run in HIQS without
 adding a JavaScript build toolchain.
 
-## Modern calendar UI
+## Removed browser client
 
-The browser bundle under `src/hsas/web/static/modern-assets/` includes React,
-React DOM, FullCalendar Standard, Motion, Radix Slot, class-variance-authority,
-clsx and tailwind-merge under their respective permissive licenses. It also
-includes Lucide icons under the ISC License. HIQS uses only FullCalendar
-Standard plugins released under the MIT License; no FullCalendar Premium or
-Scheduler code is included.
-
-The editable source and exact dependency versions are stored in `ui/` and
-`ui/pnpm-lock.yaml`.
+The former local React dashboard and its bundled dependencies (React, FullCalendar,
+Motion, Tailwind helpers and Lucide icons) were removed together with `ui/` and
+`src/hsas/web/`. No frontend runtime is shipped or required. The removed sources and
+their licence notices remain available in git history.

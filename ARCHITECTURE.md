@@ -15,7 +15,6 @@ skills/                          产品 Skills 的唯一源，独立打包分发
 src/hsas/                        Python 复用服务，保留现有包名和运行数据兼容
 contracts/                       服务合同快照
 .agents/skills/                  产品 Skill 相对链接及仓库工程 Skill
-ui/ + src/hsas/web/ + packaging/  本地兼容客户端与打包
 ```
 
 工程 Skill 保留在 `.agents/skills/hiqs-product-development`，不进入产品 Skill 包。
@@ -29,7 +28,6 @@ ui/ + src/hsas/web/ + packaging/  本地兼容客户端与打包
 | Python 复用服务 | 机构采集、文本/OCR、检索、验证、原子保存、版本检查、稳定 ID 投影与上传 | `src/hsas/` |
 | Notion | 课程/课程档案/资料展示、笔记页面与用户正文 | 已验证的工作台与数据源 |
 | MCP／CLI | 将调用转交同一 `HIQSPort`，CLI 同时承载设置、恢复和确定性 worker | `src/hsas/mcp`、`src/hsas/cli` |
-| 本地兼容客户端 | 旧安装和恢复诊断，复用同一服务 | `ui/`、`src/hsas/web`、`packaging/` |
 
 新增需求先判断是 Agent 的理解/编排/写作，还是可跨 Skills 复用的确定性能力。
 前者进入 Skill，后者进入现有 service；MCP 和 CLI 仅增加必要入口，避免增加透传服务层。
@@ -124,13 +122,11 @@ Notion connector adapter 使用同一投影。个人执行状态与正文归 Not
 src/hsas/
 ├── core/             稳定 Port、façade、服务容器与同步编排
 ├── mcp/              面向 AI 的 MCP tools
-├── web/              兼容本地 HTTP API 与生产静态资源
 ├── domain/           CORE 内部纯模型与规则
 ├── application/      CORE 内部用例
 ├── infrastructure/   CORE 内部来源、存储和运行时适配器
 ├── cli/              Typer CLI 入口与命令组
 └── codegen/          JSON Schema 衍生代码生成器
-ui/                    兼容 React + TypeScript 客户端源码
 ```
 
 `HIQSPort` 是 CORE 对外的聚合契约，由按用例划分的能力接口组成：
@@ -142,19 +138,19 @@ ui/                    兼容 React + TypeScript 客户端源码
 - `CourseNotesPort`：整套学习笔记的输入清单、完整正文读取、检查点和本地交付。
 - `NotionDeliveryPort`：连接检查、稳定投影、原文件同步、导出与同步控件状态。
 
-MCP 与 UI 接受注入的 Port，不导入 domain、application、infrastructure 或彼此的实现：
+MCP 接受注入的 Port，不导入 domain、application、infrastructure 或彼此的实现：
 
 ```text
 domain ← application ← infrastructure/composition ← CORE implements HIQSPort
-                                                    ↑               ↑
-                                                   MCP              UI
+                                                    ↑
+                                                   MCP
 ```
 
 领域层保持纯模型与规则。内部应用用例通过 repository/gateway ports 使用外部系统，
 基础设施提供实现；这些内部对象不会穿过 `HIQSPort`。后台同步线程、取消信号与状态快照
 由独立的 `CourseSyncController` 管理，`CourseSyncWorkflow` 负责认证、并发来源采集、进度、
-取消、精确重试和结果持久化。`DashboardProjectionService` 组合规范事实与各来源状态，生成
-Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`PersonalInboxService` 与
+取消、精确重试和结果持久化。`InformationSnapshotService` 组合规范事实与各来源状态，生成
+只读信息快照；`CourseRecordService`、`SourceReviewService`、`PersonalInboxService` 与
 `MaterialQueryService` 分别负责规范记录变更、来源审阅游标、个人草稿和只读材料证据。它们
 使用注入的 repository，并由 `HIQSCore` 组合。应用更新与本地证据操作分别由
 `ApplicationLifecycleService`、`LocalEvidenceOperationService` 负责；同步来源命令由
@@ -162,11 +158,11 @@ Dashboard 只读模型；`CourseRecordService`、`SourceReviewService`、`Person
 CORE façade 只维持稳定 Port、服务装配和兼容入口。MCP 是 Agent 的正式接口；CLI 是人工
 诊断、恢复和无 MCP 环境使用的薄适配器。CLI 不得重复实现校验、写入、报告或 checkpoint
 业务逻辑，仍需终端交互回调的 collector 命令仅保留界面适配。新增服务工具进入 `mcp`；
-新的展示工作流优先进入 Notion，兼容 HTTP 入口按实际需要进入 `web`。
+新的展示工作流优先进入 Notion。
 
-“需要确认”使用同一条只读链路：Dashboard read model 进入 application 层的确定性 attention
+“需要确认”使用同一条只读链路：只读快照进入 application 层的确定性 attention
 用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
-`InformationQueryPort.attention_snapshot()` 同时暴露给 MCP 和 UI。当前时间由 CORE 注入，
+`InformationQueryPort.attention_snapshot()` 暴露给 MCP。当前时间由 CORE 注入，
 以便测试固定 14 天窗口；前端不重新判断风险。`GET /api/attention` 独立于首页主数据请求，
 因此摘要失败不会阻断日历和资料。暂时忽略只写浏览器偏好，指纹变化后自动重新出现，绝不
 修改 `information.json`。来源未覆盖不会产生冲突；只有既有 warning 明确记录的矛盾才生成
@@ -230,12 +226,12 @@ caption/row/cell 结构，保留空单元格、表头及 rowspan/colspan。递�
 
 每个活动可确定性投影为 `EvidenceNode` / `EvidenceEdge` 图：活动、嵌套 HTML 页面、原文件与
 提取文本各有稳定 evidence ID，并用 `links_to`、`contains`、`derived_from` 连接。MCP
-`get_evidence` 与 Dashboard `GET /api/evidence/<id>` 返回节点、相邻节点和完整性状态，Agent
+`get_evidence` 返回节点、相邻节点和完整性状态，Agent
 可以从搜索命中追溯到原始来源，而不需要理解存储实现。搜索包受字符预算约束；需要完整上下文
 时，MCP `get_evidence_content` 按 evidence ID、chunk index 和最多三个相邻 chunk 定向展开，
 避免把无关文件一并送入 Agent。
 
-`explain_evidence` 与 Dashboard `GET /api/evidence-explanation/<id>` 统一返回确认状态、
+`explain_evidence` 统一返回确认状态、
 来源、处理方式、警告和已知限制。正式记录使用 `information:course:<course_id>` 与
 `information:item:<item_id>` 作为稳定 evidence ID。
 
@@ -351,12 +347,12 @@ project、report、reading、deadline 和 other。
 ## Personal Inbox
 
 `ai-state/personal-inbox.json` 保存 AI 根据用户明确陈述准备的 `InformationUpdate` 草稿。
-每条草稿拥有稳定 ID、创建时间、备注和 pending/applied 状态。Dashboard 与
-`hsas inbox list` 将草稿同当前 `information.json` 比较，呈现 create/update 动作以及
+每条草稿拥有稳定 ID、创建时间、备注和 pending/applied 状态。`hsas inbox list`
+将草稿同当前 `information.json` 比较，呈现 create/update 动作以及
 逐字段 before/after。用户确认单条草稿后，应用服务调用现有 Information upsert，再把
 Inbox 条目标为 applied。
 
-## 本地兼容 Dashboard
+## Apple 交付与本地更新
 
 Apple Calendar/Reminders 是独立的确定性 delivery 路径，经同一 `HIQSPort` 将已校验
 事项单向同步到用户选择的 Apple 账户。原生 EventKit helper 保留个人完成状态、提醒
@@ -364,54 +360,12 @@ Apple Calendar/Reminders 是独立的确定性 delivery 路径，经同一 `HIQS
 information 文件并周期性重试，不运行 AI、不批准事实；Apple 本地回执不代表 iCloud
 另一设备已收到。架构、账户边界及恢复详见 [Apple 整合](docs/apple-integration.md)。
 
-以下描述保留的本地客户端，不代表产品需要为每个新 Skill 增加 React 页面。
 Notion 配置和真实同步的状态边界见 [Notion 整合说明](docs/notion-integration.md)。
 
-本地 HTTP 服务只绑定 `127.0.0.1`。浏览器通过 `GET /api/information` 获取已经验证的
-store，并通过独立的 `GET /api/attention` 获取只读的“需要确认”摘要。首页以一个入口先建立共享 HKU Portal 会话并运行 Student Center，再并发采集 Moodle、
-SIS Course Information 与 Class Planner；单一进度条显示阶段、当前课程和完成数量。同时
-集中本地刷新、资料状态、OCR 队列、Personal Inbox、资料搜索和 pending review 差异。日历作为
-独立侧栏页面。React 岛使用 shadcn/ui 风格的本地组件、FullCalendar 和 Motion 呈现月、周、日
-视图；旧 JavaScript 日历保留为静态资源缺失时的回退。两套视图共享课程与全文筛选，日期待确认
-事项单独列出。前端构建产物固定写入 `src/hsas/web/static/modern-assets/`，运行应用不依赖 Node。
-
-课程概览也由同一个端点返回。课程概述与目的由 AI 根据官方资料归纳后写入已校验的
-`information.json`；成绩构成由带 `weight_percent` 的事项汇总；全部课件和新增/修改标记
-来自最新 Moodle archive 与 pending review。程序综合 activity 类型、标题、section 与
-文件名，在学习材料/课程信息两大区内继续标记 Lecture、Tutorial、Notes、Exercises、
-Reading、Assessment 等类型。课件内容由 AI 阅读，页面呈现经过验证的课程事实。
-
-日历详情显示 DDL、时间、地点、形式、提交方式、占分、字数、要求、政策、警告、链接、
-AI 关联的学习材料和来源。`GET /api/source-preview` 只接受当前课程快照中的白名单路径；PDF 与图片使用同源原文
-预览，DOCX/PPTX 使用已提取文本预览，并保留打开原文件的入口。首页问答式搜索只匹配本地
-结构化事项和课件目录。AI 写入的字符串使用 DOM `textContent` 作为纯文本呈现。
-
-## 兼容 macOS App 与发布包
-
-配置了 Notion 工作台时，现有启动入口打开该工作台；下面的 WebKit/后端路径
-用于未配置连接的兼容模式。产品 Skill ZIP 与 Python 服务是主要独立交付物，
-macOS 应用保留现有构建支持。
-
-`HIQS.app` 使用 Swift/AppKit 创建原生窗口，并以 WKWebView 承载 Dashboard。App 启动时从
-源码构建配置指向当前项目的 `.venv/bin/hsas`；完整发布构建则从 Bundle Resources 运行
-PyInstaller 冻结的 `hiqs-backend`。两种模式都会绑定随机回环端口，并从后端启动输出取得
-地址后加载页面。窗口不提供地址栏，HTTP 服务继续限制在 `127.0.0.1`。
-
-WKNavigationDelegate 允许回环页面导航，并把 Moodle 等外部 HTTP(S) 链接交给系统浏览器。
-App 退出时终止它启动的后端子进程。源码构建使用现有项目环境和 Playwright 安装：
-`scripts/build_macos_app.sh` 只编译 Swift Launcher、写入构建者自己的项目位置并生成 ad-hoc
-签名的 `dist/HIQS.app`，本机路径不会进入 Git。
-
-Dashboard 启动后通过固定的 GitHub raw version URL 只读比较版本。自动更新仅对官方
+本地安装通过固定的 GitHub raw version URL 只读比较版本。自动更新仅对官方
 `origin` 的 Git 源码安装开放，并要求工作树干净、当前 HEAD 是 `origin/main` 的祖先；随后
-使用 `git merge --ff-only`，仅在依赖文件变化时更新 `.venv` 与 Playwright，最后重建
-`HIQS.app`。用户课程资料位于 Application Support，不参与源码更新。
-
-DMG 构建脚本同时打包匹配的 Playwright Chromium，并通过
-`PLAYWRIGHT_BROWSERS_PATH` 指向 Bundle 内浏览器，因此登录和同步不依赖额外安装步骤。
-
-`scripts/build_macos_dmg.sh` 固定执行 Python 冻结、Swift 编译、Bundle 组装、ad-hoc 签名、
-DMG 压缩与 SHA-256 输出。版本来自 `src/hsas/__init__.py`，并同步写入 Info.plist。
+使用 `git merge --ff-only`，仅在依赖文件变化时更新 `.venv` 与 Playwright。用户课程资料
+位于 Application Support，不参与源码更新。
 
 ## 有限兼容
 

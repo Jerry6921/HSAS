@@ -17,8 +17,7 @@ The material query path maintains one global SQLite FTS5 index at
 OCR update only the affected course rows; course filters execute in SQL and do
 not rebuild the index or scan the material tree. An incompatible derived index
 is rebuilt once on demand. The index preserves the same file/page provenance as
-the JSON archive. The UI contracts in `ui/src/contracts.ts` are generated from the
-Pydantic response models with `scripts/generate_ui_contracts.py`.
+the JSON archive.
 
 ## 2. Collector commands
 
@@ -230,7 +229,6 @@ Important download states:
 - Sanitize secret query keys from stored URLs.
 - Enforce local paths under the resources directory.
 - Use source allowlists for external download behavior.
-- Keep the HTTP dashboard on `127.0.0.1`.
 - Keep course data, browser profiles, secrets, and `information.json` in the private runtime directory.
 
 ## 10. Verification

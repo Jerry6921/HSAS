@@ -173,7 +173,6 @@ hsas information validate UPDATE.json
 hsas information apply UPDATE.json [--changes CHANGES.json] --confirmed
 hsas information show
 hsas list-status
-hsas ui
 hsas login
 hsas sync-courses [COURSE]
 hsas class-planner login

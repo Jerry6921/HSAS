@@ -150,7 +150,7 @@ uncertainty visible.
 
 - Given: pending Moodle changes, an OCR-required PDF, an external Google file,
   an unknown date and a source-conflict warning exist.
-- Expected: the Dashboard reports each condition in its separate status count
+- Expected: `get_status` reports each condition in its separate status count
   and exposes the affected records without merging their meanings.
 
 ### 28. Batch OCR

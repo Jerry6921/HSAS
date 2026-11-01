@@ -194,4 +194,13 @@ class SourceReviewService:
         return checkpoints
 
 
-__all__ = ["SourceReviewService"]
+def pending_summary(batch: PendingChangeBatch) -> dict[str, int]:
+    """Summarize a pending review batch for workflow and status payloads."""
+    return {
+        "course_count": len(batch.courses),
+        "change_count": batch.pending_change_count,
+        "full_review_count": sum(course.mode == "full" for course in batch.courses),
+    }
+
+
+__all__ = ["SourceReviewService", "pending_summary"]

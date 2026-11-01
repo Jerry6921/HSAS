@@ -106,9 +106,7 @@ Python suite 中。首次沙箱运行有三项 Dashboard socket 测试被拒绝�
 生成并检查，不含个人 resources 或认证配置。
 
 ```bash
-PYTHONPATH=.:src .venv/bin/pytest -q
-.venv/bin/ruff check .
-PYTHONPATH=.:src .venv/bin/python scripts/check_generated.py
+PYTHONPATH=.:src .venv/bin/python scripts/check_all.py
 .venv/bin/python scripts/generate_notes_contracts.py
 .venv/bin/python scripts/package_agent_skills.py --output work/hiqs-agent-skills.zip
 git diff --check

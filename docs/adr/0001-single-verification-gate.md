@@ -13,15 +13,15 @@ UI/TypeScript contracts, pytest). Locally that meant reconstructing the list fro
    stale contract. The feedback loop is long and the failure looks mysterious.
 2. The four steps drift: a gate is added to CI and never to anyone's local habit.
 
-The suite is currently ~6s offline with the `slow` marker excluded, which makes a single
-combined gate cheap enough to run on every task.
+The default suite is a couple of seconds offline with the `slow` marker excluded, which
+makes a single combined gate cheap enough to run on every task.
 
 ## Decision
 
 - `scripts/check_all.py` is the single local verification gate. It runs lint, both
-  committed contract snapshots (compared in memory against the generator's own render
-  functions, so the check never rewrites files), the generated UI/TypeScript contracts,
-  and the default test suite. `--fast` skips only the test suite.
+  committed JSON contract snapshots (compared in memory against the generator's own
+  render functions, so the check never rewrites files), and the default test suite.
+  `--fast` skips only the test suite.
 - The Definition of Done in `docs/agents/engineering-management.md` names this script and
   nothing else. If a gate exists in CI and not in the script, the script is incomplete.
 - The script is the contract between "green locally" and "green in CI"; keep those two

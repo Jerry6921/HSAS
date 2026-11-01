@@ -17,16 +17,6 @@ over tests that only assert a phrase exists.
   report/checkpoint state;
 - ensure no parallel business implementation was introduced.
 
-## React and local web UI
-
-- run `pnpm run typecheck` and focused Vitest tests;
-- run `pnpm run build` so `src/hsas/web/static/modern-assets` matches source;
-- run `.venv/bin/python scripts/check_generated.py` when Pydantic, MCP, or UI
-  response models change;
-- inspect the served page for layout or interaction changes, including empty,
-  error, busy, completed, and narrow-screen states when relevant;
-- confirm keyboard names and controls express their actual action.
-
 ## Collectors and file processing
 
 - test discovery, download, and parsing independently where possible;

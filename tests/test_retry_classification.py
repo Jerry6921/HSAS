@@ -9,7 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from hsas.core.ports import HIQSPortError
-from hsas.core.services.dashboard import DashboardProjectionService
+from hsas.core.services.information_snapshot import InformationSnapshotService
 from hsas.core.sync.controller import CourseSyncController
 from hsas.core.sync.workflow import (
     CourseSyncWorkflow,
@@ -51,8 +51,8 @@ def _persist(resources: Path, tasks: list[dict]) -> None:
     )
 
 
-def _dashboard(resources: Path, store: InformationStore, tasks: list[dict]):
-    return DashboardProjectionService(
+def _snapshot(resources: Path, store: InformationStore, tasks: list[dict]):
+    return InformationSnapshotService(
         resources_dir=resources,
         review_service=Mock(),
         personal_inbox_service=Mock(),
@@ -122,7 +122,7 @@ def test_retry_can_include_permanent_failures_explicitly(tmp_path: Path) -> None
 def test_review_closure_is_not_blocked_by_permanent_failures(tmp_path: Path) -> None:
     (tmp_path / "sis-enrollment").mkdir(parents=True)
     (tmp_path / "sis-enrollment/latest.json").write_text("{}", encoding="utf-8")
-    service = _dashboard(tmp_path, _complete_store(), annotate_retry_tasks([_PERMANENT]))
+    service = _snapshot(tmp_path, _complete_store(), annotate_retry_tasks([_PERMANENT]))
 
     closure = service._review_closure(
         _complete_store(), _empty_pending(tmp_path), _complete_material_status()
@@ -136,7 +136,7 @@ def test_review_closure_is_not_blocked_by_permanent_failures(tmp_path: Path) -> 
 def test_review_closure_reports_transient_failures_as_incomplete(tmp_path: Path) -> None:
     (tmp_path / "sis-enrollment").mkdir(parents=True)
     (tmp_path / "sis-enrollment/latest.json").write_text("{}", encoding="utf-8")
-    service = _dashboard(tmp_path, _complete_store(), annotate_retry_tasks([_TRANSIENT]))
+    service = _snapshot(tmp_path, _complete_store(), annotate_retry_tasks([_TRANSIENT]))
 
     closure = service._review_closure(
         _complete_store(), _empty_pending(tmp_path), _complete_material_status()

@@ -42,12 +42,11 @@ Install and verify changes with:
 
 ```bash
 python -m pip install -c requirements.lock -e '.[dev]'
-python -m ruff check src tests
-PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider
-cd ui
-pnpm install --frozen-lockfile
-pnpm run check
+python scripts/check_all.py
 ```
+
+`scripts/check_all.py` is the single gate: lint, both contract snapshots compared in
+memory, and the default suite.
 
 Preserve the dependency direction documented in `ARCHITECTURE.md`. Collector
 changes require download-coverage, last-known-good and failure-path tests.

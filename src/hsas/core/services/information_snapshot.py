@@ -1,4 +1,4 @@
-"""Build the read-only Dashboard projection from canonical facts and source state."""
+"""Build the read-only information snapshot from canonical facts and source state."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from hsas.application.ports.repositories import (
 from hsas.core.ports import HIQSPortError
 from hsas.core.services.personal_inbox import PersonalInboxService
 from hsas.core.services.records import is_user_created_item, matching_archive
-from hsas.core.services.reviews import SourceReviewService
+from hsas.core.services.reviews import SourceReviewService, pending_summary
 from hsas.domain.courses import ArchiveIndex, PendingChangeBatch, iter_activities, iter_files
 from hsas.domain.courses.change_queue import CourseReview
 from hsas.domain.information import CourseRecord, InformationStore, RecentInformationUpdate
@@ -35,12 +35,12 @@ from hsas.infrastructure.storage import JsonChangeQueueRepository, JsonInformati
 from hsas.infrastructure.storage.json_store import read_json
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-DashboardError = HIQSPortError
+SnapshotError = HIQSPortError
 
 
 @dataclass(slots=True)
-class DashboardProjectionService:
-    """Compose the validated Dashboard read model without mutating course facts."""
+class InformationSnapshotService:
+    """Compose the validated information read model without mutating course facts."""
 
     resources_dir: Path
     review_service: SourceReviewService
@@ -78,7 +78,7 @@ class DashboardProjectionService:
                     "calendar_item_count": 0,
                     "unknown_date_count": 0,
                 },
-                "pending_review": _pending_summary(pending),
+                "pending_review": pending_summary(pending),
                 "material_status": material_status,
                 "review_closure": self._review_closure(store, pending, material_status),
                 "course_reconciliation": self._course_reconciliation(store),
@@ -96,7 +96,7 @@ class DashboardProjectionService:
         try:
             store = self.information_repository.load(path)
         except (OSError, ValueError, ValidationError) as exc:
-            raise DashboardError(
+            raise SnapshotError(
                 f"information.json 无法通过模型校验：{type(exc).__name__}"
             ) from exc
         calendar_count = sum(
@@ -138,7 +138,7 @@ class DashboardProjectionService:
                     item.date_status == "unknown" for item in store.items
                 ),
             },
-            "pending_review": _pending_summary(pending),
+            "pending_review": pending_summary(pending),
             "material_status": material_status,
             "review_closure": self._review_closure(store, pending, material_status),
             "course_reconciliation": self._course_reconciliation(store),
@@ -396,11 +396,11 @@ class DashboardProjectionService:
     def calendar_ics(self) -> bytes:
         path = self.resources_dir / "information.json"
         if not self.information_repository.exists(path):
-            raise DashboardError("information.json 尚未建立。")
+            raise SnapshotError("information.json 尚未建立。")
         try:
             return build_ics(self.information_repository.load(path)).encode("utf-8")
         except (OSError, ValueError, ValidationError) as exc:
-            raise DashboardError(f"日历导出失败：{type(exc).__name__}") from exc
+            raise SnapshotError(f"日历导出失败：{type(exc).__name__}") from exc
 
     def _dashboard_courses(
         self,
@@ -603,13 +603,6 @@ class DashboardProjectionService:
             "source_conflicts": source_conflicts,
         }
 
-
-def _pending_summary(batch: PendingChangeBatch) -> dict[str, int]:
-    return {
-        "course_count": len(batch.courses),
-        "change_count": batch.pending_change_count,
-        "full_review_count": sum(course.mode == "full" for course in batch.courses),
-    }
 
 def _pending_updates(batch: PendingChangeBatch) -> dict[str, Any]:
     """Shape pending review data for the local update-diff view."""
@@ -922,8 +915,4 @@ def _material_locator_prompt(
         ]
     )
 
-def pending_summary(batch: PendingChangeBatch) -> dict[str, int]:
-    return _pending_summary(batch)
-
-
-__all__ = ["DashboardProjectionService", "pending_summary"]
+__all__ = ["InformationSnapshotService"]

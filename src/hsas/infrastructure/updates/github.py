@@ -189,16 +189,6 @@ class GitHubUpdateService:
             )
         self._command(["git", "merge", "--ff-only", target_commit], timeout=120)
 
-        if self.system_name == "Darwin":
-            builder = self.project_root / "scripts" / "build_macos_app.sh"
-            if builder.is_file():
-                try:
-                    self._command([str(builder)], timeout=180)
-                except ApplicationUpdateError as exc:
-                    raise ApplicationUpdateError(
-                        f"源码已更新至 {latest_version}，但 HIQS.app 重建失败：{exc}"
-                    ) from exc
-
         return {
             "status": "updated",
             "previous_version": self.current_version,

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-import webbrowser
 
 from .commands.information import information_app
 from .commands.class_planner import class_planner_app
@@ -206,31 +205,6 @@ def sync_courses(
         f"Synced {result.course_title}: {result.change_count} change(s) -> "
         f"{result.output_path}"
     )
-
-
-@app.command("ui")
-def ui(
-    ctx: typer.Context,
-    port: Annotated[
-        int,
-        typer.Option(min=0, max=65535, help="Local TCP port; use 0 for any free port"),
-    ] = 8765,
-    open_browser: Annotated[
-        bool,
-        typer.Option("--open/--no-open", help="Open the calendar in the default browser"),
-    ] = True,
-) -> None:
-    """Open Notion after migration; retain local recovery until configured."""
-    from hsas.core import build_port
-    from hsas.web.server import serve_dashboard
-
-    workspace = build_port(_resources(ctx)).notion_status().get("workspace_url")
-    if workspace:
-        typer.echo(workspace)
-        if open_browser:
-            webbrowser.open(workspace)
-        return
-    serve_dashboard(_resources(ctx), port=port, open_browser=open_browser)
 
 
 def _course_service(settings=None):

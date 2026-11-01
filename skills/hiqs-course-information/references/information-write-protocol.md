@@ -64,8 +64,8 @@ Deletion uses a separate explicit workflow.
 
 The AI should synthesize course-wide `overview` and `objectives` during the first
 full review, and refresh them only when relevant evidence changes. These summaries
-must be concise paraphrases grounded in the course-level `sources`. The dashboard
-derives its assessment distribution from item `weight_percent` values and
+must be concise paraphrases grounded in the course-level `sources`. Status and
+assessment distribution derive from item `weight_percent` values and
 combines parent and child grading entries according to documented contribution rules.
 
 If a field on a matching record should stay unchanged, copy it into the update.
@@ -90,7 +90,7 @@ An upsert record contains the complete reviewed state of that record.
 - Store fact provenance in `sources`; store student-facing courseware in `materials`.
 - An item-level material relation includes `title`, an optional freely authored `material_type`, and a local `relative_path` or source `url`. Add page or slide numbers and a short note when they help the student reach the relevant section.
 - Link a material when an official week number, topic, title, Moodle activity, or course section supports the relationship.
-- Reuse the downloaded archive path so the dashboard source preview can open the original file or its text sidecar.
+- Reuse the downloaded archive path so the original file or its text sidecar stays locatable.
 - Review material relations when a linked Moodle file is modified or removed.
 - Use `courses[].material_sections` to organize the complete current Moodle archive. Section titles and descriptions are AI-authored free text derived from the course itself; there is no allowed-category list.
 - Compare section membership against `hsas materials list --course <MOODLE_COURSE_ID>`, assign every current material exactly once, and keep the same `relative_path` or source `url` as the manifest.

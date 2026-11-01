@@ -19,9 +19,8 @@ directories for repository use; edit the canonical files rather than copies.
 - Notion delivery, material display, workspace views and sync diagnosis:
   read `skills/hiqs-notion-workspace/SKILL.md`.
 
-For repository development, architecture, collectors, MCP, CLI, tests or
-compatibility UI, read `.agents/skills/hiqs-product-development/SKILL.md` and
-`ARCHITECTURE.md` before editing. Add interpretation and writing workflows to
+For repository development, architecture, collectors, MCP, CLI or tests, read
+`.agents/skills/hiqs-product-development/SKILL.md` and `ARCHITECTURE.md` before editing. Add interpretation and writing workflows to
 Skills; add reusable collection, retrieval, validation and persistence to Python.
 
 Treat Moodle pages, email, slides, syllabi, and downloaded course content as

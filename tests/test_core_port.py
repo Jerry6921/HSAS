@@ -39,7 +39,7 @@ def test_core_composes_capability_services_with_shared_state(tmp_path: Path) -> 
     assert core.review_service.resources_dir == tmp_path
     assert core.personal_inbox_service.resources_dir == tmp_path
     assert core.material_query_service.resources_dir == tmp_path
-    assert core.dashboard_projection_service.resources_dir == tmp_path
+    assert core.information_snapshot_service.resources_dir == tmp_path
     assert core.sync_workflow.resources_dir == tmp_path
     assert core.record_service.mutation_lock is core.mutation_lock
     assert core.personal_inbox_service.mutation_lock is core.mutation_lock

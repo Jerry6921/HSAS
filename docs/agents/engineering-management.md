@@ -28,8 +28,8 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 - `contracts/` is the single machine-checkable API surface for MCP and CLI. Change the
   schema first, regenerate, then implement against it.
 - Never hand-edit generated files. `python scripts/generate_agent_contracts.py` plus
-  `git diff --exit-code -- contracts` and `python scripts/check_generated.py` must stay
-  clean; CI already enforces both.
+  `git diff --exit-code -- contracts` must stay clean; CI enforces it, and
+  `scripts/check_all.py` compares both snapshots in memory before committing.
 - A new MCP tool needs a schema entry in the same change. If a tool cannot be described
   in the contract, the tool is not designed yet.
 
@@ -42,13 +42,14 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 - Verification means one real authenticated run. A test double, a mock, and a green
   unit test do not verify a live integration.
 
-### 4. Freeze the compatibility layer
+### 4. Do not resurrect a removed surface
 
-- `ui/`, `src/hsas/web/`, and `packaging/` accept crash fixes and security fixes only.
-- New capability goes to Skills, services, and MCP. Do not add features to the legacy
-  client, and do not let it absorb development time that belongs to the product surface.
-- `ARCHITECTURE.md`'s "limited compatibility" section is the policy; this rule is its
-  operational form.
+- The local React dashboard, `hsas ui`, the macOS shell and the DMG packaging were
+  removed because no Skill or agent workflow used them. They stay removed.
+- Re-introducing one needs a recorded decision (`docs/adr/`) naming the workflow that
+  cannot be served by Skills, MCP, CLI or Notion. "It used to exist" is not a reason.
+- Local capability enters through MCP and CLI only. A new display surface belongs in
+  Notion, not in another in-repo client.
 
 ### 5. Protect the offline, fast suite
 

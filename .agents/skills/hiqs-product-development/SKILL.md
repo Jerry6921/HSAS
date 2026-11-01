@@ -8,8 +8,8 @@ description: Develop and validate the HIQS Skill Set, its reusable Python servic
 Develop HIQS as an AI Skill Set with Notion as its primary presentation workspace.
 Product workflows, evidence interpretation, teaching and authorship belong in
 `skills/`. Python supplies reusable deterministic collection, retrieval,
-validation, checkpoint and delivery services. The local web app and macOS shell
-are compatibility/recovery clients; new workflows start from Skills and Notion.
+validation, checkpoint and delivery services. The local web app and macOS shell have been removed; MCP and CLI are the only local
+entry points, and new workflows start from Skills and Notion.
 Treat the user's explicit request as the required outcome and infer the low-risk
 supporting behavior needed to make that outcome understandable, reliable, and
 usable. Do not infer permission for unrelated features, external publication,
@@ -75,10 +75,8 @@ local state can still exist. Make long-running work expose meaningful progress,
 failure, cancellation, and safe retry. Make user-facing mutations report their
 result; absence of a report is not proof of no change.
 
-For UI work, edit React/TypeScript source, rebuild `modern-assets`, and inspect
-the served result when layout or interaction changed. For Agent-facing work,
-prefer stable IDs and bounded evidence expansion over dumping full private files
-into context. For collector work, preserve staged publication, budgets,
+For Agent-facing work, prefer stable IDs and bounded evidence expansion over dumping
+full private files into context. For collector work, preserve staged publication, budgets,
 deduplication, provenance, and the last valid snapshot on failure.
 
 ## Finish with evidence

@@ -54,8 +54,6 @@ jobs:
         run: python -m ruff check src tests scripts
       - name: Verify Agent contract snapshots
         run: python scripts/generate_agent_contracts.py && git diff --exit-code -- contracts
-      - name: Verify generated UI and TypeScript contracts
-        run: python scripts/check_generated.py
       - name: Test
         run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider --cov=hsas --cov-report=term-missing --cov-fail-under=75
       - name: Build wheel
@@ -66,52 +64,3 @@ jobs:
           python -m venv wheelcheck
           wheelcheck/bin/pip install dist-wheel/*.whl
           wheelcheck/bin/hsas --help
-
-  macos:
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install in app-compatible environment
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -c requirements.lock -e '.[dev]'
-      - name: Verify macOS runtime and local server
-        run: |
-          .venv/bin/python -c "import sqlite3; connection = sqlite3.connect(':memory:'); connection.execute('CREATE VIRTUAL TABLE probe USING fts5(content)')"
-          PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider tests/test_macos_app.py tests/test_macos_launcher.py tests/test_run_dashboard.py
-          .venv/bin/python -m hsas --help
-      - name: Build and verify native app
-        run: |
-          scripts/build_macos_app.sh
-          test -x dist/HIQS.app/Contents/MacOS/HIQS
-          codesign --verify --deep --strict dist/HIQS.app
-
-  frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
-      - name: Install
-        working-directory: ui
-        run: pnpm install --frozen-lockfile
-      - name: Typecheck and test
-        working-directory: ui
-        run: pnpm run typecheck && pnpm run test
-      - name: Verify committed production bundle
-        working-directory: ui
-        run: pnpm run build
-      - name: Check generated assets
-        run: git diff --exit-code -- src/hsas/web/static/modern-assets

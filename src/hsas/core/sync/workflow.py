@@ -14,7 +14,7 @@ from hsas.application.material_search import (
     refresh_material_index,
 )
 from hsas.core.ports import HIQSPortError
-from hsas.core.services.dashboard import pending_summary
+from hsas.core.services.reviews import pending_summary
 from hsas.core.services.reviews import SourceReviewService
 from hsas.core.sync.controller import CourseSyncController
 from hsas.infrastructure.storage.json_store import read_json, write_json

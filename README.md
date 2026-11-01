@@ -39,17 +39,12 @@ HIQS/
 │   ├── infrastructure/         HKU 来源、文件、存储与 Notion 适配器
 │   ├── mcp/                    Skills 调用服务的正式接口
 │   ├── cli/                    人工设置、恢复诊断与确定性 worker
-│   ├── web/                    兼容本地 HTTP／静态客户端
 │   └── codegen/                合同生成工具
 ├── contracts/                  服务的可检查数据合同
 ├── docs/                       架构、Notion 接入与实现边界
 ├── tests/                      复用服务与入口的行为验证
-├── scripts/                    Skill 打包、合同生成与兼容应用构建
-├── .agents/skills/             产品 Skill 链接与仓库工程 Skill
-├── ui/                         兼容 React 客户端源码
-├── packaging/                  兼容 macOS 应用资源（Info.plist 模板）
-├── scripts/build_macos_app.sh  开发者 launcher（复用本机 .venv）
-└── scripts/build_macos_dmg.sh  分发包（PyInstaller，可脱离仓库运行）
+├── scripts/                    Skill 打包、合同生成与验证入口
+└── .agents/skills/             产品 Skill 链接与仓库工程 Skill
 ```
 
 `skills/` 是产品 Skill 的唯一维护位置；`.agents/skills/` 使用相对链接指向同一份内容。
@@ -196,12 +191,11 @@ information.json → Apple Calendar / Reminders（已确认、未过期）
 - HIQS 用于整理和核对课程信息；涉及提交截止时间、考试安排和课程政策时，用户仍可打开所列
   官方来源进行最终确认。
 
-## 兼容入口
+## 交付边界
 
-现有 React Dashboard、`hsas ui` 和 macOS 应用保留为兼容／恢复入口。
-配置 Notion 后，UI 入口打开对应工作台；连接未配置时仍可使用本地页面。
-功能和历史截图见 [本地兼容界面](docs/compatibility-ui.md)。新产品工作流以 Skills
-和 Notion 为起点，兼容客户端继续复用相同服务与课程事实。
+产品交付是 Skills + Notion + Python 服务，本地入口只有 MCP、CLI 与 Apple 交付。
+曾作为兼容／恢复入口的本地 React Dashboard、`hsas ui`、macOS 应用和 DMG 打包已移除；
+历史实现可从 git 历史取回，不重新引入，除非先记录一条架构决策。
 
 ## 隐私与信息可信度
 

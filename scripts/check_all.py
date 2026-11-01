@@ -73,7 +73,6 @@ def _contract_checks() -> list[bool]:
             ROOT / "contracts/course-notes.schema.json",
             render_notes_contracts(),
         ),
-        _run("UI and TypeScript contracts", [PY, "scripts/check_generated.py"]),
     ]
 
 

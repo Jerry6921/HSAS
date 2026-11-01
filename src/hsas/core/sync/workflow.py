@@ -481,6 +481,11 @@ class CourseSyncWorkflow:
                     if isinstance(moodle_result, dict)
                     else 0
                 )
+                moodle_warnings = (
+                    list(moodle_result.get("warnings") or [])
+                    if isinstance(moodle_result, dict)
+                    else []
+                )
                 sis_failures = list(getattr(sis_result, "failures", ()) or ())
                 retry_remaining.extend(
                     {"source": "moodle", "course_code": failure.get("course_code"), "error": failure.get("error", "")}
@@ -500,6 +505,7 @@ class CourseSyncWorkflow:
                 "failed_course_count": failed_course_count,
                 "source_failures": source_failures,
                 "retry_tasks": retry_remaining,
+                "warnings": moodle_warnings,
                 "retry_mode": retry_tasks is not None,
                 "materials_deferred": True,
                 "term": enrollment.get("term"),

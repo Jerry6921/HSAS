@@ -92,7 +92,13 @@ def discover_moodle_course_codes(resources_dir: Path) -> tuple[list[dict[str, st
     for path in sorted((resources_dir / "courses").glob("*/course.json")):
         try:
             archive = ArchiveIndex.from_json(path).archive
-        except Exception:
+        except Exception as exc:
+            # A corrupt snapshot must stay visible: otherwise the course is
+            # silently dropped from SIS discovery and the sync reports success.
+            skipped.append(
+                f"{path.parent.name}: unreadable course.json "
+                f"({type(exc).__name__})"
+            )
             continue
         identity = course_identity(archive.course.title)
         if identity is None:

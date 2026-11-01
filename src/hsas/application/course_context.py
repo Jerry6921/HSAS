@@ -133,6 +133,9 @@ def build_course_question_context(
         warnings.append(
             "no matching extracted material text was found; do not infer missing course content"
         )
+    for warning in [*structured.warnings, *materials.warnings]:
+        if warning not in warnings:
+            warnings.append(warning)
 
     return CourseQuestionContext(
         question=normalized_question,

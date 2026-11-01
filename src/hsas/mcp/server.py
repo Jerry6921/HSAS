@@ -500,29 +500,7 @@ def build_mcp_server(port: HIQSPort) -> MCPServer:
         """Read official catalogue pages, including explicit unselected course_codes."""
         return port.synchronize_sis_course_info({"confirmed": confirmed, "course_codes": course_codes})
 
-    @server.tool()
-    def add_course(course: dict[str, Any], confirmed: bool = False) -> dict[str, Any]:
-        """Add one validated course record after explicit confirmation."""
-        return port.add_course({"course": course, "confirmed": confirmed})
-
-    @server.tool()
-    def delete_courses(
-        course_ids: list[str],
-        confirmation: list[str],
-        confirmed: bool = False,
-    ) -> dict[str, Any]:
-        """Delete selected courses and related local data after confirmation.
-
-        ``confirmation`` must repeat ``course_ids`` exactly: the destructive
-        service gate checks both ``confirmed`` and the repeated target list, so
-        an accidental or hallucinated deletion cannot pass on one flag alone.
-        """
-        return port.delete_courses(
-            {
-                "course_ids": course_ids,
-                "confirmation": confirmation,
-                "confirmed": confirmed,
-            }
-        )
-
+    # Course add/delete are compatibility-UI maintenance actions, not Agent
+    # tools: canonical facts must be written through the validated apply flow
+    # (coverage, audit digest, checkpoints and index refresh all live there).
     return server

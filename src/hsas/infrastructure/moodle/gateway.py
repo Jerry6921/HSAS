@@ -53,18 +53,19 @@ from hsas.domain.courses import iter_activities
 from hsas.infrastructure.documents.analysis_pipeline import analyze_course_documents
 
 
-def _load_previous_archive(course_path: Path) -> CourseArchive | None:
-    """Load the previous course snapshot; a corrupt file is treated as absence.
+def _load_previous_archive(course_path: Path) -> tuple[CourseArchive | None, bool]:
+    """Load the previous course snapshot and report whether it was corrupt.
 
     The caller reads this only while holding the per-course snapshot lock, so the
-    baseline it merges into is the same tree that ``prepare()`` copies.
+    baseline it merges into is the same tree that ``prepare()`` copies. A corrupt
+    baseline is reported instead of silently collapsing into a first sync.
     """
     if not course_path.exists():
-        return None
+        return None, False
     try:
-        return CourseArchive.model_validate(read_json(course_path))
+        return CourseArchive.model_validate(read_json(course_path)), False
     except Exception:
-        return None
+        return None, True
 
 
 def _is_moodle_login_url(url: str, configured_login_url: str) -> bool:
@@ -151,7 +152,7 @@ async def _persist_course(
         # Read the baseline only after the per-course lock is held: the live tree
         # may otherwise change between the read and the copy inside prepare(),
         # and the merge below would then run against a stale baseline.
-        previous_archive = _load_previous_archive(course_path)
+        previous_archive, baseline_corrupt = _load_previous_archive(course_path)
         storage_root = transaction.staging_resources_dir
         course_root = transaction.staged_course_dir
         staged_course_path = course_root / "course.json"
@@ -239,6 +240,14 @@ async def _persist_course(
             "Comparing Moodle dates, activities, and materials",
         ):
             changes = compare_course_archives(previous_archive, archive)
+            if baseline_corrupt:
+                changes.baseline_status = "corrupt"
+                changes.warnings.append(
+                    "previous course snapshot was unreadable; the incremental "
+                    "baseline was lost and this course ran as a first sync"
+                )
+            elif previous_archive is None:
+                changes.baseline_status = "absent"
             changes_root = course_root / "changes"
             write_model(changes_root / "latest.json", changes)
             if changes.changed:
@@ -529,6 +538,7 @@ async def sync_course_in_context(
         course_title=archive.course.title,
         change_count=len(changes.changes),
         output_path=output_path,
+        warnings=tuple(changes.warnings),
     )
 
 
@@ -584,6 +594,7 @@ def sync_course(
             course_title=archive.course.title,
             change_count=len(changes.changes),
             output_path=output_path,
+            warnings=tuple(changes.warnings),
         )
 
     try:
@@ -636,6 +647,7 @@ def sync_all(
         succeeded: list[str] = []
         change_counts: dict[str, int] = {}
         failures: list[dict[str, str]] = []
+        warnings: list[str] = []
         cancelled = False
 
         def report(**values: object) -> None:
@@ -751,6 +763,7 @@ def sync_all(
                         progress.finish_course(course_task, archive.course.title)
                         succeeded.append(course_id)
                         change_counts[course_id] = len(changes.changes)
+                        warnings.extend(changes.warnings)
                         progress.advance_batch(batch_task, f"completed: {course_id}")
                     except MoodleSyncCancelled:
                         cancelled = True
@@ -798,6 +811,7 @@ def sync_all(
             failures=tuple(failures),
             report_path=report_path,
             cancelled=cancelled,
+            warnings=tuple(warnings),
         )
 
     try:

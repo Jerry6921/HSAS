@@ -79,6 +79,7 @@ class BrowserSyncSession:
         cancel_requested: CancelRequested | None,
     ) -> dict[str, object]:
         failures: list[dict[str, str]] = []
+        warnings: list[str] = []
         course_results: list[dict[str, object]] = []
         completed = 0
         processed = 0
@@ -161,6 +162,8 @@ class BrowserSyncSession:
                             }
                         )
                     else:
+                        if result.warnings:
+                            warnings.extend(result.warnings)
                         course_results.append(
                             {
                                 "course_id": result.course_id,
@@ -168,6 +171,7 @@ class BrowserSyncSession:
                                 "succeeded": True,
                                 "change_count": result.change_count,
                                 "materials_deferred": not download_materials,
+                                "warnings": list(result.warnings),
                             }
                         )
                 if not course_failed:
@@ -194,7 +198,7 @@ class BrowserSyncSession:
             "logged_in",
             available_course_count=len(self._available_by_code),
         )
-        return {"completed": completed, "failures": failures}
+        return {"completed": completed, "failures": failures, "warnings": warnings}
 
     async def sync_sis_course_info(
         self,

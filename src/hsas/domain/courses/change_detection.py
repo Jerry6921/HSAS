@@ -37,6 +37,8 @@ class CourseChangeSet(StrictModel):
     change_set_id: str | None = None
     detected_at: datetime
     initial_sync: bool = False
+    baseline_status: Literal["ok", "absent", "corrupt"] = "ok"
+    warnings: list[str] = Field(default_factory=list)
     changed: bool = False
     previous_collected_at: datetime | None = None
     current_collected_at: datetime

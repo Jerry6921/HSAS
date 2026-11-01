@@ -74,38 +74,6 @@ def test_sync_control_tools_forward_confirmation(name: str) -> None:
     getattr(port, name).assert_called_once_with({"confirmed": True})
 
 
-def test_delete_courses_forwards_both_confirmations() -> None:
-    server, port = _build_server()
-
-    _call(
-        server,
-        port,
-        "delete_courses",
-        {
-            "course_ids": ["138096"],
-            "confirmation": ["138096"],
-            "confirmed": True,
-        },
-    )
-
-    port.delete_courses.assert_called_once_with(
-        {
-            "course_ids": ["138096"],
-            "confirmation": ["138096"],
-            "confirmed": True,
-        }
-    )
-
-
-def test_delete_courses_schema_requires_repeated_target_list() -> None:
-    server, _port = _build_server()
-    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
-
-    schema = tools["delete_courses"].input_schema
-    assert "confirmation" in schema["required"]
-    assert schema["properties"]["confirmation"]["type"] == "array"
-
-
 def test_workflow_rejects_missing_confirmation_and_empty_course_scope() -> None:
     workflow = _workflow()
 
@@ -141,7 +109,7 @@ def test_courses_matching_scope_is_case_insensitive() -> None:
     assert courses_matching_scope(courses, "missing") == []
 
 
-def test_delete_courses_service_accepts_mcp_payload(tmp_path: Path) -> None:
+def test_delete_courses_service_requires_matching_confirmation(tmp_path: Path) -> None:
     service = CourseRecordService(resources_dir=tmp_path, mutation_lock=Lock())
 
     with pytest.raises(HIQSPortError, match="确认"):

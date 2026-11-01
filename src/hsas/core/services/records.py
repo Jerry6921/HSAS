@@ -17,14 +17,17 @@ from hsas.application.ports.repositories import (
 )
 from hsas.application.material_search import (
     invalidate_material_index,
+    refresh_material_index,
     remove_material_index_courses,
 )
 from hsas.core.ports import HIQSPortError
+from hsas.core.services.information import persist_recent_information_update
 from hsas.domain.courses import ArchiveIndex
 from hsas.domain.information import (
     CourseRecord,
     InformationItem,
     InformationStore,
+    InformationUpdate,
 )
 from hsas.infrastructure.storage import (
     JsonChangeQueueRepository,
@@ -63,28 +66,46 @@ class CourseRecordService:
         except ValidationError as exc:
             raise HIQSPortError(f"课程资料无法通过校验：{exc}") from exc
         path = self.resources_dir / "information.json"
+        warnings: list[str] = []
+        recent_update: dict[str, Any] | None = None
         with self.mutation_lock, canonical_information_lock(self.resources_dir):
             try:
                 store = self._load_optional_store(path)
                 if any(value.course_id == course.course_id for value in store.courses):
                     raise HIQSPortError(f"课程 ID 已存在：{course.course_id}")
-                self.information_repository.save(
-                    path,
-                    InformationStore(
-                        timezone=store.timezone,
-                        updated_at=datetime.now(UTC),
-                        updated_by="manual",
-                        courses=[*store.courses, course],
-                        items=store.items,
-                    ),
+                updated = InformationStore(
+                    timezone=store.timezone,
+                    updated_at=datetime.now(UTC),
+                    updated_by="manual",
+                    courses=[*store.courses, course],
+                    items=store.items,
                 )
+                self.information_repository.save(path, updated)
             except HIQSPortError:
                 raise
             except (OSError, ValueError, ValidationError) as exc:
                 raise HIQSPortError(
                     f"添加课程失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
-        return {"course_id": course.course_id, "created": True}
+        # Keep the same invariants as the validated apply path: every canonical
+        # write produces a user-visible digest and keeps the derived index fresh.
+        try:
+            recent_update = persist_recent_information_update(
+                self.resources_dir, store, updated, InformationUpdate(courses=[course])
+            )
+        except (OSError, ValueError) as exc:
+            warnings.append(f"recent update digest failed: {type(exc).__name__}")
+        try:
+            refresh_material_index(self.resources_dir, {course.course_id})
+        except (OSError, ValueError):
+            invalidate_material_index(self.resources_dir)
+            warnings.append("material index refresh failed; the index was marked stale")
+        return {
+            "course_id": course.course_id,
+            "created": True,
+            "recent_update": recent_update,
+            "warnings": warnings,
+        }
 
     def delete_course(self, payload: dict[str, Any]) -> dict[str, Any]:
         course_id = payload.get("course_id")
@@ -312,15 +333,30 @@ class CourseRecordService:
                 raise HIQSPortError(
                     f"删除课程失败：{type(exc).__name__}: {str(exc)[:300]}"
                 ) from exc
+        warnings: list[str] = []
+        recent_update: dict[str, Any] | None = None
+        try:
+            recent_update = persist_recent_information_update(
+                self.resources_dir,
+                store,
+                updated,
+                InformationUpdate(),
+                removed_course_ids=selected_ids,
+            )
+        except (OSError, ValueError) as exc:
+            warnings.append(f"recent update digest failed: {type(exc).__name__}")
         try:
             remove_material_index_courses(
                 self.resources_dir, removed_archive_ids | selected_ids
             )
         except (OSError, ValueError):
             invalidate_material_index(self.resources_dir)
+            warnings.append("material index removal failed; the index was marked stale")
         return {
             "deleted_item_count": len(removed_items),
             "files_moved_to_trash": len(moved_archives),
+            "recent_update": recent_update,
+            "warnings": warnings,
         }
 
 

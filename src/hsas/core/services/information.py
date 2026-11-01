@@ -290,9 +290,17 @@ def persist_recent_information_update(
     before: InformationStore,
     after: InformationStore,
     update: InformationUpdate,
+    *,
+    removed_course_ids: Any = (),
 ) -> dict[str, Any]:
-    """Persist the user-visible audit for every canonical information write path."""
-    audit = _build_recent_update(before, after, update)
+    """Persist the user-visible audit for every canonical information write path.
+
+    ``InformationUpdate`` only expresses upserts, so explicit deletions pass the
+    removed course ids separately and still produce an auditable digest.
+    """
+    audit = _build_recent_update(
+        before, after, update, removed_course_ids=removed_course_ids
+    )
     audit_path = write_json(resources_dir / RECENT_UPDATE_PATH, audit)
     audit_path.chmod(0o600)
     return audit
@@ -690,6 +698,8 @@ def _build_recent_update(
     before: InformationStore,
     after: InformationStore,
     update: InformationUpdate,
+    *,
+    removed_course_ids: Any = (),
 ) -> dict[str, Any]:
     old_courses = {course.course_id: course for course in before.courses}
     new_courses = {course.course_id: course for course in after.courses}
@@ -735,6 +745,13 @@ def _build_recent_update(
         if item_changes:
             for group, outcome in _item_outcomes(previous, current):
                 course_bucket[group].append(outcome)
+    for course_id in removed_course_ids:
+        previous = old_courses.get(course_id)
+        if previous is None:
+            continue
+        bucket(course_id)["changes"].append(
+            _change("removed", "course", previous.title)
+        )
     outcome_groups = (
         "activities_added",
         "activities_updated",

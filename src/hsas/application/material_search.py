@@ -81,6 +81,9 @@ class MaterialSearchResult(StrictModel):
     indexed_chunk_count: int = Field(ge=0)
     skipped_document_count: int = Field(ge=0)
     hits: list[MaterialHit] = Field(default_factory=list)
+    # Canonical facts or the derived index may be degraded; never report a
+    # "complete" evidence packet without saying so.
+    warnings: list[str] = Field(default_factory=list)
 
 
 class EvidenceContentChunk(StrictModel):
@@ -324,6 +327,13 @@ def search_evidence(
         raise ValueError("hit character limit must be between 200 and 10000")
 
     index_path = resources_dir / "index" / "materials.sqlite3"
+    warnings: list[str] = []
+    information, information_warning = _load_information(resources_dir)
+    if information_warning is not None:
+        warnings.append(information_warning)
+    canonical_ids = _canonical_search_ids(
+        resources_dir, course_ids, information=information, warnings=warnings
+    )
     if not index_ready(index_path):
         _ensure_material_index(resources_dir)
     query_expression = " OR ".join(query_tokens)
@@ -331,7 +341,7 @@ def search_evidence(
         indexed = search_index(
             index_path,
             query_expression,
-            _canonical_search_ids(resources_dir, course_ids),
+            canonical_ids,
             limit,
             source_kinds=source_kinds,
         )
@@ -341,7 +351,7 @@ def search_evidence(
             indexed = search_index(
                 index_path,
                 query_expression,
-                _canonical_search_ids(resources_dir, course_ids),
+                canonical_ids,
                 limit,
                 source_kinds=source_kinds,
             )
@@ -354,31 +364,40 @@ def search_evidence(
         limit,
         context_character_limit=context_character_limit,
         hit_character_limit=hit_character_limit,
+        warnings=warnings,
     )
 
 
 def refresh_material_index(
     resources_dir: Path,
     course_ids: set[str] | None = None,
-) -> dict[str, int]:
-    """Build once or incrementally refresh synchronized course evidence."""
+) -> dict[str, Any]:
+    """Build once or incrementally refresh synchronized course evidence.
+
+    When canonical facts are unreadable the index is still refreshed from course
+    archives, but the returned status carries a warning instead of hiding it.
+    """
     index_path = resources_dir / "index" / "materials.sqlite3"
     try:
         with _material_index_lock(resources_dir):
             selected = course_ids if course_ids and index_ready(index_path) else None
-            chunks, skipped_by_course = _collect_chunks(resources_dir, selected)
+            chunks, skipped_by_course, warnings = _collect_chunks(resources_dir, selected)
             if selected is None:
-                return replace_index(
+                result = replace_index(
                     index_path,
                     chunks,
                     skipped_by_course=skipped_by_course,
                 )
-            return update_index_courses(
-                index_path,
-                chunks,
-                course_ids=_canonical_search_ids(resources_dir, selected) or set(),
-                skipped_by_course=skipped_by_course,
-            )
+            else:
+                result = update_index_courses(
+                    index_path,
+                    chunks,
+                    course_ids=_canonical_search_ids(resources_dir, selected) or set(),
+                    skipped_by_course=skipped_by_course,
+                )
+            if warnings:
+                result = {**result, "warnings": warnings}
+            return result
     except sqlite3.Error as exc:
         raise OSError(f"material index refresh failed: {exc}") from exc
 
@@ -389,7 +408,7 @@ def _ensure_material_index(resources_dir: Path) -> None:
         with _material_index_lock(resources_dir):
             if index_ready(index_path):
                 return
-            chunks, skipped_by_course = _collect_chunks(resources_dir, None)
+            chunks, skipped_by_course, _warnings = _collect_chunks(resources_dir, None)
             replace_index(
                 index_path,
                 chunks,
@@ -399,17 +418,20 @@ def _ensure_material_index(resources_dir: Path) -> None:
         raise OSError(f"material index initialization failed: {exc}") from exc
 
 
-def _rebuild_material_index(resources_dir: Path) -> dict[str, int]:
+def _rebuild_material_index(resources_dir: Path) -> dict[str, Any]:
     """Replace a broken derived index once while serializing competing rebuilds."""
     index_path = resources_dir / "index" / "materials.sqlite3"
     try:
         with _material_index_lock(resources_dir):
-            chunks, skipped_by_course = _collect_chunks(resources_dir, None)
-            return replace_index(
+            chunks, skipped_by_course, warnings = _collect_chunks(resources_dir, None)
+            result = replace_index(
                 index_path,
                 chunks,
                 skipped_by_course=skipped_by_course,
             )
+            if warnings:
+                result = {**result, "warnings": warnings}
+            return result
     except sqlite3.Error as exc:
         raise OSError(f"material index recovery failed: {exc}") from exc
 
@@ -478,12 +500,20 @@ def retrieve_evidence_context(
 def _collect_chunks(
     resources_dir: Path,
     course_ids: set[str] | None,
-) -> tuple[list[_Chunk], dict[str, int]]:
+) -> tuple[list[_Chunk], dict[str, int], list[str]]:
     chunks: list[_Chunk] = []
     skipped_by_course: dict[str, int] = {}
-    information = _load_information(resources_dir)
+    warnings: list[str] = []
+    information, information_warning = _load_information(resources_dir)
+    if information_warning is not None:
+        warnings.append(information_warning)
     alias_to_canonical, _ = _course_identity_maps(information)
-    selected_canonical = _canonical_search_ids(resources_dir, course_ids) or set()
+    selected_canonical = (
+        _canonical_search_ids(
+            resources_dir, course_ids, information=information, warnings=warnings
+        )
+        or set()
+    )
     courses_root = resources_dir / "courses"
     for archive_path in sorted(courses_root.glob("*/course.json")):
         index = ArchiveIndex.from_json(archive_path)
@@ -590,7 +620,7 @@ def _collect_chunks(
                 record_id=item.item_id,
                 content_kind="structured_fact",
             ))
-    return chunks, skipped_by_course
+    return chunks, skipped_by_course, warnings
 
 
 def _result_from_index(
@@ -601,6 +631,7 @@ def _result_from_index(
     *,
     context_character_limit: int,
     hit_character_limit: int,
+    warnings: list[str] | None = None,
 ) -> MaterialSearchResult:
     hits = []
     remaining = context_character_limit
@@ -640,6 +671,7 @@ def _result_from_index(
         indexed_chunk_count=int(indexed["chunk_count"]),
         skipped_document_count=int(indexed["skipped"]),
         hits=hits,
+        warnings=list(warnings or []),
     )
 
 
@@ -789,14 +821,24 @@ def _split_sections(text: str) -> list[tuple[str | None, str | None, str]]:
     return sections or [(None, None, text.strip())]
 
 
-def _load_information(resources_dir: Path) -> InformationStore | None:
+def _load_information(
+    resources_dir: Path,
+) -> tuple[InformationStore | None, str | None]:
+    """Load canonical facts, returning a warning instead of hiding corruption."""
     path = resources_dir / "information.json"
     if not path.is_file():
-        return None
+        return None, "information.json is missing: this result has no canonical course facts"
     try:
-        return InformationStore.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+        return (
+            InformationStore.model_validate_json(path.read_text(encoding="utf-8")),
+            None,
+        )
+    except (OSError, ValueError) as exc:
+        return None, (
+            "information.json could not be read "
+            f"({type(exc).__name__}): this result has no canonical course facts; "
+            "repair the store before answering factual questions"
+        )
 
 
 def _course_identity_maps(
@@ -815,10 +857,17 @@ def _course_identity_maps(
 def _canonical_search_ids(
     resources_dir: Path,
     course_ids: set[str] | None,
+    *,
+    information: InformationStore | None = None,
+    warnings: list[str] | None = None,
 ) -> set[str] | None:
     if not course_ids:
         return None
-    aliases, _ = _course_identity_maps(_load_information(resources_dir))
+    if information is None:
+        information, warning = _load_information(resources_dir)
+        if warning is not None and warnings is not None:
+            warnings.append(warning)
+    aliases, _ = _course_identity_maps(information)
     return {aliases.get(course_id, course_id) for course_id in course_ids}
 
 

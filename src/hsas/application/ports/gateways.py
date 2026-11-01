@@ -13,6 +13,7 @@ class SyncCourseResult:
     course_title: str
     change_count: int
     output_path: Path
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class SyncBatchResult:
     failures: tuple[dict[str, str], ...]
     report_path: Path
     cancelled: bool = False
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

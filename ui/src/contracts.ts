@@ -52,6 +52,7 @@ export interface MaterialSearchResult {
   indexed_chunk_count: number;
   skipped_document_count: number;
   hits?: Array<MaterialHit>;
+  warnings?: Array<string>;
 }
 
 export interface MaterialHit {

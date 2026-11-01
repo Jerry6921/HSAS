@@ -53,4 +53,4 @@ def test_moodle_sync_collects_every_course_shell_with_the_same_course_code(
     )
 
     assert moodle.calls == ["142655", "146267"]
-    assert result == {"completed": 1, "failures": []}
+    assert result == {"completed": 1, "failures": [], "warnings": []}

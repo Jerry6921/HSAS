@@ -279,7 +279,9 @@ def test_course_management_adds_and_deletes_canonical_course_data(tmp_path: Path
             },
         }
     )
-    assert created == {"course_id": "DEMO1001-2026-S1", "created": True}
+    assert created["course_id"] == "DEMO1001-2026-S1"
+    assert created["created"] is True
+    assert created["recent_update"]["summary"]["added"] == 1
     apply_information_update(
         tmp_path / "information.json",
         {

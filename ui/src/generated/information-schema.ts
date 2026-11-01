@@ -7,7 +7,7 @@ export interface CourseLink {
 
 export interface CourseMaterialSection {
   "title": string;
-  "description"?: string;
+  "description"?: string | null;
   "materials"?: Array<RelatedMaterial>;
 }
 
@@ -15,13 +15,13 @@ export interface CourseRecord {
   "course_id": string;
   "code": string;
   "title": string;
-  "moodle_course_id"?: string;
+  "moodle_course_id"?: string | null;
   "additional_moodle_course_ids"?: Array<string>;
-  "semester"?: string;
-  "starts_on"?: string;
-  "ends_on"?: string;
+  "semester"?: string | null;
+  "starts_on"?: string | null;
+  "ends_on"?: string | null;
   "color"?: string;
-  "overview"?: string;
+  "overview"?: string | null;
   "objectives"?: Array<string>;
   "instructors"?: Array<string>;
   "links"?: Array<CourseLink>;
@@ -38,57 +38,57 @@ export interface InformationItem {
   "category": "class" | "tutorial" | "lab" | "office_hour" | "assignment" | "quiz" | "exam" | "presentation" | "project" | "report" | "reading" | "deadline" | "other";
   "task_role"?: "auto" | "action" | "reference";
   "date_status"?: "confirmed" | "tentative" | "unknown";
-  "opens_at"?: string;
-  "starts_at"?: string;
-  "ends_at"?: string;
-  "due_at"?: string;
-  "due_on"?: string;
-  "scheduled_on"?: string;
-  "recurrence"?: WeeklyRecurrence;
+  "opens_at"?: string | null;
+  "starts_at"?: string | null;
+  "ends_at"?: string | null;
+  "due_at"?: string | null;
+  "due_on"?: string | null;
+  "scheduled_on"?: string | null;
+  "recurrence"?: WeeklyRecurrence | null;
   "all_day"?: boolean;
-  "location"?: string;
-  "description"?: string;
-  "assessment_format"?: string;
-  "submission_method"?: string;
-  "weight_percent"?: number;
-  "word_limit"?: number;
+  "location"?: string | null;
+  "description"?: string | null;
+  "assessment_format"?: string | null;
+  "submission_method"?: string | null;
+  "weight_percent"?: number | null;
+  "word_limit"?: number | null;
   "requirements"?: Array<string>;
   "policies"?: Array<string>;
   "links"?: Array<CourseLink>;
   "materials"?: Array<RelatedMaterial>;
   "sources"?: Array<SourceReference>;
   "warnings"?: Array<string>;
-  "last_verified_at"?: string;
+  "last_verified_at"?: string | null;
 }
 
 export interface RecurrenceException {
   "date": string;
   "status": "cancelled" | "changed";
-  "start_time"?: string;
-  "end_time"?: string;
-  "location"?: string;
-  "title"?: string;
-  "note"?: string;
+  "start_time"?: string | null;
+  "end_time"?: string | null;
+  "location"?: string | null;
+  "title"?: string | null;
+  "note"?: string | null;
   "sources"?: Array<SourceReference>;
 }
 
 export interface RelatedMaterial {
   "title": string;
-  "material_type"?: string;
-  "url"?: string;
-  "relative_path"?: string;
+  "material_type"?: string | null;
+  "url"?: string | null;
+  "relative_path"?: string | null;
   "page_numbers"?: Array<number>;
-  "note"?: string;
+  "note"?: string | null;
 }
 
 export interface SourceReference {
   "source_type": "syllabus" | "moodle" | "course_document" | "announcement" | "email" | "manual" | "sis_course_info" | "other";
   "title": string;
-  "url"?: string;
-  "relative_path"?: string;
+  "url"?: string | null;
+  "relative_path"?: string | null;
   "page_numbers"?: Array<number>;
-  "observed_at"?: string;
-  "note"?: string;
+  "observed_at"?: string | null;
+  "note"?: string | null;
 }
 
 export interface WeeklyRecurrence {
@@ -103,8 +103,8 @@ export interface WeeklyRecurrence {
 }
 
 export interface InformationUpdate {
-  "schema_version"?: string;
-  "timezone"?: string;
+  "schema_version"?: "1.0";
+  "timezone"?: string | null;
   "updated_by"?: "ai_agent" | "import" | "manual";
   "courses"?: Array<CourseRecord>;
   "items"?: Array<InformationItem>;

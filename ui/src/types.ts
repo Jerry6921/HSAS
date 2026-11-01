@@ -1,3 +1,5 @@
+import type { AttentionAction, AttentionItem } from "./contracts";
+
 export type CalendarMode = "month" | "week" | "day";
 
 export interface ModernCalendarEvent {
@@ -201,18 +203,9 @@ export interface HomeSyncJob {
   cancel_requested?: boolean;
 }
 
-export type AttentionReason =
-  | "DUE_DATE_TENTATIVE"
-  | "DUE_DATE_UNKNOWN"
-  | "SUBMISSION_DETAILS_MISSING"
-  | "WEIGHT_UNKNOWN"
-  | "SOURCE_CONFLICT"
-  | "SOURCE_SYNC_FAILED"
-  | "SOURCE_CHANGED_REVIEW_PENDING"
-  | "LOGIN_REQUIRED"
-  | "OVERDUE_UNRESOLVED";
-
-export type AttentionActionKind = "open_item" | "open_evidence" | "retry_source" | "login_source" | "review_changes";
+// Derived from the generated backend contract instead of a hand-maintained copy.
+export type AttentionReason = NonNullable<AttentionItem["reason_codes"]>[number];
+export type AttentionActionKind = AttentionAction["kind"];
 export type AttentionDraftField = "due_at" | "due_time" | "submission_method" | "submission_link" | "weight_percent";
 
 export interface HomeAttentionEvidence extends HomeUpdateSource {

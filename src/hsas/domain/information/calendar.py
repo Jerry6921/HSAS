@@ -259,10 +259,6 @@ def _recurring_events(
     return lines
 
 
-def _first_occurrence(recurrence: WeeklyRecurrence) -> date:
-    return _weekly_dates(recurrence)[0]
-
-
 def _weekly_dates(
     recurrence: WeeklyRecurrence,
     *,

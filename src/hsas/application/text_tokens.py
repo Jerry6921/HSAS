@@ -6,15 +6,17 @@ import re
 
 
 WORD = re.compile(r"[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[\u3400-\u9fff]+")
+__all__ = ["WORD", "tokenize"]
 
 
 def tokenize(text: str, *, unique: bool = False) -> list[str]:
     """Tokenize Latin words, numbers and Chinese bigrams.
 
-    Latin tokens are case-folded and one-character non-numeric tokens are
-    ignored, preserving the historical material-search behavior.  ``unique``
-    retains first occurrence order when callers need the course-context
-    ranking semantics.
+    Latin tokens are case-folded and one-character non-numeric Latin tokens are
+    ignored, preserving the historical material-search behavior. Chinese runs
+    expand into overlapping bigrams (including a single-character run).
+    ``unique`` retains first occurrence order when callers need the
+    course-context ranking semantics.
     """
     tokens: list[str] = []
     for match in WORD.findall(text.casefold()):

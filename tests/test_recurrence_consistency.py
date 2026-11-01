@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from hsas.application.information_audit import audit_information
@@ -30,6 +33,57 @@ def _occurrence_set(item, timezone):
         (start.isoformat(), end.isoformat() if end else None)
         for start, end in expand_occurrences(item, timezone)
     }
+
+
+def _ics_occurrence_set(content, timezone):
+    """Expand the small RRULE subset emitted by HIQS for an audit comparison."""
+    zone = ZoneInfo(timezone)
+    weekdays = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+    result = set()
+    blocks = content.split("BEGIN:VEVENT\r\n")[1:]
+    for block in blocks:
+        lines = block.split("\r\n")
+        start_line = next(line for line in lines if line.startswith("DTSTART"))
+        end_line = next((line for line in lines if line.startswith("DTEND")), None)
+        start_value = start_line.split(":", 1)[1]
+        end_value = end_line.split(":", 1)[1] if end_line else None
+
+        def parse_local(value):
+            return datetime.strptime(value, "%Y%m%dT%H%M%S").replace(tzinfo=zone)
+
+        start = parse_local(start_value)
+        end = parse_local(end_value) if end_value else None
+        rrule_line = next((line for line in lines if line.startswith("RRULE:")), None)
+        if rrule_line is None:
+            result.add((start.isoformat(), end.isoformat() if end else None))
+            continue
+        fields = dict(part.split("=", 1) for part in rrule_line.removeprefix("RRULE:").split(";"))
+        until = datetime.strptime(fields["UNTIL"].removesuffix("Z"), "%Y%m%dT%H%M%S").replace(
+            tzinfo=ZoneInfo("UTC")
+        ).astimezone(zone)
+        end_time = end.timetz().replace(tzinfo=None) if end else None
+        excluded = set()
+        for line in lines:
+            if line.startswith("EXDATE"):
+                excluded.update(parse_local(value) for value in line.split(":", 1)[1].split(","))
+        additions = set()
+        for line in lines:
+            if line.startswith("RDATE"):
+                additions.update(parse_local(value) for value in line.split(":", 1)[1].split(","))
+        cursor = start
+        while cursor <= until:
+            if cursor.weekday() in {weekdays[value] for value in fields["BYDAY"].split(",")}:
+                if cursor not in excluded:
+                    occurrence_end = (
+                        datetime.combine(cursor.date(), end_time, zone)
+                        if end_time else None
+                    )
+                    result.add((cursor.isoformat(), occurrence_end.isoformat() if occurrence_end else None))
+            cursor += timedelta(days=1)
+        for occurrence in additions:
+            occurrence_end = datetime.combine(occurrence.date(), end_time, zone) if end_time else None
+            result.add((occurrence.isoformat(), occurrence_end.isoformat() if occurrence_end else None))
+    return result
 
 
 def test_projection_audit_and_ics_share_cancellation_makeup_and_change_facts():
@@ -72,6 +126,7 @@ def test_projection_audit_and_ics_share_cancellation_makeup_and_change_facts():
     assert "EXDATE;TZID=Asia/Hong_Kong:20261012T090000,20261019T090000" in ics
     assert "RDATE;TZID=Asia/Hong_Kong:20261013T090000" in ics
     assert "20261020T090000" not in ics
+    assert _ics_occurrence_set(ics, store.timezone) == expected
     assert "DTSTART;TZID=Asia/Hong_Kong:20261019T100000" in ics
 
 

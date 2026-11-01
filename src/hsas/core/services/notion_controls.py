@@ -120,7 +120,7 @@ class NotionControlsService:
             if automatic_error:
                 packet.update({"状态": "失败", "阶段": "自动采集未启动",
                     "详情": "请检查本机同步状态或登录授权；本周期未重复执行。"})
-            self.adapter.publish(status_row["id"], packet, prompt_page=True)
+            self.adapter.publish(status_row["id"], packet)
             if active:
                 self.adapter.publish(active["id"], packet)
                 if job.get("state") in {"completed", "failed", "cancelled"}:

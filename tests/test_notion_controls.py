@@ -11,10 +11,10 @@ from hsas.infrastructure.notion.config import save_config
 
 def test_progress_is_a_real_stage_ratio_and_unknown_totals_stay_unknown():
     packet = controls_snapshot({"state": "running", "stage": "moodle", "completed": 2,
-        "total": 5, "job_id": "job"}, {"pending_total": 4, "agent_prompt": "Read verified sources"}, connected=True)
+        "total": 5, "job_id": "job"}, {"pending_total": 4}, connected=True)
     assert packet["阶段进度"] == 0.4
     assert packet["状态"] == "运行中"
-    assert "sync_notion" in packet["AI 整理提示词"]
+    assert "AI 整理提示词" not in packet
     unknown = controls_snapshot({"state": "running", "stage": "starting", "total": 0}, {}, connected=True)
     assert unknown["阶段进度"] is None
     done = controls_snapshot({"state": "completed"}, {"pending_total": 4}, connected=True)
@@ -54,7 +54,7 @@ def service(tmp_path, rows):
         job.update(state="cancelled")
         return dict(job)
     result = NotionControlsService(tmp_path, lambda: dict(job),
-        lambda: {"review_closure": {"pending_total": 2, "agent_prompt": "Source prompt"}},
+        lambda: {"review_closure": {"pending_total": 2}},
         start, start, cancel, adapter_factory=lambda _: gateway)
     return result, job, calls, gateway
 

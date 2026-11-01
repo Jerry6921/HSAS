@@ -1,4 +1,4 @@
-"""User-facing source-sync state and existing Agent review prompt."""
+"""User-facing source-sync state for the Notion control page."""
 
 from typing import Any
 
@@ -21,10 +21,7 @@ def controls_snapshot(job: dict[str, Any], closure: dict[str, Any],
         "timetable": "官方课表", "finished": "采集结束"}.get(job.get("stage"), "等待同步请求")
     if not connected:
         stage = "本机后台尚未连接"
-    prompt = closure.get("agent_prompt", "")
-    if prompt:
-        prompt += "\n完成校验写入和 checkpoint 后，调用 sync_notion 将已验证的课程事实同步到 Notion；保留 Notion 个人状态、笔记正文和用户草稿。"
     return {"状态": label, "阶段": stage, "阶段进度": progress,
         "阶段完成": completed, "阶段总数": total, "待整理": pending,
-        "任务 ID": job.get("job_id") or "", "AI 整理提示词": prompt,
+        "任务 ID": job.get("job_id") or "",
         "详情": "采集、Agent 整理、校验写入和 Notion 发布分别记录；阶段进度不是整个流程的完成比例。"}

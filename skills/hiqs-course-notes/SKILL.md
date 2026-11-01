@@ -5,6 +5,12 @@ description: Generate English university course learning and revision notes from
 
 # HIQS Course Notes
 
+## MCP profile
+
+Start the HIQS MCP server with `hiqs-mcp --profile course-notes` (or set
+`HIQS_MCP_PROFILE=course-notes`) to expose only the tools this Skill uses. The
+`full` profile exists for an operator working by hand.
+
 Read [references/teaching.md](references/teaching.md) completely before planning
 or authoring notes. It contains the full `english-course-notes` requirements,
 including language, course stages, conceptual solution phases, unit reasoning,

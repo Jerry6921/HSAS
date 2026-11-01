@@ -160,12 +160,17 @@ CORE façade 只维持稳定 Port、服务装配和兼容入口。MCP 是 Agent 
 业务逻辑，仍需终端交互回调的 collector 命令仅保留界面适配。新增服务工具进入 `mcp`；
 新的展示工作流优先进入 Notion。
 
+MCP 工具按工作流分区。完整面（`full`）服务人工排查；`course-information`、
+`course-notes`、`course-planning`、`notion-workspace` 四个 profile 只暴露对应 Skill
+使用的工具，由 `HIQS_MCP_PROFILE` 或 `hiqs-mcp --profile` 选择。登录、原生权限、
+取消与导出这类需要人在场的 operator 工具不进入任何 Skill profile。分区与工具清单由
+`contracts/mcp-tool-profiles.json` 固定：新增工具未归入任何位置时检查失败。
+
 “需要确认”使用同一条只读链路：只读快照进入 application 层的确定性 attention
 用例，生成 reason code、证据、缺失字段、严重程度、指纹与允许动作，再由
 `InformationQueryPort.attention_snapshot()` 暴露给 MCP。当前时间由 CORE 注入，
-以便测试固定 14 天窗口；前端不重新判断风险。`GET /api/attention` 独立于首页主数据请求，
-因此摘要失败不会阻断日历和资料。暂时忽略只写浏览器偏好，指纹变化后自动重新出现，绝不
-修改 `information.json`。来源未覆盖不会产生冲突；只有既有 warning 明确记录的矛盾才生成
+以便测试固定 14 天窗口；调用方不重新判断风险。暂时忽略只写浏览器偏好，指纹变化后
+自动重新出现，绝不修改 `information.json`。来源未覆盖不会产生冲突；只有既有 warning 明确记录的矛盾才生成
 `SOURCE_CONFLICT`。
 
 ## Moodle Collector

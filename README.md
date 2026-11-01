@@ -71,6 +71,12 @@ python3 -m venv .venv
 .venv/bin/hiqs-mcp
 ```
 
+`hiqs-mcp --profile <name>` 把工具面收窄到单个 Skill（`course-information`、
+`course-notes`、`course-planning`、`notion-workspace`）；不指定时保持完整工具面。
+登录、原生权限、取消和导出这类需要人operator在场的工具不属于任何 Skill profile，
+只在完整面可见。分类记录在 `contracts/mcp-tool-profiles.json`，新增工具若未归类会
+直接使检查失败。
+
 MCP 客户端通常负责启动最后一条 stdio 命令。机构浏览器采集还需在同一环境安装
 Playwright Chromium：`.venv/bin/python -m playwright install chromium`。
 连接状态可用 `hsas notion status`、`hsas notion check` 诊断。

@@ -61,6 +61,7 @@ def _check_generated(label: str, path: Path, expected: str) -> bool:
 def _contract_checks() -> list[bool]:
     from scripts.generate_agent_contracts import render_contract_document
     from scripts.generate_notes_contracts import render_notes_contracts
+    from scripts.generate_tool_profiles import render_tool_profiles
 
     return [
         _check_generated(
@@ -72,6 +73,11 @@ def _contract_checks() -> list[bool]:
             "Course notes contract",
             ROOT / "contracts/course-notes.schema.json",
             render_notes_contracts(),
+        ),
+        _check_generated(
+            "MCP tool profiles",
+            ROOT / "contracts/mcp-tool-profiles.json",
+            render_tool_profiles(),
         ),
     ]
 

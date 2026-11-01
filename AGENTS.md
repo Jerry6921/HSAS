@@ -34,7 +34,10 @@ or request native permissions, so they need the user present. `cancel_course_syn
 `cancel_course_plan`, `export_notion`, `sync_apple` and `sync_notion` halt work or write
 outside the local store, so they need explicit confirmation in the same turn. Never call
 any of them because a task merely seemed to need it; a refused call is cheap, an
-unattended login prompt or a cancelled sync is not.
+unattended login prompt or a cancelled sync is not. Start the MCP server with the
+profile of the Skill in use (`hiqs-mcp --profile course-notes`) so only that workflow's
+tools are exposed; `full` is the operator default. `contracts/mcp-tool-profiles.json`
+records the classification.
 
 ## Repository conventions
 

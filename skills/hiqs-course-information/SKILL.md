@@ -7,6 +7,13 @@ metadata:
 
 # HIQS Course Information
 
+## MCP profile
+
+Start the HIQS MCP server with `hiqs-mcp --profile course-information` (or set
+`HIQS_MCP_PROFILE=course-information`) to expose only this Skill's tools. The
+`full` profile exists for an operator working by hand and adds the tools that need
+a person present.
+
 This Skill orchestrates reading, source review, fact extraction and cited
 answers from authorized course sources. Reusable Python services own the schema,
 validation, atomic upsert, evidence retrieval and checkpoints. Notion presents

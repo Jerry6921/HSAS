@@ -73,7 +73,7 @@ python3 -m venv .venv
 
 `hiqs-mcp --profile <name>` 把工具面收窄到单个 Skill（`course-information`、
 `course-notes`、`course-planning`、`notion-workspace`）；不指定时保持完整工具面。
-登录、原生权限、取消和导出这类需要人operator在场的工具不属于任何 Skill profile，
+登录、原生权限、取消和导出这类需要人在场的工具不属于任何 Skill profile，
 只在完整面可见。分类记录在 `contracts/mcp-tool-profiles.json`，新增工具若未归类会
 直接使检查失败。
 

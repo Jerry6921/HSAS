@@ -9,7 +9,7 @@ description: Present HIQS courses, course archives, materials and learning notes
 
 Start the HIQS MCP server with `hiqs-mcp --profile notion-workspace` (or set
 `HIQS_MCP_PROFILE=notion-workspace`) to expose only the Notion delivery tools.
-The `full` profile exists for an operator working by hand.
+The `full` profile exists for a person working by hand.
 
 Notion is the student's primary workspace for course information, original
 materials and learning notes. Apple Calendar and Reminders own the agenda and

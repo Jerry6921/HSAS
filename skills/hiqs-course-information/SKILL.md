@@ -11,7 +11,7 @@ metadata:
 
 Start the HIQS MCP server with `hiqs-mcp --profile course-information` (or set
 `HIQS_MCP_PROFILE=course-information`) to expose only this Skill's tools. The
-`full` profile exists for an operator working by hand and adds the tools that need
+`full` profile exists for a person working by hand and adds the tools that need
 a person present.
 
 This Skill orchestrates reading, source review, fact extraction and cited

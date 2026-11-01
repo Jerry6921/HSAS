@@ -9,7 +9,7 @@ import pytest
 
 from hsas.core import HIQSPort
 from hsas.mcp import build_mcp_server
-from hsas.mcp.profiles import DEFAULT_PROFILE, OPERATOR_ONLY, PROFILES, resolve_profile
+from hsas.mcp.profiles import DEFAULT_PROFILE, HUMAN_ONLY, PROFILES, resolve_profile
 
 
 def _tool_names(**kwargs) -> frozenset[str]:
@@ -19,21 +19,21 @@ def _tool_names(**kwargs) -> frozenset[str]:
 
 def test_every_tool_has_exactly_one_place_in_the_classification() -> None:
     all_tools = _tool_names()
-    classified = set(OPERATOR_ONLY)
+    classified = set(HUMAN_ONLY)
     for members in PROFILES.values():
         classified |= set(members)
 
-    assert OPERATOR_ONLY.isdisjoint(set().union(*PROFILES.values()))
+    assert HUMAN_ONLY.isdisjoint(set().union(*PROFILES.values()))
     assert classified == set(all_tools), (
-        "tools with no profile and no operator listing: "
+        "tools with no profile and no human-only listing: "
         f"{sorted(set(all_tools) - classified)}; "
         f"names in a profile that do not exist: {sorted(classified - set(all_tools))}"
     )
 
 
-def test_operator_tools_are_not_reachable_from_any_skill_profile() -> None:
+def test_human_only_tools_are_not_reachable_from_any_skill_profile() -> None:
     for name in PROFILES:
-        assert _tool_names(profile=name).isdisjoint(OPERATOR_ONLY), name
+        assert _tool_names(profile=name).isdisjoint(HUMAN_ONLY), name
 
 
 def test_a_profile_exposes_exactly_its_declared_tools() -> None:

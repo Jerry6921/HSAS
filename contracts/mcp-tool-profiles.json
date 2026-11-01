@@ -134,7 +134,7 @@
       "sync_notion"
     ]
   },
-  "operator_only": [
+  "human_only": [
     "cancel_course_sync",
     "configure_apple_sync",
     "configure_apple_sync_worker",

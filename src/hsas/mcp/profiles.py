@@ -1,9 +1,8 @@
 """Which MCP tools each workflow actually needs.
 
-The full server exposes every HIQS tool. That is right for an operator working by
-hand and wrong for an agent: most of the surface is irrelevant to the task at
-hand, and a handful of tools must never run unattended because they open a
-browser, request native permissions, halt work, or write outside the local store.
+The full server exposes every HIQS tool. That is right when a person drives the
+session by hand and wrong for an agent: most of the surface is irrelevant to the
+task at hand, and a handful of tools must never run unattended.
 
 ``HIQS_MCP_PROFILE`` selects a subset at startup. ``full`` (the default) keeps
 every tool exposed, so existing configurations keep working. The profiles below
@@ -16,9 +15,11 @@ from __future__ import annotations
 
 DEFAULT_PROFILE = "full"
 
-#: Tools no Skill profile exposes. They need a human present, or they halt or
-#: export work. Reachable by selecting the ``full`` profile explicitly.
-OPERATOR_ONLY: frozenset[str] = frozenset(
+#: Tools no Skill profile exposes: they stay reachable, the agent just does not
+#: see them. A tool belongs here when it needs a person's hands or eyes, when it
+#: interrupts work someone else is doing, or when what it produces is not the
+#: agent's decision. None of them are removed from the product.
+HUMAN_ONLY: frozenset[str] = frozenset(
     {
         "cancel_course_sync",
         "configure_apple_sync",
@@ -119,7 +120,7 @@ def resolve_profile(name: str | None) -> frozenset[str] | None:
 
     ``None`` and empty input select the default. An unknown name is an error
     rather than a silent fall back to ``full``: a typo would otherwise hand an
-    agent every operator tool while looking like it was restricted.
+    agent every human-only tool while looking like it was restricted.
     """
     resolved = (name or "").strip() or DEFAULT_PROFILE
     if resolved == DEFAULT_PROFILE:
@@ -133,4 +134,4 @@ def resolve_profile(name: str | None) -> frozenset[str] | None:
         ) from None
 
 
-__all__ = ["DEFAULT_PROFILE", "OPERATOR_ONLY", "PROFILES", "resolve_profile"]
+__all__ = ["DEFAULT_PROFILE", "HUMAN_ONLY", "PROFILES", "resolve_profile"]

@@ -51,7 +51,7 @@ generic frameworks for hypothetical future features.
 ## Preserve HIQS trust boundaries
 
 - MCP tools are classified by workflow profile in `src/hsas/mcp/profiles.py`; a new
-  tool must join a profile or the operator list, and `contracts/mcp-tool-profiles.json`
+  tool must join a profile or the human-only list, and `contracts/mcp-tool-profiles.json`
   fails the gate otherwise.
 - `HIQSPort` is the stable application boundary. MCP is the formal Agent
   interface; CLI remains a thin human recovery and diagnostic adapter.

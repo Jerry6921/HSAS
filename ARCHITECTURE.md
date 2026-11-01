@@ -163,7 +163,7 @@ CORE façade 只维持稳定 Port、服务装配和兼容入口。MCP 是 Agent 
 MCP 工具按工作流分区。完整面（`full`）服务人工排查；`course-information`、
 `course-notes`、`course-planning`、`notion-workspace` 四个 profile 只暴露对应 Skill
 使用的工具，由 `HIQS_MCP_PROFILE` 或 `hiqs-mcp --profile` 选择。登录、原生权限、
-取消与导出这类需要人在场的 operator 工具不进入任何 Skill profile。分区与工具清单由
+取消与导出这类需要人在场的工具不进入任何 Skill profile。分区与工具清单由
 `contracts/mcp-tool-profiles.json` 固定：新增工具未归入任何位置时检查失败。
 
 “需要确认”使用同一条只读链路：只读快照进入 application 层的确定性 attention

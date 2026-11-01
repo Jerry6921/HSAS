@@ -1,7 +1,7 @@
 """Generate the committed MCP tool-profile contract.
 
 The contract records which tools exist, which workflow profile exposes them, and
-which tools are operator-only. ``scripts/check_all.py`` compares it in memory, so
+which tools are human-only. ``scripts/check_all.py`` compares it in memory, so
 adding a tool without giving it a profile fails the gate instead of silently
 widening the surface an agent sees.
 """
@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 from hsas.core import HIQSPort
 from hsas.mcp import build_mcp_server
-from hsas.mcp.profiles import DEFAULT_PROFILE, OPERATOR_ONLY, PROFILES
+from hsas.mcp.profiles import DEFAULT_PROFILE, HUMAN_ONLY, PROFILES
 
 
 def render_tool_profiles() -> str:
@@ -31,7 +31,7 @@ def render_tool_profiles() -> str:
                 "profiles": {
                     name: sorted(members) for name, members in sorted(PROFILES.items())
                 },
-                "operator_only": sorted(OPERATOR_ONLY),
+                "human_only": sorted(HUMAN_ONLY),
             },
             ensure_ascii=False,
             indent=2,

@@ -9,7 +9,7 @@ description: Plan HKU courses from syllabus and SIS evidence, solve complete cla
 
 Start the HIQS MCP server with `hiqs-mcp --profile course-planning` (or set
 `HIQS_MCP_PROFILE=course-planning`) to expose only the planning and enrolment
-tools. The `full` profile exists for an operator working by hand.
+tools. The `full` profile exists for a person working by hand.
 
 HIQS owns deterministic planning and durable execution checkpoints. The Agent
 reads official pages and operates the authenticated SIS interface in the foreground.

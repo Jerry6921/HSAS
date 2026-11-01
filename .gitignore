@@ -4,6 +4,7 @@
 src/resources/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.pyc
 *.egg-info/
 build/
@@ -12,3 +13,9 @@ work/
 ui/node_modules/
 .DS_Store
 config/selectors.local.json
+
+# Private local data and workspace companions: never commit.
+sync-runs/
+notion-sync/
+course-notes/
+sites/

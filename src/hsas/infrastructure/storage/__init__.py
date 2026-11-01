@@ -1,4 +1,5 @@
-"""Atomic persistence and course snapshot publication."""
+"""Atomic persistence, cross-process locks and course snapshot publication."""
+from .locking import canonical_information_lock, exclusive_file_lock
 from .repositories import (
     JsonChangeQueueRepository,
     JsonInformationRepository,
@@ -6,6 +7,8 @@ from .repositories import (
 )
 
 __all__ = [
+    "canonical_information_lock",
+    "exclusive_file_lock",
     "JsonChangeQueueRepository",
     "JsonInformationRepository",
     "JsonPersonalInboxRepository",

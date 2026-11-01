@@ -476,6 +476,16 @@
               "default": null,
               "title": "Submission Method"
             },
+            "task_role": {
+              "default": "auto",
+              "enum": [
+                "auto",
+                "action",
+                "reference"
+              ],
+              "title": "Task Role",
+              "type": "string"
+            },
             "title": {
               "minLength": 1,
               "title": "Title",

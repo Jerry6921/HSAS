@@ -18,6 +18,26 @@ def safe_filename(value: str) -> str:
     return cleaned[:100] or "course"
 
 
+def fsync_directory(directory: Path) -> None:
+    """Flush directory metadata so a completed rename survives a power loss.
+
+    ``os.replace`` publishes atomically, but the rename itself is only durable
+    once the parent directory entry is flushed. Some filesystems reject fsync on
+    a directory descriptor; there the rename has already happened, so this stays
+    best-effort instead of failing an otherwise successful write.
+    """
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def atomic_write(path: Path, value: str | bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     binary = isinstance(value, bytes)
@@ -35,6 +55,7 @@ def atomic_write(path: Path, value: str | bytes) -> Path:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, path)
+        fsync_directory(path.parent)
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise

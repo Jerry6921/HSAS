@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from typing import BinaryIO
 
-from .json_store import read_json, write_json
+from .json_store import fsync_directory, read_json, write_json
 from hsas.domain.courses.archive_index import ArchiveIndex
 
 
@@ -101,10 +101,12 @@ class CourseSnapshotTransaction:
         try:
             if self.live_course_dir.exists():
                 os.replace(self.live_course_dir, backup)
+                fsync_directory(self.live_course_dir.parent)
                 old_moved = True
             payload["state"] = "old_moved"
             write_json(journal, payload)
             os.replace(self.staged_course_dir, self.live_course_dir)
+            fsync_directory(self.live_course_dir.parent)
             payload["state"] = "committed"
             write_json(journal, payload)
             self._committed = True
@@ -118,6 +120,7 @@ class CourseSnapshotTransaction:
             if self._committed:
                 _remove_tree(backup, transactions)
                 journal.unlink(missing_ok=True)
+                fsync_directory(transactions)
         return self.live_course_dir / "course.json"
 
     def close(self) -> None:

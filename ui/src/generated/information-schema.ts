@@ -36,6 +36,7 @@ export interface InformationItem {
   "course_id": string;
   "title": string;
   "category": "class" | "tutorial" | "lab" | "office_hour" | "assignment" | "quiz" | "exam" | "presentation" | "project" | "report" | "reading" | "deadline" | "other";
+  "task_role"?: "auto" | "action" | "reference";
   "date_status"?: "confirmed" | "tentative" | "unknown";
   "opens_at"?: string;
   "starts_at"?: string;

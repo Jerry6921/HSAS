@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Package product skills
+        run: python scripts/package_agent_skills.py --output dist/hiqs-agent-skills.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hiqs-agent-skills
+          path: dist/hiqs-agent-skills.zip
+
   python:
     runs-on: ubuntu-latest
     strategy:

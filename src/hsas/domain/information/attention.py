@@ -16,6 +16,7 @@ AttentionReason = Literal[
     "WEIGHT_UNKNOWN",
     "SOURCE_CONFLICT",
     "SOURCE_SYNC_FAILED",
+    "SOURCE_STALE",
     "SOURCE_CHANGED_REVIEW_PENDING",
     "LOGIN_REQUIRED",
     "OVERDUE_UNRESOLVED",
@@ -26,6 +27,7 @@ AttentionActionKind = Literal[
     "open_evidence",
     "retry_source",
     "login_source",
+    "refresh_source",
     "review_changes",
 ]
 

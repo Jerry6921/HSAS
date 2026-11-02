@@ -42,14 +42,15 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
 - Verification means one real authenticated run. A test double, a mock, and a green
   unit test do not verify a live integration.
 
-### 4. Do not resurrect a removed surface
+### 4. One display surface, and it has a budget
 
-- The local React dashboard, `hsas ui`, the macOS shell and the DMG packaging were
-  removed because no Skill or agent workflow used them. They stay removed.
-- Re-introducing one needs a recorded decision (`docs/adr/`) naming the workflow that
-  cannot be served by Skills, MCP, CLI or Notion. "It used to exist" is not a reason.
-- Local capability enters through MCP and CLI only. A new display surface belongs in
-  Notion, not in another in-repo client.
+- Notion displays course facts and notes. `src/hsas/viewer/` displays one thing a
+  terminal cannot: source freshness and the material tree. Both are read-only.
+- The viewer exists under hard constraints (`docs/adr/0002-local-viewer.md`): standard
+  library only, no build step, no client-side framework, no native shell, no write
+  route, loopback only. Break one and the viewer is deleted, not extended.
+- A surface that needs a toolchain to change will not be changed. That is how the old
+  React dashboard and macOS shell happened, and why they were removed.
 
 ### 5. Protect the offline, fast suite
 
@@ -60,6 +61,10 @@ sits in the adapters under `src/hsas/infrastructure/`, not in the domain model.
   it, and never let it leak into the default run.
 - Do not add `sleep`-based coordination tests. A slow or flaky suite is deleted within a
   month, and with it the only cheap way to verify a change.
+- Inject the clock; never assert on output the wall clock produced. A test that compares
+  a date-dependent projection against the real "now" is green in the morning and red
+  after the first deadline passes — `test_apple_sync` was exactly that, and it started
+  failing the hour a fixture lecture ended.
 
 ### 6. Private data lives outside the checkout
 

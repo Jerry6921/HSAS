@@ -31,5 +31,6 @@ class OperationalStatusService:
             "sis_enrollment": snapshot["sis_enrollment"],
             "class_planner": snapshot["class_planner"],
             "sis_course_info": snapshot["sis_course_info"],
+            "freshness": snapshot.get("freshness"),
             "sync": self._sync_status(),
         }

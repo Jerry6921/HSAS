@@ -13,7 +13,7 @@ def test_cli_exposes_only_information_workflow_commands() -> None:
     }
     group_names = {group.name for group in app.registered_groups}
     assert result.exit_code == 0
-    assert command_names == {"list-status", "login", "query", "sync-courses"}
+    assert command_names == {"list-status", "login", "query", "serve", "sync-courses"}
     assert group_names == {
         "apple",
         "changes",

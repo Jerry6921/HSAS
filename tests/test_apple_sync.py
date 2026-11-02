@@ -171,10 +171,13 @@ def test_launch_agent_uses_canonical_file_watch_and_safe_argument_list(tmp_path)
         worker_definition(root, 0)
 
 
-def test_cli_routes_through_core_and_plan_is_read_only(tmp_path):
+def test_cli_routes_through_core_and_plan_is_read_only(tmp_path, monkeypatch):
     service, gateway = configured(tmp_path)
     core = HIQSCore(tmp_path)
     core.apple_service = service
+    # Route the CLI through this core: its clock is the fixture's, so the assertion
+    # does not change depending on the hour the suite happens to run.
+    monkeypatch.setattr("hsas.core.build_port", lambda _resources: core)
     assert core.apple_projection()["counts"]["reminders"] == 1
     before = len(gateway.calls)
     result = CliRunner().invoke(app, ["--resources", str(tmp_path), "apple", "plan"])

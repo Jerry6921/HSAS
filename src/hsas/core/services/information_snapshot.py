@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from hsas.application.freshness import build_freshness
 from hsas.application.ports.repositories import (
     ChangeQueueRepository,
     InformationRepository,
@@ -64,7 +66,7 @@ class InformationSnapshotService:
             courses = self._dashboard_courses(store, pending)
             inbox = self.personal_inbox_service.snapshot(store)
             material_status = self._material_status(store, pending)
-            return {
+            result: dict[str, Any] = {
                 "available": False,
                 "schema_version": "1.0",
                 "timezone": "Asia/Hong_Kong",
@@ -93,6 +95,8 @@ class InformationSnapshotService:
                     "information.json 尚未建立。请让 AI 阅读本地课程资料并生成更新。"
                 ],
             }
+            result["freshness"] = build_freshness(result, now=datetime.now(UTC))
+            return result
         try:
             store = self.information_repository.load(path)
         except (OSError, ValueError, ValidationError) as exc:
@@ -118,7 +122,7 @@ class InformationSnapshotService:
             dashboard_items.append(value)
         inbox = self.personal_inbox_service.snapshot(store)
         material_status = self._material_status(store, pending)
-        return {
+        result = {
             "available": True,
             **payload,
             "courses": courses,
@@ -144,6 +148,8 @@ class InformationSnapshotService:
             "recent_update": self._recent_update(),
             "warnings": [],
         }
+        result["freshness"] = build_freshness(result, now=datetime.now(UTC))
+        return result
 
     def _recent_update(self) -> dict[str, Any] | None:
         path = self.resources_dir / "ai-state" / "recent-information-update.json"

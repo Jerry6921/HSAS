@@ -186,6 +186,21 @@ def build_attention_snapshot(
             )
         )
 
+    for entry in (information.get("freshness") or {}).get("sources") or []:
+        if entry.get("state") == "fresh":
+            continue
+        source = str(entry.get("source") or "unknown")
+        attention.append(
+            _attention_item(
+                attention_id=f"freshness:{source}",
+                title=source,
+                severity="low",
+                reasons=["SOURCE_STALE"],
+                affected_source=source,
+                actions=[AttentionAction(kind="refresh_source", source=source)],
+            )
+        )
+
     moodle = information.get("moodle_session") or {}
     login_status = str(moodle.get("login_status") or "unknown")
     if login_status in {"expired", "login_required", "logged_out"}:

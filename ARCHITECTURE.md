@@ -28,6 +28,7 @@ contracts/                       服务合同快照
 | Python 复用服务 | 机构采集、文本/OCR、检索、验证、原子保存、版本检查、稳定 ID 投影与上传 | `src/hsas/` |
 | Notion | 课程/课程档案/资料展示、笔记页面与用户正文 | 已验证的工作台与数据源 |
 | MCP／CLI | 将调用转交同一 `HIQSPort`，CLI 同时承载设置、恢复和确定性 worker | `src/hsas/mcp`、`src/hsas/cli` |
+| 本地只读查看器 | 只显示来源新鲜度与课件树；无写入口、无构建步骤 | `src/hsas/viewer` |
 
 新增需求先判断是 Agent 的理解/编排/写作，还是可跨 Skills 复用的确定性能力。
 前者进入 Skill，后者进入现有 service；MCP 和 CLI 仅增加必要入口，避免增加透传服务层。
@@ -122,6 +123,7 @@ Notion connector adapter 使用同一投影。个人执行状态与正文归 Not
 src/hsas/
 ├── core/             稳定 Port、façade、服务容器与同步编排
 ├── mcp/              面向 AI 的 MCP tools
+├── viewer/           只读本地查看器（标准库、无构建）
 ├── domain/           CORE 内部纯模型与规则
 ├── application/      CORE 内部用例
 ├── infrastructure/   CORE 内部来源、存储和运行时适配器
@@ -371,6 +373,17 @@ Notion 配置和真实同步的状态边界见 [Notion 整合说明](docs/notion
 `origin` 的 Git 源码安装开放，并要求工作树干净、当前 HEAD 是 `origin/main` 的祖先；随后
 使用 `git merge --ff-only`，仅在依赖文件变化时更新 `.venv` 与 Playwright。用户课程资料
 位于 Application Support，不参与源码更新。
+
+## 本地只读查看器
+
+`hsas serve` 用标准库 `http.server` 在同一 `HIQSPort` 上渲染三个页面：来源新鲜度、
+课程列表、单课程事实与课件。它不写任何状态，只绑回环，没有构建步骤与前端框架；
+约束与理由见 [ADR 0002](docs/adr/0002-local-viewer.md)。
+
+新鲜度由 `application/freshness.py` 判定：每个来源有独立阈值，输出
+`fresh` / `stale` / `never` 与 `age_days`，进入 `get_status`、`hsas list-status`，
+并作为 `SOURCE_STALE` 待办进入 attention。缺时间戳是 `never`，不是 `fresh`——一个
+未被采集过的来源不能被当成最新。
 
 ## 有限兼容
 

@@ -88,6 +88,11 @@ def list_status(ctx: typer.Context) -> None:
     )
     typer.echo(f"OCR queue: {counts['ocr']} document(s)")
     typer.echo(f"Personal inbox: {status['personal_inbox'].get('pending_count', 0)} draft(s)")
+    for entry in (status.get("freshness") or {}).get("sources") or []:
+        age = entry["age_days"]
+        shown = "never collected" if age is None else f"{age:g}d old"
+        flag = "" if entry["state"] == "fresh" else f"  [{entry['state'].upper()}]"
+        typer.echo(f"Freshness {entry['source']}: {shown} (limit {entry['threshold_days']:g}d){flag}")
     enrollment = status["sis_enrollment"]
     typer.echo(
         f"Student Center: {enrollment['course_count']} course(s); "
@@ -221,6 +226,32 @@ def sync_courses(
         f"Synced {result.course_title}: {result.change_count} change(s) -> "
         f"{result.output_path}"
     )
+
+
+@app.command("serve")
+def serve(
+    ctx: typer.Context,
+    port: Annotated[
+        int,
+        typer.Option(min=0, max=65535, help="Local TCP port; 0 picks any free port"),
+    ] = 8765,
+    open_browser: Annotated[
+        bool,
+        typer.Option("--open/--no-open", help="Open the viewer in the default browser"),
+    ] = True,
+) -> None:
+    """Open the read-only local viewer: source freshness and course materials."""
+    from hsas.core import build_port
+    from hsas.viewer import serve_viewer
+
+    try:
+        serve_viewer(
+            build_port(_resources(ctx)),
+            port=port,
+            open_browser=open_browser,
+        )
+    except OSError as exc:
+        raise typer.BadParameter(f"cannot bind port {port}: {exc}") from exc
 
 
 def _course_service(settings=None):

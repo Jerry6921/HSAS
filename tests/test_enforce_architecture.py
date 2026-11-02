@@ -42,6 +42,7 @@ OUTER_LAYER_PREFIXES = (
     "hsas.cli",
     "hsas.codegen",
     "hsas.mcp",
+    "hsas.viewer",
 )
 
 
@@ -74,7 +75,7 @@ def test_top_level_packages_express_architecture_layers() -> None:
         "domain",
         "infrastructure",
         "mcp",
-        "web",
+        "viewer",
     }
 
 
@@ -101,6 +102,7 @@ def test_application_does_not_import_outer_adapters_or_ui_frameworks() -> None:
     forbidden_prefixes = (
         "hsas.infrastructure",
         "hsas.cli",
+        "hsas.viewer",
         "playwright",
         "typer",
     )
@@ -125,7 +127,7 @@ def test_application_does_not_import_outer_adapters_or_ui_frameworks() -> None:
 def test_core_does_not_depend_on_delivery_adapters() -> None:
     violations = _import_violations(
         SOURCE_ROOT / "core",
-        forbidden_prefixes=("hsas.cli", "hsas.codegen", "hsas.mcp", "typer"),
+        forbidden_prefixes=("hsas.cli", "hsas.codegen", "hsas.mcp", "hsas.viewer", "typer"),
     )
     assert violations == []
 
@@ -133,7 +135,7 @@ def test_core_does_not_depend_on_delivery_adapters() -> None:
 def test_infrastructure_does_not_depend_on_composition_or_delivery_layers() -> None:
     violations = _import_violations(
         SOURCE_ROOT / "infrastructure",
-        forbidden_prefixes=("hsas.cli", "hsas.codegen", "hsas.core", "hsas.mcp"),
+        forbidden_prefixes=("hsas.cli", "hsas.codegen", "hsas.core", "hsas.mcp", "hsas.viewer"),
     )
     assert violations == []
 

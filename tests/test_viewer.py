@@ -36,6 +36,36 @@ def _snapshot() -> dict:
                     "collected_at": (NOW - timedelta(days=9)).isoformat(),
                     "download_failed_count": 2,
                 },
+                "materials": {
+                    "all": [
+                        {
+                            "title": "Lecture Note 3.pdf",
+                            "activity_name": "Biomaterials",
+                            "section_title": "Lectures",
+                            "relative_path": "courses/C1/files/Lecture 3.pdf",
+                            "downloaded_at": "2026-10-20T00:00:00+00:00",
+                        },
+                        {
+                            "title": "Lecture Note 5.pdf",
+                            "activity_name": "Tissue engineering",
+                            "section_title": "Lectures",
+                            "relative_path": "courses/C1/files/Lecture 5.pdf",
+                            "downloaded_at": "2026-10-27T00:00:00+00:00",
+                        },
+                        {
+                            "title": "Lab manual.pdf",
+                            "activity_name": "Lab",
+                            "relative_path": "courses/C1/files/Lab manual.pdf",
+                            "downloaded_at": "2026-10-28T00:00:00+00:00",
+                        },
+                        {
+                            "title": "Electrochemistry.pdf",
+                            "activity_name": "Electrochemistry (2026-10-30 by Prof. Zhang)",
+                            "relative_path": "courses/C1/files/Electrochemistry.pdf",
+                            "downloaded_at": "2026-10-01T00:00:00+00:00",
+                        },
+                    ]
+                },
                 "material_sections": [
                     {
                         "title": "Lectures",
@@ -121,6 +151,60 @@ def test_course_page_links_each_material_to_its_file_and_text() -> None:
     assert "/file?path=courses/C1/files/Note%201.pdf" in html
     assert "/preview?path=courses/C1/files/Note%201.pdf" in html
     assert "Quiz 2" in html
+
+
+def test_home_page_surfaces_the_newest_lecture_per_course() -> None:
+    html = render_status(_snapshot(), {"items": []})
+
+    assert "Latest lecture materials" in html
+    # The lecture's own date outranks a later download and a newer lab manual.
+    assert "Electrochemistry.pdf" in html
+    assert "Lecture Note 5.pdf" not in html
+    assert "/file?path=courses/C1/files/Electrochemistry.pdf" in html
+    assert "2026-10-30" in html
+
+
+def test_home_page_reports_apple_delivery_against_the_current_facts() -> None:
+    delivery = {
+        "configured": True,
+        "worker_loaded": True,
+        "counts": {"events": 49, "reminders": 13},
+        "verification": {"matched": 62, "expected": 62, "status": "verified"},
+        "last_delivered_at": "2026-11-02T07:13:18+00:00",
+        "facts_updated_at": "2026-10-27T06:17:29Z",
+        "up_to_date_with_facts": True,
+        "why": "Apple reflects the current facts",
+    }
+
+    html = render_status(_snapshot(), {"items": []}, delivery)
+
+    assert "Apple delivery" in html
+    assert "49" in html and "13" in html
+    assert "62/62" in html
+    assert "up to date with the facts" in html
+    assert "worker loaded" in html
+
+
+def test_home_page_says_when_apple_delivery_is_behind() -> None:
+    delivery = {
+        "configured": True,
+        "worker_loaded": True,
+        "up_to_date_with_facts": False,
+        "behind_facts": True,
+        "why": "facts changed after the last Apple delivery; the worker will catch up",
+        "counts": {"events": 49, "reminders": 13},
+        "verification": {},
+    }
+
+    html = render_status(_snapshot(), {"items": []}, delivery)
+
+    assert "facts changed after the last Apple delivery" in html
+
+
+def test_unconfigured_apple_delivery_is_stated_plainly() -> None:
+    html = render_status(_snapshot(), {"items": []}, {"configured": False})
+
+    assert "Not configured" in html
 
 
 def test_unknown_course_is_none_rather_than_an_empty_page() -> None:

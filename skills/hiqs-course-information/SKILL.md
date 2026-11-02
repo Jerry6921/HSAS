@@ -25,6 +25,23 @@ Students own planning decisions and may use evidence-grounded AI conversation
 to compare course demands and develop study plans. Suggestions remain separate
 conversation content, with calendar recording controlled by the student.
 
+## Decide whether the data is current
+
+Call `get_status` (or read `freshness` on `get_information`) before answering anything
+time-sensitive: a deadline, a room, a weight, an exam date, or "is there anything new".
+
+- `freshness.needs_sync` is a boolean judgement, and `freshness.why` names the sources.
+  Each source has its own limit; Moodle is 3 days, the fact store 7, the catalogue 30.
+- If the answer depends on a stale or never-collected source, **sync before answering.**
+  A fact read from stale data is a guess wearing a citation. Say which source was old and
+  what you refreshed.
+- Do not sync when the question is about a closed past item, or when the user only asked
+  to read something already local. Syncing costs a login and a minute; spend it on
+  questions whose answers can change.
+- After facts are applied, Apple Calendar/Reminders follow automatically: the launchd
+  worker watches `information.json`. Check `delivery.up_to_date_with_facts` in
+  `get_status` rather than assuming, and report it when delivery is behind.
+
 ## Locate the project
 
 With HIQS MCP connected, use its configured local services; installing this

@@ -201,17 +201,23 @@ information.json → Apple Calendar / Reminders（已确认、未过期）
 
 `hsas serve` 打开一个只读本地页面（默认 `http://127.0.0.1:8765`），只有三页：
 
-- `/` 各来源年龄与是否过期（`freshness`）、课程/事实数量、待办
+- `/` 每门课的**最新 lecture 材料**（直接 open / text）、各来源年龄与是否过期、
+  Apple 投递状态、待办
 - `/courses` 课程与材料树
-- `/courses/<id>` 该课程的已校验事实与课件，可直接打开原文件或文本副本
+- `/courses/<id>` 该课程的已校验事实与课件，按下载时间倒序，可直接打开原文件或文本副本
 
 它的约束写在 [ADR 0002](docs/adr/0002-local-viewer.md)：只用标准库、无构建步骤、
 无前端框架、无写入口、只绑回环。**这些约束是功能的一部分**——一旦需要打包工具，
 正确的做法是删掉它，而不是引入工具链。
 
-新鲜度也在 MCP 与 CLI 里可用：`get_status` / `hsas list-status` 会给出每个来源的
-`age_days` 与 `state`（`fresh` / `stale` / `never`），过期的来源会出现在
-`get_attention` 的待办里。阈值按来源设定（见 `src/hsas/application/freshness.py`）：
+新鲜度也在 MCP 与 CLI 里可用：`get_status` / `hsas list-status` 给出 `needs_sync`、
+`why` 和每个来源的 `age_days` / `state`（`fresh` / `stale` / `never`），过期来源会进入
+`get_attention` 的待办。Agent 在回答时间敏感问题前必须先看 `needs_sync`，需要时先同步
+再回答（规则在 `skills/hiqs-course-information/SKILL.md`）。
+
+Apple 投递是自动的：launchd worker 监听 `information.json`，事实一改就重新投递。
+`delivery.up_to_date_with_facts` 说明日历/提醒是否已经跟上当前事实，`get_status`、
+`hsas list-status` 与查看器都会报这个状态——"已投递"不等于"已是最新"。阈值按来源设定（见 `src/hsas/application/freshness.py`）：
 课程事实 7 天、Moodle 资料 3 天、选课 7 天、课表 7 天、SIS 课程页 30 天。
 
 ## 交付边界

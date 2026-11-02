@@ -140,12 +140,21 @@ def build_freshness(snapshot: dict[str, Any], *, now: datetime) -> dict[str, Any
     ]
     stale = [entry.source for entry in entries if entry.state == STALE]
     never = [entry.source for entry in entries if entry.state == NEVER]
+    needs_sync = bool(stale or never)
     return {
         "evaluated_at": now.isoformat(),
+        "needs_sync": needs_sync,
+        "why": (
+            "stale: " + ", ".join(stale)
+            if stale
+            else "never collected: " + ", ".join(never)
+            if never
+            else "all sources are within their freshness limit"
+        ),
         "sources": [entry.as_dict() for entry in entries],
         "stale_sources": stale,
         "never_collected": never,
-        "all_fresh": not stale and not never,
+        "all_fresh": not needs_sync,
     }
 
 

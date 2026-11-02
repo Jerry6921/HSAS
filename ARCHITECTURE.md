@@ -376,14 +376,18 @@ Notion 配置和真实同步的状态边界见 [Notion 整合说明](docs/notion
 
 ## 本地只读查看器
 
-`hsas serve` 用标准库 `http.server` 在同一 `HIQSPort` 上渲染三个页面：来源新鲜度、
-课程列表、单课程事实与课件。它不写任何状态，只绑回环，没有构建步骤与前端框架；
+`hsas serve` 用标准库 `http.server` 在同一 `HIQSPort` 上渲染三个页面：首页（每门课最新
+lecture 材料、来源新鲜度、Apple 投递状态、待办）、课程列表、单课程事实与课件。它不写任何状态，只绑回环，没有构建步骤与前端框架；
 约束与理由见 [ADR 0002](docs/adr/0002-local-viewer.md)。
 
 新鲜度由 `application/freshness.py` 判定：每个来源有独立阈值，输出
 `fresh` / `stale` / `never` 与 `age_days`，进入 `get_status`、`hsas list-status`，
 并作为 `SOURCE_STALE` 待办进入 attention。缺时间戳是 `never`，不是 `fresh`——一个
 未被采集过的来源不能被当成最新。
+
+`application/delivery.py` 回答另一个问题：Apple 投递是否已经跟上当前事实。worker 异步，
+所以"已投递"可能落后于刚写入的事实；`up_to_date_with_facts` 比较投递记录的
+`source_updated_at` 与 `information.json` 的 `updated_at`，状态进入 `get_status` 与查看器。
 
 ## 有限兼容
 

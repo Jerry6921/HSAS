@@ -143,6 +143,7 @@ class HIQSCore:
         self.status_service = OperationalStatusService(
             self.information_snapshot,
             self.course_sync_status,
+            self.apple_status,
         )
         self.lifecycle_service = ApplicationLifecycleService(
             self.update_service, self.mutation_lock, self.course_sync_status

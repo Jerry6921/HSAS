@@ -86,6 +86,19 @@ def list_status(ctx: typer.Context) -> None:
         f"AI review: {pending['course_count']} course(s), "
         f"{pending['change_count']} pending review item(s)"
     )
+    delivery = status.get("delivery") or {}
+    if delivery.get("configured"):
+        verification = delivery.get("verification") or {}
+        state = "up to date" if delivery.get("up_to_date_with_facts") else "behind the facts"
+        typer.echo(
+            f"Apple delivery: {delivery.get('counts', {}).get('events', 0)} event(s), "
+            f"{delivery.get('counts', {}).get('reminders', 0)} reminder(s); "
+            f"verified {verification.get('matched', 0)}/{verification.get('expected', 0)}; "
+            f"delivered={delivery.get('last_delivered_at') or 'never'}; "
+            f"worker={'loaded' if delivery.get('worker_loaded') else 'not loaded'}; {state}"
+        )
+    else:
+        typer.echo("Apple delivery: not configured")
     typer.echo(f"OCR queue: {counts['ocr']} document(s)")
     typer.echo(f"Personal inbox: {status['personal_inbox'].get('pending_count', 0)} draft(s)")
     for entry in (status.get("freshness") or {}).get("sources") or []:

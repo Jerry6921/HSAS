@@ -9,8 +9,25 @@ interaction belongs in the chat workflow, not here.
 from __future__ import annotations
 
 from html import escape
+import re
 from typing import Any
 from urllib.parse import quote
+
+LECTURE_HINT = re.compile(r"lecture|slide|lect", re.IGNORECASE)
+#: Moodle activity names and file names often carry the lecture's own date
+#: ("Electrochemistry (2026-09-28 by ...)"). A full re-sync rewrites every
+#: downloaded_at to the same moment, so the download time cannot rank lectures.
+DATE_HINT = re.compile(r"(20\d{2})[-_. /]?(\d{2})[-_. /]?(\d{2})")
+MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
+        start=1,
+    )
+}
+DAY_MONTH_YEAR = re.compile(r"\b(\d{1,2})[-_./](\d{1,2})[-_./](20\d{2})\b")
+MONTH_FIRST = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-_. ]?(\d{1,2})[-_. ,]+(20\d{2})", re.I)
+DAY_FIRST = re.compile(r"\b(\d{1,2})[-_. ]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[-_. ,]+(20\d{2})", re.I)
 
 STYLE = """
 :root { color-scheme: light dark; --fg:#1b1b1f; --muted:#5f6368; --bg:#fbfbfa;
@@ -94,9 +111,127 @@ def _freshness_table(freshness: dict[str, Any] | None) -> str:
     )
 
 
+def _delivery_section(delivery: dict[str, Any] | None) -> str:
+    if not delivery or not delivery.get("configured"):
+        return (
+            '<section><h2>Apple delivery</h2><p class="muted">Not configured. '
+            "Calendar and reminders will not be updated automatically.</p></section>"
+        )
+    counts = delivery.get("counts") or {}
+    verification = delivery.get("verification") or {}
+    state = (
+        '<span class="good">up to date with the facts</span>'
+        if delivery.get("up_to_date_with_facts")
+        else f'<span class="bad">{escape(str(delivery.get("why") or "not current"))}</span>'
+    )
+    worker = "worker loaded" if delivery.get("worker_loaded") else "worker NOT loaded"
+    return (
+        "<section><h2>Apple delivery</h2>"
+        '<table><tbody>'
+        f"<tr><td>Calendar events</td><td>{counts.get('events', 0)}</td></tr>"
+        f"<tr><td>Reminders</td><td>{counts.get('reminders', 0)}</td></tr>"
+        f"<tr><td>Read-back verification</td>"
+        f"<td>{verification.get('matched', 0)}/{verification.get('expected', 0)} "
+        f"{escape(str(verification.get('status') or ''))}</td></tr>"
+        f"<tr><td>Last delivered</td><td>{_when(delivery.get('last_delivered_at'))}</td></tr>"
+        f"<tr><td>Facts last changed</td><td>{_when(delivery.get('facts_updated_at'))}</td></tr>"
+        f"<tr><td>Sync state</td><td>{state} <span class=\"muted\">· {escape(worker)}</span></td></tr>"
+        "</tbody></table></section>"
+    )
+
+
+def _written_date(haystack: str) -> str | None:
+    """A date the material itself carries, normalized to YYYYMMDD."""
+    match = DATE_HINT.search(haystack)
+    if match:
+        return f"{match.group(1)}{match.group(2)}{match.group(3)}"
+    day_month_year = DAY_MONTH_YEAR.search(haystack)
+    if day_month_year:
+        return (
+            f"{day_month_year.group(3)}"
+            f"{int(day_month_year.group(2)):02d}{int(day_month_year.group(1)):02d}"
+        )
+    month_first = MONTH_FIRST.search(haystack)
+    if month_first:
+        month = MONTHS[month_first.group(1).lower()[:3]]
+        return f"{month_first.group(3)}{month:02d}{int(month_first.group(2)):02d}"
+    day_first = DAY_FIRST.search(haystack)
+    if day_first:
+        month = MONTHS[day_first.group(2).lower()[:3]]
+        return f"{day_first.group(3)}{month:02d}{int(day_first.group(1)):02d}"
+    return None
+
+
+def _material_rank(material: dict[str, Any]) -> str:
+    """One comparable day per material: what it says about itself, else when it arrived."""
+    haystack = (
+        f"{material.get('title', '')} {material.get('activity_name', '')} "
+        f"{material.get('section_title', '')}"
+    )
+    written = _written_date(haystack)
+    if written:
+        return written
+    downloaded = str(material.get("downloaded_at") or "")
+    return downloaded[:10].replace("-", "") if len(downloaded) >= 10 else ""
+
+
+def _latest_lecture(course: dict[str, Any]) -> dict[str, Any] | None:
+    """The newest lecture-like material that has a local file."""
+    entries = [
+        material
+        for material in (course.get("materials") or {}).get("all") or []
+        if material.get("relative_path") and material.get("exists", True)
+    ]
+    if not entries:
+        return None
+    lectures = [
+        material
+        for material in entries
+        if LECTURE_HINT.search(
+            f"{material.get('title', '')} {material.get('activity_name', '')} "
+            f"{material.get('section_title', '')}"
+        )
+    ]
+    pool = lectures or entries
+    return max(pool, key=_material_rank)
+
+
+def _lecture_date(material: dict[str, Any]) -> str:
+    day = _material_rank(material)
+    if len(day) == 8 and day.isdigit():
+        return f"{day[:4]}-{day[4:6]}-{day[6:8]}"
+    return _when(material.get("downloaded_at"))
+
+
+def _latest_section(snapshot: dict[str, Any]) -> str:
+    rows = []
+    for course in snapshot.get("courses") or []:
+        lecture = _latest_lecture(course)
+        if lecture is None:
+            continue
+        path = escape(quote(str(lecture.get("relative_path")), safe="/"))
+        rows.append(
+            f"<tr><td><a href=\"/courses/{escape(str(course.get('course_id')))}\">"
+            f"{escape(str(course.get('code') or ''))}</a></td>"
+            f"<td>{escape(str(lecture.get('title') or ''))}</td>"
+            f"<td class=\"muted\">{_lecture_date(lecture)}</td>"
+            f'<td><a href="/file?path={path}">open</a> · '
+            f'<a href="/preview?path={path}">text</a></td></tr>'
+        )
+    if not rows:
+        return ""
+    return (
+        "<section><h2>Latest lecture materials</h2>"
+        "<table><thead><tr><th>Course</th><th>Newest lecture material</th>"
+        "<th>Date</th><th></th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></section>"
+    )
+
+
 def render_status(
     snapshot: dict[str, Any],
     attention: dict[str, Any] | None = None,
+    delivery: dict[str, Any] | None = None,
 ) -> str:
     summary = snapshot.get("summary") or {}
     freshness = snapshot.get("freshness") or {}
@@ -131,6 +266,7 @@ def render_status(
     return _page(
         "HIQS",
         f"""<h1>HIQS</h1>{banner}
+{_latest_section(snapshot)}
 <section><h2>Freshness</h2>{_freshness_table(freshness)}</section>
 <section><h2>Contents</h2><table><tbody>
 <tr><td>Courses</td><td>{summary.get("course_count", 0)}</td></tr>
@@ -138,8 +274,9 @@ def render_status(
 <tr><td>Items with a date</td><td>{summary.get("calendar_item_count", 0)}</td></tr>
 <tr><td>Pending review</td><td>{int((snapshot.get("pending_review") or {}).get("change_count", 0))}</td></tr>
 </tbody></table></section>
+{_delivery_section(delivery)}
 {attention_html}
-<section><h2>Browse</h2><p><a href="/courses">Course materials →</a></p></section>""",
+<section><h2>Browse</h2><p><a href="/courses">All course materials →</a></p></section>""",
     )
 
 
@@ -188,10 +325,13 @@ def _material_row(material: dict[str, Any]) -> str:
     url = material.get("url")
     if isinstance(url, str) and url.startswith("http"):
         links.append(f'<a href="{escape(url, quote=True)}" rel="noreferrer">source</a>')
+    when = material.get("downloaded_at")
+    when_html = f' <span class="muted">{_when(when)}</span>' if when else ""
     pages = material.get("page_numbers") or []
     where = f' <span class="muted">p.{escape(",".join(str(p) for p in pages))}</span>' if pages else ""
     note = material.get("note")
     note_html = f' <span class="muted">— {escape(str(note))}</span>' if note else ""
+    note_html = when_html + note_html
     return (
         f'<li>{title} <span class="pill">{kind}</span>{where}{note_html} '
         f'<span class="muted">· {" ".join(links) if links else "no local file"}</span></li>'
@@ -215,7 +355,12 @@ def render_course(snapshot: dict[str, Any], course_id: str) -> str | None:
     )
     sections = []
     for section in course.get("material_sections") or []:
-        rows = "".join(_material_row(material) for material in section.get("materials") or [])
+        ordered = sorted(
+            section.get("materials") or [],
+            key=lambda material: str(material.get("downloaded_at") or ""),
+            reverse=True,
+        )
+        rows = "".join(_material_row(material) for material in ordered)
         sections.append(
             f'<section><h2>{escape(str(section.get("title") or "Materials"))}</h2>'
             f'<ul class="items">{rows or "<li class=muted>nothing in this section</li>"}</ul></section>'

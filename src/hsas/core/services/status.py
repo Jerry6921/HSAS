@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from hsas.application.delivery import build_delivery
+
 
 class OperationalStatusService:
     """Compose the stable status packet consumed by UI, MCP and agents."""
@@ -13,9 +15,11 @@ class OperationalStatusService:
         self,
         information_snapshot: Callable[[], dict[str, Any]],
         sync_status: Callable[[], dict[str, Any]],
+        apple_status: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._information_snapshot = information_snapshot
         self._sync_status = sync_status
+        self._apple_status = apple_status
 
     def snapshot(self) -> dict[str, Any]:
         snapshot = self._information_snapshot()
@@ -32,5 +36,9 @@ class OperationalStatusService:
             "class_planner": snapshot["class_planner"],
             "sis_course_info": snapshot["sis_course_info"],
             "freshness": snapshot.get("freshness"),
+            "delivery": build_delivery(
+                self._apple_status() if self._apple_status else None,
+                information_updated_at=snapshot.get("updated_at"),
+            ),
             "sync": self._sync_status(),
         }

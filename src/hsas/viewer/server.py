@@ -12,6 +12,7 @@ import threading
 from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
 
+from hsas.application.delivery import build_delivery
 from hsas.core import HIQSPort, HIQSPortError
 
 from .pages import render_course, render_courses, render_error, render_status, render_text
@@ -60,9 +61,17 @@ class _Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if path == "/":
+                snapshot = _snapshot(self.core)
                 self._send_html(
                     HTTPStatus.OK,
-                    render_status(_snapshot(self.core), self.core.attention_snapshot()),
+                    render_status(
+                        snapshot,
+                        self.core.attention_snapshot(),
+                        build_delivery(
+                            self.core.apple_status(),
+                            information_updated_at=snapshot.get("updated_at"),
+                        ),
+                    ),
                 )
             elif path == "/courses":
                 self._send_html(HTTPStatus.OK, render_courses(_snapshot(self.core)))

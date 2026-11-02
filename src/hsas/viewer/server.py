@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import threading
 from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
@@ -16,6 +17,7 @@ from hsas.application.delivery import build_delivery
 from hsas.core import HIQSPort, HIQSPortError
 
 from .pages import render_course, render_courses, render_error, render_status, render_text
+from .revisions import data_revision
 
 LOOPBACK = "127.0.0.1"
 SECURITY_HEADERS = {
@@ -27,6 +29,10 @@ SECURITY_HEADERS = {
 
 def _snapshot(core: HIQSPort) -> dict:
     return core.information_snapshot()
+
+
+def _revision(core: HIQSPort) -> str:
+    return data_revision(core.resources_dir)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -45,6 +51,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
+
+    def _send_json(self, status: int, payload: dict) -> None:
+        self._send(status, json.dumps(payload).encode("utf-8"), "application/json")
 
     def _send_html(self, status: int, html: str) -> None:
         self._send(status, html.encode("utf-8"), "text/html; charset=utf-8")
@@ -71,13 +80,21 @@ class _Handler(BaseHTTPRequestHandler):
                             self.core.apple_status(),
                             information_updated_at=snapshot.get("updated_at"),
                         ),
+                        rev=_revision(self.core),
                     ),
                 )
+            elif path == "/rev":
+                self._send_json(HTTPStatus.OK, {"rev": _revision(self.core)})
             elif path == "/courses":
-                self._send_html(HTTPStatus.OK, render_courses(_snapshot(self.core)))
+                self._send_html(
+                    HTTPStatus.OK,
+                    render_courses(_snapshot(self.core), rev=_revision(self.core)),
+                )
             elif path.startswith("/courses/"):
                 course_id = unquote(path[len("/courses/"):])
-                html = render_course(_snapshot(self.core), course_id)
+                html = render_course(
+                    _snapshot(self.core), course_id, rev=_revision(self.core)
+                )
                 if html is None:
                     self._send_html(HTTPStatus.NOT_FOUND, render_error(404, "No such course."))
                 else:

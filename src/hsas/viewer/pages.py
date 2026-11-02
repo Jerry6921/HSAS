@@ -66,12 +66,39 @@ ul.items li:last-child { border-bottom:none; }
 """
 
 
-def _page(title: str, body: str) -> str:
+AUTO_REFRESH = """
+<script>
+(() => {
+  const current = %s;
+  const check = async () => {
+    try {
+      const response = await fetch("/rev", {cache: "no-store"});
+      const data = await response.json();
+      if (data.rev && data.rev !== current) location.reload();
+    } catch (error) { /* offline or restarting: the next tick retries */ }
+  };
+  setInterval(check, 10000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) check();
+  });
+})();
+</script>
+"""
+
+
+def _auto_refresh(rev: str | None) -> str:
+    """Progressive enhancement: the page is complete without it."""
+    if not rev:
+        return ""
+    return AUTO_REFRESH % __import__("json").dumps(rev)
+
+
+def _page(title: str, body: str, *, footer: str = "") -> str:
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         f"<title>{escape(title)}</title><style>{STYLE}</style></head>"
-        f"<body><main>{body}</main></body></html>"
+        f"<body><main>{body}</main></body>{footer}</html>"
     )
 
 
@@ -232,6 +259,8 @@ def render_status(
     snapshot: dict[str, Any],
     attention: dict[str, Any] | None = None,
     delivery: dict[str, Any] | None = None,
+    *,
+    rev: str | None = None,
 ) -> str:
     summary = snapshot.get("summary") or {}
     freshness = snapshot.get("freshness") or {}
@@ -277,10 +306,11 @@ def render_status(
 {_delivery_section(delivery)}
 {attention_html}
 <section><h2>Browse</h2><p><a href="/courses">All course materials →</a></p></section>""",
+        footer=_auto_refresh(rev),
     )
 
 
-def render_courses(snapshot: dict[str, Any]) -> str:
+def render_courses(snapshot: dict[str, Any], *, rev: str | None = None) -> str:
     courses = snapshot.get("courses") or []
     if not courses:
         return _page(
@@ -310,6 +340,7 @@ def render_courses(snapshot: dict[str, Any]) -> str:
         f"<th>Moodle collected</th><th>Failed downloads</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table>"
         '<p><a href="/">← status</a></p>',
+        footer=_auto_refresh(rev),
     )
 
 
@@ -338,7 +369,12 @@ def _material_row(material: dict[str, Any]) -> str:
     )
 
 
-def render_course(snapshot: dict[str, Any], course_id: str) -> str | None:
+def render_course(
+    snapshot: dict[str, Any],
+    course_id: str,
+    *,
+    rev: str | None = None,
+) -> str | None:
     courses = snapshot.get("courses") or []
     course = next(
         (item for item in courses if str(item.get("course_id")) == course_id), None
@@ -376,6 +412,7 @@ def render_course(snapshot: dict[str, Any], course_id: str) -> str | None:
         f'{item_rows or "<li class=muted>no recorded facts</li>"}</ul></section>'
         f"{''.join(sections)}"
         '<p><a href="/courses">← courses</a> · <a href="/">status</a></p>',
+        footer=_auto_refresh(rev),
     )
 
 

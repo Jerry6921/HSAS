@@ -38,6 +38,10 @@ back into the thing that was deleted:
   `/courses/<id>` (facts and materials). A fourth page needs a recorded reason.
 - **Served files come from the material service**, which already whitelists paths inside
   the snapshot; the viewer never invents file access.
+- **Auto-refresh is a progressive enhancement.** The page polls `/rev`, which stat()s seven
+  files and never builds a snapshot (~1 ms), and reloads only when the fingerprint changes.
+  With JavaScript disabled the page stays complete and correct; it simply does not update
+  itself. This is the only script allowed, and it must stay optional.
 
 ## Consequences
 

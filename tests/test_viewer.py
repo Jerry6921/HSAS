@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 import threading
 from unittest.mock import Mock
@@ -14,6 +15,7 @@ import pytest
 from hsas.application.freshness import build_freshness
 from hsas.core import HIQSPort, HIQSPortError
 from hsas.viewer import create_viewer_server
+from hsas.viewer.revisions import data_revision
 from hsas.viewer.pages import (
     render_course,
     render_courses,
@@ -233,6 +235,7 @@ def _serve(port: Mock) -> tuple[object, str]:
 
 def _port(tmp_path: Path) -> Mock:
     port = Mock(spec=HIQSPort)
+    port.resources_dir = tmp_path
     port.information_snapshot.return_value = _snapshot()
     port.attention_snapshot.return_value = {"items": []}
     file_path = tmp_path / "note.pdf"
@@ -286,6 +289,45 @@ def test_server_refuses_to_write_and_reports_missing_things(tmp_path: Path) -> N
         with pytest.raises(urllib.error.HTTPError) as rejected:
             urllib.request.urlopen(base + "/file?path=../../etc/passwd")
         assert rejected.value.code == 404
+    finally:
+        server.shutdown()
+
+
+def test_the_revision_changes_only_when_a_rendered_file_moves(tmp_path: Path) -> None:
+    information = tmp_path / "information.json"
+    first = data_revision(tmp_path)
+    information.write_text("{}", encoding="utf-8")
+    second = data_revision(tmp_path)
+    assert first != second
+
+    information.write_text('{"courses": []}', encoding="utf-8")
+    third = data_revision(tmp_path)
+    assert third != second
+
+    (tmp_path / "unrelated.txt").write_text("noise", encoding="utf-8")
+    assert data_revision(tmp_path) == third
+
+
+def test_pages_carry_a_cheap_refresh_when_a_revision_is_supplied() -> None:
+    with_rev = render_status(_snapshot(), {"items": []}, None, rev="abc123")
+    without_rev = render_status(_snapshot(), {"items": []})
+
+    assert "/rev" in with_rev and "abc123" in with_rev
+    assert "/rev" not in without_rev
+
+
+def test_the_server_reports_a_revision_and_the_page_uses_it(tmp_path: Path) -> None:
+    port = _port(tmp_path)
+    (tmp_path / "information.json").write_text("{}", encoding="utf-8")
+    server, base = _serve(port)
+    try:
+        first = json.loads(urllib.request.urlopen(base + "/rev").read())["rev"]
+        page = urllib.request.urlopen(base + "/").read().decode()
+        assert first in page
+
+        (tmp_path / "information.json").write_text('{"courses": []}', encoding="utf-8")
+        second = json.loads(urllib.request.urlopen(base + "/rev").read())["rev"]
+        assert second != first
     finally:
         server.shutdown()
 
